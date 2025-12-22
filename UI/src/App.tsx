@@ -2,6 +2,15 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import './App.css';
 import Spectrogram from './Spectrogram';
 import { SerialService } from './serial-service';
+import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from '@/components/ui/select';
+import { Slider } from '@/components/ui/slider';
 
 type PeakInfo = {
   frequency: number;
@@ -42,9 +51,12 @@ function App() {
     };
   }, []);
 
-  const handlePeakUpdate = useCallback((info: PeakInfo) => {
-    setPeakInfoByAxis((prev) => ({ ...prev, [selectedAxis]: info }));
-  },[selectedAxis]);
+  const handlePeakUpdate = useCallback(
+    (info: PeakInfo) => {
+      setPeakInfoByAxis((prev) => ({ ...prev, [selectedAxis]: info }));
+    },
+    [selectedAxis]
+  );
 
   const connect = async () => {
     const success = await serialServiceRef.current?.connect();
@@ -78,82 +90,89 @@ function App() {
   const currentPeak = peakInfoByAxis[selectedAxis];
 
   return (
-    <div className="app">
-      <h1>ADXL Resonance Analyzer</h1>
-      <div className="status">
+    <div className="max-w-4xl mx-auto p-8 text-center font-sans">
+      <h1 className="mb-8 text-4xl font-bold">ADXL Resonance Analyzer</h1>
+      <div className="my-4 text-xl">
         <p>
-          Status: <span className={isConnected ? 'connected' : 'disconnected'}>{status}</span>
+          Status:{' '}
+          <span className={isConnected ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>
+            {status}
+          </span>
         </p>
       </div>
-      <div className="controls">
+      <div className="my-8">
         {!isConnected ? (
-          <button onClick={connect} className="connect-btn">
-            Connect to Device
-          </button>
+          <Button onClick={connect}>Connect to Device</Button>
         ) : (
-          <button onClick={disconnect} className="disconnect-btn">
-            Disconnect
-          </button>
+          <Button onClick={disconnect}>Disconnect</Button>
         )}
       </div>
-      <div className="data-display">
-        <div className="axis">
-          <h2>X Axis</h2>
-          <div className="value">{adxlData?.[0]}</div>
+      <div className="flex justify-center my-8 flex-wrap gap-4">
+        <div className="rounded-xl p-6 min-w-[140px] flex-1 max-w-[180px] shadow-sm text-center">
+          <h2 className="m-0 mb-4 text-xl">X Axis</h2>
+          <div className="text-3xl font-bold text-blue-600 font-mono">{adxlData?.[0]}</div>
         </div>
-        <div className="axis">
-          <h2>Y Axis</h2>
-          <div className="value">{adxlData?.[1]}</div>
+        <div className="rounded-xl p-6 min-w-[140px] flex-1 max-w-[180px] shadow-sm text-center">
+          <h2 className="m-0 mb-4 text-xl">Y Axis</h2>
+          <div className="text-3xl font-bold text-blue-600 font-mono">{adxlData?.[1]}</div>
         </div>
-        <div className="axis">
-          <h2>Z Axis</h2>
-          <div className="value">{adxlData?.[2]}</div>
+        <div className="rounded-xl p-6 min-w-[140px] flex-1 max-w-[180px] shadow-sm text-center">
+          <h2 className="m-0 mb-4 text-xl">Z Axis</h2>
+          <div className="text-3xl font-bold text-blue-600 font-mono">{adxlData?.[2]}</div>
         </div>
-        <div className="axis">
-          <h2>Frequency</h2>
-          <div className="value">{frequency.toFixed(1)} Hz</div>
+        <div className="rounded-xl p-6 min-w-[140px] flex-1 max-w-[180px] shadow-sm text-center">
+          <h2 className="m-0 mb-4 text-xl">Frequency</h2>
+          <div className="text-3xl font-bold text-blue-600 font-mono">
+            {frequency.toFixed(1)} Hz
+          </div>
         </div>
       </div>
 
       {isConnected && (
-        <div className="spectrogram-section">
-          <div className="controls-row">
-            <div className="axis-selector">
-              <label>Axis: </label>
-              <select
-                value={selectedAxis}
-                onChange={(e) => setSelectedAxis(e.target.value as 'x' | 'y' | 'z')}
-              >
-                <option value="x">X Axis</option>
-                <option value="y">Y Axis</option>
-                <option value="z">Z Axis</option>
-              </select>
-            </div>
-            {/* Sample rate fixed in firmware, UI control removed */}
+        <div className="my-8 flex flex-col items-center">
+          <div className="flex items-center gap-4 mb-6">
+            <span className="text-sm text-gray-600">Axis:</span>
+            <Select
+              value={selectedAxis}
+              onValueChange={(value) => setSelectedAxis(value as 'x' | 'y' | 'z')}
+            >
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Select axis" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="x">X Axis</SelectItem>
+                <SelectItem value="y">Y Axis</SelectItem>
+                <SelectItem value="z">Z Axis</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-          <div className="frequency-controls">
-            <div className="slider-control">
-              <label htmlFor="min-frequency-slider">Min Frequency: {minFrequency} Hz</label>
-              <input
+          <div className="flex flex-col items-stretch gap-6 mb-8 w-full max-w-md">
+            <div className="flex flex-col items-start min-w-[220px]">
+              <label htmlFor="min-frequency-slider" className="text-sm mb-1">
+                Min Frequency: {minFrequency} Hz
+              </label>
+              <Slider
                 id="min-frequency-slider"
-                type="range"
                 min={MIN_FREQUENCY_SLIDER}
                 max={MAX_DISPLAY_FREQUENCY}
                 step={1}
-                value={minFrequency}
-                onChange={(e) => handleMinFrequencyChange(Number(e.target.value))}
+                value={[minFrequency]}
+                onValueChange={(value) => handleMinFrequencyChange(value[0])}
+                className="w-full"
               />
             </div>
-            <div className="slider-control">
-              <label htmlFor="max-frequency-slider">Max Frequency: {maxFrequency} Hz</label>
-              <input
+            <div className="flex flex-col items-start min-w-[220px]">
+              <label htmlFor="max-frequency-slider" className="text-sm mb-1">
+                Max Frequency: {maxFrequency} Hz
+              </label>
+              <Slider
                 id="max-frequency-slider"
-                type="range"
                 min={MIN_FREQUENCY_SLIDER}
                 max={MAX_DISPLAY_FREQUENCY}
                 step={1}
-                value={maxFrequency}
-                onChange={(e) => handleMaxFrequencyChange(Number(e.target.value))}
+                value={[maxFrequency]}
+                onValueChange={(value) => handleMaxFrequencyChange(value[0])}
+                className="w-full"
               />
             </div>
           </div>
@@ -169,17 +188,19 @@ function App() {
         </div>
       )}
 
-      <div className="info">
-        <div className="peak-info">
-          <span>Peak ({selectedAxis.toUpperCase()}): </span>
+      <div className="mt-8 text-sm leading-relaxed">
+        <div className="mb-2">
+          <span className="font-medium">Peak ({selectedAxis.toUpperCase()}): </span>
           <strong>
             {currentPeak
               ? `${currentPeak.frequency.toFixed(1)} Hz @ ${currentPeak.magnitude.toFixed(1)}`
               : '—'}
           </strong>
         </div>
-        <p>Make sure your device is connected and running the firmware.</p>
-        <p>This app requires a browser that supports the Web Serial API (Chrome, Edge, Opera).</p>
+        <p className="my-2">Make sure your device is connected and running the firmware.</p>
+        <p className="my-2">
+          This app requires a browser that supports the Web Serial API (Chrome, Edge, Opera).
+        </p>
       </div>
     </div>
   );

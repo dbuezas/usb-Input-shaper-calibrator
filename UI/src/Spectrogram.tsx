@@ -146,20 +146,15 @@ function Spectrogram({
   const sliderRange = clampSliderRange(freqRange, minFrequency, maxFrequency);
 
   return (
-    <div className="spectrogram-container">
-      <h3>Live Waterfall Spectrogram</h3>
+    <div className="text-center">
+      <h3 className="mb-4 text-2xl font-semibold">Live Waterfall Spectrogram</h3>
       <canvas
         ref={canvasRef}
         width={width}
         height={height}
-        style={{
-          border: '1px solid #ccc',
-          backgroundColor: '#000',
-          display: 'block',
-          imageRendering: 'pixelated',
-        }}
+        className="border border-gray-300 bg-black block image-rendering-pixelated"
       />
-      <div className="spectrogram-info">
+      <div className="mt-2 text-sm flex flex-wrap justify-center gap-4">
         <span>
           Displaying: {sliderRange.min.toFixed(1)}-{sliderRange.max.toFixed(1)} Hz
         </span>
