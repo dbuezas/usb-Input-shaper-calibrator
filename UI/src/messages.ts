@@ -1,6 +1,5 @@
-
 export interface RawDataMessage {
-  frequency: number,
+  frequency: number;
   data: Int16Array;
 }
 
@@ -27,5 +26,5 @@ export interface SetSelectedAxisMessage {
   axis: 'x' | 'y' | 'z';
 }
 
-export const serialChannel = new BroadcastChannel("serial");
-export const spectrogramChannel = new BroadcastChannel("spectrogram");
+export const serialChannel = new BroadcastChannel('serial');
+export const spectrogramChannel = new BroadcastChannel('spectrogram');

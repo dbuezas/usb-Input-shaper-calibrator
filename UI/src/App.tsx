@@ -90,12 +90,12 @@ function App() {
   const currentPeak = peakInfoByAxis[selectedAxis];
 
   return (
-    <div className="max-w-4xl mx-auto p-8 text-center font-sans">
+    <div className="mx-auto max-w-4xl p-8 text-center font-sans">
       <h1 className="mb-8 text-4xl font-bold">ADXL Resonance Analyzer</h1>
       <div className="my-4 text-xl">
         <p>
           Status:{' '}
-          <span className={isConnected ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>
+          <span className={isConnected ? 'font-bold text-green-600' : 'font-bold text-red-600'}>
             {status}
           </span>
         </p>
@@ -107,22 +107,22 @@ function App() {
           <Button onClick={disconnect}>Disconnect</Button>
         )}
       </div>
-      <div className="flex justify-center my-8 flex-wrap gap-4">
-        <div className="rounded-xl p-6 min-w-[140px] flex-1 max-w-[180px] shadow-sm text-center">
+      <div className="my-8 flex flex-wrap justify-center gap-4">
+        <div className="max-w-[180px] min-w-[140px] flex-1 rounded-xl p-6 text-center shadow-sm">
           <h2 className="m-0 mb-4 text-xl">X Axis</h2>
-          <div className="text-3xl font-bold text-blue-600 font-mono">{adxlData?.[0]}</div>
+          <div className="font-mono text-3xl font-bold text-blue-600">{adxlData?.[0]}</div>
         </div>
-        <div className="rounded-xl p-6 min-w-[140px] flex-1 max-w-[180px] shadow-sm text-center">
+        <div className="max-w-[180px] min-w-[140px] flex-1 rounded-xl p-6 text-center shadow-sm">
           <h2 className="m-0 mb-4 text-xl">Y Axis</h2>
-          <div className="text-3xl font-bold text-blue-600 font-mono">{adxlData?.[1]}</div>
+          <div className="font-mono text-3xl font-bold text-blue-600">{adxlData?.[1]}</div>
         </div>
-        <div className="rounded-xl p-6 min-w-[140px] flex-1 max-w-[180px] shadow-sm text-center">
+        <div className="max-w-[180px] min-w-[140px] flex-1 rounded-xl p-6 text-center shadow-sm">
           <h2 className="m-0 mb-4 text-xl">Z Axis</h2>
-          <div className="text-3xl font-bold text-blue-600 font-mono">{adxlData?.[2]}</div>
+          <div className="font-mono text-3xl font-bold text-blue-600">{adxlData?.[2]}</div>
         </div>
-        <div className="rounded-xl p-6 min-w-[140px] flex-1 max-w-[180px] shadow-sm text-center">
+        <div className="max-w-[180px] min-w-[140px] flex-1 rounded-xl p-6 text-center shadow-sm">
           <h2 className="m-0 mb-4 text-xl">Frequency</h2>
-          <div className="text-3xl font-bold text-blue-600 font-mono">
+          <div className="font-mono text-3xl font-bold text-blue-600">
             {frequency.toFixed(1)} Hz
           </div>
         </div>
@@ -130,7 +130,7 @@ function App() {
 
       {isConnected && (
         <div className="my-8 flex flex-col items-center">
-          <div className="flex items-center gap-4 mb-6">
+          <div className="mb-6 flex items-center gap-4">
             <span className="text-sm text-gray-600">Axis:</span>
             <Select
               value={selectedAxis}
@@ -146,9 +146,9 @@ function App() {
               </SelectContent>
             </Select>
           </div>
-          <div className="flex flex-col items-stretch gap-6 mb-8 w-full max-w-md">
-            <div className="flex flex-col items-start min-w-[220px]">
-              <label htmlFor="min-frequency-slider" className="text-sm mb-1">
+          <div className="mb-8 flex w-full max-w-md flex-col items-stretch gap-6">
+            <div className="flex min-w-[220px] flex-col items-start">
+              <label htmlFor="min-frequency-slider" className="mb-1 text-sm">
                 Min Frequency: {minFrequency} Hz
               </label>
               <Slider
@@ -161,8 +161,8 @@ function App() {
                 className="w-full"
               />
             </div>
-            <div className="flex flex-col items-start min-w-[220px]">
-              <label htmlFor="max-frequency-slider" className="text-sm mb-1">
+            <div className="flex min-w-[220px] flex-col items-start">
+              <label htmlFor="max-frequency-slider" className="mb-1 text-sm">
                 Max Frequency: {maxFrequency} Hz
               </label>
               <Slider

@@ -152,9 +152,9 @@ function Spectrogram({
         ref={canvasRef}
         width={width}
         height={height}
-        className="border border-gray-300 bg-black block image-rendering-pixelated"
+        className="image-rendering-pixelated block border border-gray-300 bg-black"
       />
-      <div className="mt-2 text-sm flex flex-wrap justify-center gap-4">
+      <div className="mt-2 flex flex-wrap justify-center gap-4 text-sm">
         <span>
           Displaying: {sliderRange.min.toFixed(1)}-{sliderRange.max.toFixed(1)} Hz
         </span>
