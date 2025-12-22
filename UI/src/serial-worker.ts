@@ -1,0 +1,294 @@
+import {
+  serialChannel,
+  spectrogramChannel,
+  type RawDataMessage,
+  type SpectrumSliceMessage,
+} from './messages';
+import { CircularBuffer } from './circular-buffer';
+
+interface SensorData {
+  x: number;
+  y: number;
+  z: number;
+}
+
+interface WorkerMessage {
+  type: 'rawData' | 'reset' | 'setRange' | 'setSelectedAxis';
+  data?: Uint8Array;
+  minFrequency?: number;
+  maxFrequency?: number;
+  axis?: 'x' | 'y' | 'z';
+}
+
+function fft(re: number[], im: number[]): void {
+  const N = re.length;
+  if (N <= 1) return;
+
+  const re_even: number[] = [];
+  const im_even: number[] = [];
+  const re_odd: number[] = [];
+  const im_odd: number[] = [];
+
+  for (let i = 0; i < N; i += 2) {
+    re_even.push(re[i]);
+    im_even.push(im[i]);
+    re_odd.push(re[i + 1]);
+    im_odd.push(im[i + 1]);
+  }
+
+  fft(re_even, im_even);
+  fft(re_odd, im_odd);
+
+  for (let k = 0; k < N / 2; k++) {
+    const angle = (-2 * Math.PI * k) / N;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+
+    const re_temp = re_odd[k] * cos - im_odd[k] * sin;
+    const im_temp = re_odd[k] * sin + im_odd[k] * cos;
+
+    re[k] = re_even[k] + re_temp;
+    im[k] = im_even[k] + im_temp;
+    re[k + N / 2] = re_even[k] - re_temp;
+    im[k + N / 2] = im_even[k] - im_temp;
+  }
+}
+
+function hammingWindow(size: number): number[] {
+  const window: number[] = new Array(size);
+  for (let i = 0; i < size; i++) {
+    window[i] = 0.54 - 0.46 * Math.cos((2 * Math.PI * i) / (size - 1));
+  }
+  return window;
+}
+
+const resolutionHz = 0.1;
+
+class WaterfallSpectrogramProcessor {
+  WINDOW_SIZE: number;
+  HOP_SIZE: number;
+  sampleRateHz: number;
+  minFreq: number;
+  maxFreq: number;
+  buffer: number[];
+  bufferIndex: number;
+  windows: number[];
+  minFrequency: number;
+  maxFrequency: number;
+  re: number[];
+  im: number[];
+  magnitudes: number[];
+
+  constructor(sampleRateHz: number) {
+    const targetWindowSize = Math.max(256, sampleRateHz / resolutionHz);
+    this.WINDOW_SIZE = 2 ** Math.ceil(Math.log2(targetWindowSize));
+    this.HOP_SIZE = Math.max(32, Math.floor(this.WINDOW_SIZE / 256));
+
+    this.sampleRateHz = sampleRateHz;
+    this.minFreq = sampleRateHz / this.WINDOW_SIZE;
+    this.maxFreq = sampleRateHz / 2;
+    this.buffer = new Array(this.WINDOW_SIZE).fill(0);
+    this.bufferIndex = 0;
+    this.windows = hammingWindow(this.WINDOW_SIZE);
+    this.minFrequency = 5;
+    this.maxFrequency = 150;
+    this.re = new Array(this.WINDOW_SIZE);
+    this.im = new Array(this.WINDOW_SIZE);
+    this.magnitudes = new Array(this.WINDOW_SIZE / 2);
+    console.log('new');
+  }
+
+  setRange(minFrequency: number, maxFrequency: number): void {
+    this.minFrequency = minFrequency;
+    this.maxFrequency = maxFrequency;
+  }
+
+  addSample(value: number): void {
+    this.buffer[this.bufferIndex] = value;
+    this.bufferIndex = (this.bufferIndex + 1) % this.WINDOW_SIZE;
+
+    if (this.bufferIndex % this.HOP_SIZE === 0) {
+      this.computeSpectrogram();
+    }
+  }
+
+  computeSpectrogram(): void {
+    const resolution = this.sampleRateHz / this.WINDOW_SIZE;
+
+    for (let i = 0; i < this.WINDOW_SIZE; i++) {
+      const idx = (this.bufferIndex + i) % this.WINDOW_SIZE;
+      this.re[i] = this.buffer[idx] * this.windows[i];
+      this.im[i] = 0;
+    }
+
+    fft(this.re, this.im);
+
+    const scale = 2 / this.WINDOW_SIZE;
+    this.magnitudes[0] =
+      Math.sqrt(this.re[0] * this.re[0] + this.im[0] * this.im[0]) * (scale * 0.5);
+    for (let i = 1; i < this.WINDOW_SIZE / 2; i++) {
+      this.magnitudes[i] = Math.sqrt(this.re[i] * this.re[i] + this.im[i] * this.im[i]) * scale;
+    }
+
+    const startFreq = Math.max(this.minFreq, this.minFrequency);
+    const endFreq = Math.min(this.maxFreq, this.maxFrequency);
+    const startBin = Math.max(0, Math.floor((startFreq - this.minFreq) / resolution));
+    const endBin = Math.min(
+      this.magnitudes.length - 1,
+      Math.ceil((endFreq - this.minFreq) / resolution)
+    );
+
+    let peakIndex = startBin;
+    let peakMagnitude = this.magnitudes[peakIndex] ?? 0;
+    for (let idx = startBin + 1; idx <= endBin; idx++) {
+      const value = this.magnitudes[idx];
+      if (value > peakMagnitude) {
+        peakMagnitude = value;
+        peakIndex = idx;
+      }
+    }
+
+    const peakFrequency = this.minFreq + peakIndex * resolution;
+    const reportedMinFreq = 0;
+    const reportedMaxFreq = this.sampleRateHz / 2;
+
+    spectrogramChannel.postMessage({
+      type: 'spectrumSlice',
+      spectrum: this.magnitudes,
+      freqRange: {
+        min: reportedMinFreq,
+        max: reportedMaxFreq,
+        resolution,
+      },
+      peakFrequency,
+      peakMagnitude,
+    } satisfies SpectrumSliceMessage);
+  }
+}
+
+const report_hz_every_ms = 1000;
+const AXIS_REPORT_RATE_HZ = 10;
+const BUFFER_SIZE = 1024 * 10; // 10KB circular buffer
+const FIXED_SAMPLE_RATE = 3200;
+
+class DataProcessor {
+  buffer: CircularBuffer;
+  sampleCount: number;
+  intervalStartTime: number;
+  frequency: number;
+  lastData: SensorData;
+  currentProcessor: WaterfallSpectrogramProcessor | null;
+  selectedAxis: 'x' | 'y' | 'z';
+  lastSent: number;
+
+  constructor() {
+    this.buffer = new CircularBuffer(BUFFER_SIZE);
+    this.sampleCount = 0;
+    this.intervalStartTime = 0;
+    this.frequency = 0;
+    this.lastData = { x: 0, y: 0, z: 0 };
+    this.currentProcessor = new WaterfallSpectrogramProcessor(FIXED_SAMPLE_RATE);
+    this.selectedAxis = 'x';
+    this.lastSent = 0;
+  }
+
+  processRawData(rawData: Uint8Array): void {
+    this.buffer.append(rawData);
+
+    // Process buffer, scanning for ALIGN packets and data chunks
+    while (this.buffer.available >= 6) {
+      const bmarker = this.buffer.getByte(0);
+      if (bmarker != 255) {
+        this.buffer.consume(1);
+        console.log('discard');
+        continue;
+      }
+      const b0 = this.buffer.getByte(1);
+      const b1 = this.buffer.getByte(2);
+      const b2 = this.buffer.getByte(3);
+      const b3 = this.buffer.getByte(4);
+      const b4 = this.buffer.getByte(5);
+      this.buffer.consume(6);
+
+      const now = performance.now();
+
+      // Initialize interval if needed
+      if (this.intervalStartTime === 0) {
+        this.intervalStartTime = now;
+        this.sampleCount = 0;
+      }
+
+      const packed =
+        (BigInt(b4) << 32n) |
+        (BigInt(b3) << 24n) |
+        (BigInt(b2) << 16n) |
+        (BigInt(b1) << 8n) |
+        BigInt(b0);
+
+      function sign13(v: number) {
+        return v & 0x1000 ? v - 0x2000 : v;
+      }
+
+      const x = sign13(Number((packed >> 0n) & 0x1fffn));
+      const y = sign13(Number((packed >> 13n) & 0x1fffn));
+      const z = sign13(Number((packed >> 26n) & 0x1fffn));
+
+      // sign extend
+
+      // Convert to signed 16-bit integers
+      this.sampleCount++;
+
+      // Check if interval has elapsed
+      if (now - this.intervalStartTime >= report_hz_every_ms) {
+        // Calculate frequency: samples per second
+        this.frequency = (this.sampleCount / report_hz_every_ms) * 1000;
+
+        // Reset for next interval
+        this.intervalStartTime = now;
+        this.sampleCount = 0;
+      }
+
+      // Add to spectrogram processor
+      const sample = this.selectedAxis === 'x' ? x : this.selectedAxis === 'y' ? y : z;
+      this.currentProcessor?.addSample(sample);
+
+      if (++this.lastSent > FIXED_SAMPLE_RATE / AXIS_REPORT_RATE_HZ) {
+        this.lastSent = 0;
+        serialChannel.postMessage({
+          data: new Int16Array([x, y, z]),
+          frequency: this.frequency,
+        } satisfies RawDataMessage);
+      }
+    }
+  }
+
+  reset(): void {
+    this.buffer = new CircularBuffer(BUFFER_SIZE);
+    this.sampleCount = 0;
+    this.intervalStartTime = 0;
+    this.lastData = { x: 0, y: 0, z: 0 };
+    this.frequency = 0;
+    serialChannel.postMessage({
+      data: [new Int16Array([0, 0, 0])],
+      frequency: 0,
+    });
+  }
+}
+
+const dataProcessor = new DataProcessor();
+
+self.onmessage = function (e: MessageEvent<WorkerMessage>) {
+  const { type, data } = e.data;
+
+  if (type === 'rawData') {
+    dataProcessor.processRawData(data!);
+  } else if (type === 'reset') {
+    dataProcessor.reset();
+  } else if (type === 'setSelectedAxis') {
+    console.log('selectaxis');
+    dataProcessor.selectedAxis = e.data.axis!;
+    dataProcessor.currentProcessor = new WaterfallSpectrogramProcessor(FIXED_SAMPLE_RATE);
+  } else if (type === 'setRange') {
+    dataProcessor.currentProcessor?.setRange(e.data.minFrequency!, e.data.maxFrequency!);
+  }
+};
