@@ -75,7 +75,7 @@ function Spectrogram({
   );
   const [lastIndex, setLastIndex] = useState(0);
   const [freqRange, setFreqRange] = useState<FrequencyRange>(DEFAULT_FREQUENCY_RANGE);
-
+  // console.log('spectro');
   useEffect(() => {
     const handleMessage = (e: MessageEvent<SpectrumSliceMessage>) => {
       const { type, spectrum, freqRange: workerRange, peakFrequency, peakMagnitude } = e.data;

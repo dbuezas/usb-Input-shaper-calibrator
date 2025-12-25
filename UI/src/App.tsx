@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import './App.css';
 import Spectrogram from './Spectrogram';
-import { SerialService } from './serial-service';
+import type { DataSource } from './data-source';
+import { SerialDataSource, SimulationDataSource } from './data-source';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -11,16 +12,13 @@ import {
   SelectItem,
 } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
+import { MAX_DISPLAY_FREQUENCY, MIN_FREQUENCY_SLIDER, MIN_SLIDER_GAP } from './constants';
 
 type PeakInfo = {
   frequency: number;
   magnitude: number;
 };
-
-const SAMPLE_RATE_HZ = 1600;
-const MAX_DISPLAY_FREQUENCY = SAMPLE_RATE_HZ / 2;
-const MIN_FREQUENCY_SLIDER = 0;
-const MIN_SLIDER_GAP = 1;
+type Mode = 'simulation' | 'usb';
 
 function App() {
   const [isConnected, setIsConnected] = useState(false);
@@ -35,21 +33,19 @@ function App() {
     y: null,
     z: null,
   });
-  const serialServiceRef = useRef<SerialService | null>(null);
-
-  useEffect(() => {
-    serialServiceRef.current = new SerialService(
+  const [mode, setMode] = useState<Mode>('usb');
+  const [dataSource, setDataSource] = useState<DataSource | null>(() => {
+    // Initialize with serial data source by default
+    return new SerialDataSource(
       (data) => setAdxlData(data),
       (freq) => setFrequency(freq),
       (stat) => setStatus(stat)
     );
+  });
 
-    return () => {
-      if (serialServiceRef.current) {
-        serialServiceRef.current.disconnect();
-      }
-    };
-  }, []);
+  useEffect(() => {
+    return () => void dataSource?.stop();
+  }, [dataSource]);
 
   const handlePeakUpdate = useCallback(
     (info: PeakInfo) => {
@@ -59,16 +55,53 @@ function App() {
   );
 
   const connect = async () => {
-    const success = await serialServiceRef.current?.connect();
+    if (!dataSource) return false;
+
+    const success = await dataSource.start();
     if (success) {
       setIsConnected(true);
     }
+    return success;
   };
 
   const disconnect = async () => {
-    await serialServiceRef.current?.disconnect();
-    setIsConnected(false);
-    setPeakInfoByAxis({ x: null, y: null, z: null });
+    if (dataSource) {
+      await dataSource.stop();
+      setIsConnected(false);
+      setPeakInfoByAxis({ x: null, y: null, z: null });
+    }
+  };
+
+  const toggleSimulationMode = async () => {
+    const newMode: Mode = mode === 'simulation' ? 'usb' : 'simulation';
+
+    // Stop current data source
+    await dataSource?.stop();
+
+    // Switch data source based on mode
+    if (newMode === 'simulation') {
+      const simulationDataSource = new SimulationDataSource(
+        (data) => setAdxlData(data),
+        (freq) => setFrequency(freq),
+        (stat) => setStatus(stat)
+      );
+      setDataSource(simulationDataSource);
+      simulationDataSource.start();
+      setStatus('Simulation Mode');
+      setIsConnected(true);
+    } else {
+      const serialDataSource = new SerialDataSource(
+        (data) => setAdxlData(data),
+        (freq) => setFrequency(freq),
+        (stat) => setStatus(stat)
+      );
+      setDataSource(serialDataSource);
+      setStatus('Disconnected');
+      setIsConnected(false);
+      setPeakInfoByAxis({ x: null, y: null, z: null });
+    }
+
+    setMode(newMode);
   };
 
   const handleMinFrequencyChange = (value: number) => {
@@ -88,7 +121,6 @@ function App() {
   };
 
   const currentPeak = peakInfoByAxis[selectedAxis];
-
   return (
     <div className="mx-auto max-w-4xl p-8 text-center font-sans">
       <h1 className="mb-8 text-4xl font-bold">ADXL Resonance Analyzer</h1>
@@ -100,12 +132,19 @@ function App() {
           </span>
         </p>
       </div>
-      <div className="my-8">
+      <div className="my-8 flex flex-wrap justify-center gap-4">
         {!isConnected ? (
           <Button onClick={connect}>Connect to Device</Button>
         ) : (
           <Button onClick={disconnect}>Disconnect</Button>
         )}
+        <Button
+          onClick={toggleSimulationMode}
+          variant={mode === 'simulation' ? 'secondary' : 'outline'}
+        >
+          {mode === 'simulation' ? 'Stop Simulation' : 'Start Simulation'}
+          {mode}
+        </Button>
       </div>
       <div className="my-8 flex flex-wrap justify-center gap-4">
         <div className="max-w-[180px] min-w-[140px] flex-1 rounded-xl p-6 text-center shadow-sm">
@@ -134,7 +173,11 @@ function App() {
             <span className="text-sm text-gray-600">Axis:</span>
             <Select
               value={selectedAxis}
-              onValueChange={(value) => setSelectedAxis(value as 'x' | 'y' | 'z')}
+              onValueChange={(value) => {
+                const axis = value as 'x' | 'y' | 'z';
+                setSelectedAxis(axis);
+                dataSource?.setSelectedAxis(axis);
+              }}
             >
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="Select axis" />
@@ -183,7 +226,9 @@ function App() {
             onPeakUpdate={handlePeakUpdate}
             minFrequency={minFrequency}
             maxFrequency={maxFrequency}
-            onSetRange={(min, max) => serialServiceRef.current?.setRange(min, max)}
+            onSetRange={(min, max) => {
+              dataSource?.setRange(min, max);
+            }}
           />
         </div>
       )}

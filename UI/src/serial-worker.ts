@@ -5,6 +5,13 @@ import {
   type SpectrumSliceMessage,
 } from './messages';
 import { CircularBuffer } from './circular-buffer';
+import {
+  RESOLUTION_HZ,
+  REPORT_HZ_EVERY_MS,
+  AXIS_REPORT_RATE_HZ,
+  BUFFER_SIZE,
+  FIXED_SAMPLE_RATE,
+} from './constants';
 
 interface SensorData {
   x: number;
@@ -62,12 +69,9 @@ function hammingWindow(size: number): number[] {
   return window;
 }
 
-const resolutionHz = 0.1;
-
 class WaterfallSpectrogramProcessor {
   WINDOW_SIZE: number;
   HOP_SIZE: number;
-  sampleRateHz: number;
   minFreq: number;
   maxFreq: number;
   buffer: number[];
@@ -79,14 +83,13 @@ class WaterfallSpectrogramProcessor {
   im: number[];
   magnitudes: number[];
 
-  constructor(sampleRateHz: number) {
-    const targetWindowSize = Math.max(256, sampleRateHz / resolutionHz);
+  constructor() {
+    const targetWindowSize = FIXED_SAMPLE_RATE / RESOLUTION_HZ;
     this.WINDOW_SIZE = 2 ** Math.ceil(Math.log2(targetWindowSize));
-    this.HOP_SIZE = Math.max(32, Math.floor(this.WINDOW_SIZE / 256));
+    this.HOP_SIZE = Math.floor(this.WINDOW_SIZE / 256);
 
-    this.sampleRateHz = sampleRateHz;
-    this.minFreq = sampleRateHz / this.WINDOW_SIZE;
-    this.maxFreq = sampleRateHz / 2;
+    this.minFreq = FIXED_SAMPLE_RATE / this.WINDOW_SIZE;
+    this.maxFreq = FIXED_SAMPLE_RATE / 2;
     this.buffer = new Array(this.WINDOW_SIZE).fill(0);
     this.bufferIndex = 0;
     this.windows = hammingWindow(this.WINDOW_SIZE);
@@ -113,7 +116,7 @@ class WaterfallSpectrogramProcessor {
   }
 
   computeSpectrogram(): void {
-    const resolution = this.sampleRateHz / this.WINDOW_SIZE;
+    const resolution = FIXED_SAMPLE_RATE / this.WINDOW_SIZE;
 
     for (let i = 0; i < this.WINDOW_SIZE; i++) {
       const idx = (this.bufferIndex + i) % this.WINDOW_SIZE;
@@ -150,7 +153,7 @@ class WaterfallSpectrogramProcessor {
 
     const peakFrequency = this.minFreq + peakIndex * resolution;
     const reportedMinFreq = 0;
-    const reportedMaxFreq = this.sampleRateHz / 2;
+    const reportedMaxFreq = FIXED_SAMPLE_RATE / 2;
 
     spectrogramChannel.postMessage({
       type: 'spectrumSlice',
@@ -165,11 +168,6 @@ class WaterfallSpectrogramProcessor {
     } satisfies SpectrumSliceMessage);
   }
 }
-
-const report_hz_every_ms = 1000;
-const AXIS_REPORT_RATE_HZ = 10;
-const BUFFER_SIZE = 1024 * 10; // 10KB circular buffer
-const FIXED_SAMPLE_RATE = 3200;
 
 class DataProcessor {
   buffer: CircularBuffer;
@@ -187,7 +185,7 @@ class DataProcessor {
     this.intervalStartTime = 0;
     this.frequency = 0;
     this.lastData = { x: 0, y: 0, z: 0 };
-    this.currentProcessor = new WaterfallSpectrogramProcessor(FIXED_SAMPLE_RATE);
+    this.currentProcessor = new WaterfallSpectrogramProcessor();
     this.selectedAxis = 'x';
     this.lastSent = 0;
   }
@@ -239,9 +237,9 @@ class DataProcessor {
       this.sampleCount++;
 
       // Check if interval has elapsed
-      if (now - this.intervalStartTime >= report_hz_every_ms) {
+      if (now - this.intervalStartTime >= REPORT_HZ_EVERY_MS) {
         // Calculate frequency: samples per second
-        this.frequency = (this.sampleCount / report_hz_every_ms) * 1000;
+        this.frequency = (this.sampleCount / REPORT_HZ_EVERY_MS) * 1000;
 
         // Reset for next interval
         this.intervalStartTime = now;
@@ -287,7 +285,7 @@ self.onmessage = function (e: MessageEvent<WorkerMessage>) {
   } else if (type === 'setSelectedAxis') {
     console.log('selectaxis');
     dataProcessor.selectedAxis = e.data.axis!;
-    dataProcessor.currentProcessor = new WaterfallSpectrogramProcessor(FIXED_SAMPLE_RATE);
+    dataProcessor.currentProcessor = new WaterfallSpectrogramProcessor();
   } else if (type === 'setRange') {
     dataProcessor.currentProcessor?.setRange(e.data.minFrequency!, e.data.maxFrequency!);
   }
