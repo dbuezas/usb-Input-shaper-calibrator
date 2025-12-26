@@ -6,11 +6,15 @@ import {
 } from './messages';
 import { CircularBuffer } from './circular-buffer';
 import {
-  RESOLUTION_HZ,
   REPORT_HZ_EVERY_MS,
   AXIS_REPORT_RATE_HZ,
   BUFFER_SIZE,
   FIXED_SAMPLE_RATE,
+  WINDOW_SIZE,
+  HOP_SIZE,
+  MIN_FREQ,
+  MAX_FREQ,
+  ACTUAL_RESOLUTION,
 } from './constants';
 
 interface SensorData {
@@ -70,10 +74,6 @@ function hammingWindow(size: number): number[] {
 }
 
 class WaterfallSpectrogramProcessor {
-  WINDOW_SIZE: number;
-  HOP_SIZE: number;
-  minFreq: number;
-  maxFreq: number;
   buffer: number[];
   bufferIndex: number;
   windows: number[];
@@ -84,20 +84,14 @@ class WaterfallSpectrogramProcessor {
   magnitudes: number[];
 
   constructor() {
-    const targetWindowSize = FIXED_SAMPLE_RATE / RESOLUTION_HZ;
-    this.WINDOW_SIZE = 2 ** Math.ceil(Math.log2(targetWindowSize));
-    this.HOP_SIZE = Math.floor(this.WINDOW_SIZE / 256);
-
-    this.minFreq = FIXED_SAMPLE_RATE / this.WINDOW_SIZE;
-    this.maxFreq = FIXED_SAMPLE_RATE / 2;
-    this.buffer = new Array(this.WINDOW_SIZE).fill(0);
+    this.buffer = new Array(WINDOW_SIZE).fill(0);
     this.bufferIndex = 0;
-    this.windows = hammingWindow(this.WINDOW_SIZE);
+    this.windows = hammingWindow(WINDOW_SIZE);
     this.minFrequency = 5;
     this.maxFrequency = 150;
-    this.re = new Array(this.WINDOW_SIZE);
-    this.im = new Array(this.WINDOW_SIZE);
-    this.magnitudes = new Array(this.WINDOW_SIZE / 2);
+    this.re = new Array(WINDOW_SIZE);
+    this.im = new Array(WINDOW_SIZE);
+    this.magnitudes = new Array(WINDOW_SIZE / 2);
     console.log('new');
   }
 
@@ -108,37 +102,35 @@ class WaterfallSpectrogramProcessor {
 
   addSample(value: number): void {
     this.buffer[this.bufferIndex] = value;
-    this.bufferIndex = (this.bufferIndex + 1) % this.WINDOW_SIZE;
+    this.bufferIndex = (this.bufferIndex + 1) % WINDOW_SIZE;
 
-    if (this.bufferIndex % this.HOP_SIZE === 0) {
+    if (this.bufferIndex % HOP_SIZE === 0) {
       this.computeSpectrogram();
     }
   }
 
   computeSpectrogram(): void {
-    const resolution = FIXED_SAMPLE_RATE / this.WINDOW_SIZE;
-
-    for (let i = 0; i < this.WINDOW_SIZE; i++) {
-      const idx = (this.bufferIndex + i) % this.WINDOW_SIZE;
+    for (let i = 0; i < WINDOW_SIZE; i++) {
+      const idx = (this.bufferIndex + i) % WINDOW_SIZE;
       this.re[i] = this.buffer[idx] * this.windows[i];
       this.im[i] = 0;
     }
 
     fft(this.re, this.im);
 
-    const scale = 2 / this.WINDOW_SIZE;
+    const scale = 2 / WINDOW_SIZE;
     this.magnitudes[0] =
       Math.sqrt(this.re[0] * this.re[0] + this.im[0] * this.im[0]) * (scale * 0.5);
-    for (let i = 1; i < this.WINDOW_SIZE / 2; i++) {
+    for (let i = 1; i < WINDOW_SIZE / 2; i++) {
       this.magnitudes[i] = Math.sqrt(this.re[i] * this.re[i] + this.im[i] * this.im[i]) * scale;
     }
 
-    const startFreq = Math.max(this.minFreq, this.minFrequency);
-    const endFreq = Math.min(this.maxFreq, this.maxFrequency);
-    const startBin = Math.max(0, Math.floor((startFreq - this.minFreq) / resolution));
+    const startFreq = Math.max(MIN_FREQ, this.minFrequency);
+    const endFreq = Math.min(MAX_FREQ, this.maxFrequency);
+    const startBin = Math.max(0, Math.floor((startFreq - MIN_FREQ) / ACTUAL_RESOLUTION));
     const endBin = Math.min(
       this.magnitudes.length - 1,
-      Math.ceil((endFreq - this.minFreq) / resolution)
+      Math.ceil((endFreq - MIN_FREQ) / ACTUAL_RESOLUTION)
     );
 
     let peakIndex = startBin;
@@ -151,18 +143,11 @@ class WaterfallSpectrogramProcessor {
       }
     }
 
-    const peakFrequency = this.minFreq + peakIndex * resolution;
-    const reportedMinFreq = 0;
-    const reportedMaxFreq = FIXED_SAMPLE_RATE / 2;
+    const peakFrequency = MIN_FREQ + peakIndex * ACTUAL_RESOLUTION;
 
     spectrogramChannel.postMessage({
       type: 'spectrumSlice',
       spectrum: this.magnitudes,
-      freqRange: {
-        min: reportedMinFreq,
-        max: reportedMaxFreq,
-        resolution,
-      },
       peakFrequency,
       peakMagnitude,
     } satisfies SpectrumSliceMessage);

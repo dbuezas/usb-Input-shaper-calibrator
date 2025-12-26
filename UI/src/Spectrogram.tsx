@@ -2,56 +2,8 @@ import { useRef, useEffect, useState, type RefObject } from 'react';
 import type { SpectrumSliceMessage } from './messages';
 import { spectrogramChannel } from './messages';
 import { atom, useAtomValue, useSetAtom } from 'jotai';
-
-interface FrequencyRange {
-  min: number;
-  max: number;
-  resolution: number;
-}
-
-interface SpectrogramProps {
-  width?: number;
-  height?: number;
-  onPeakUpdate?: (info: PeakInfo) => void;
-  minFrequency?: number;
-  maxFrequency?: number;
-  onSetAxis?: (axis: 'x' | 'y' | 'z') => void;
-  onSetRange?: (min: number, max: number) => void;
-}
-
-const DEFAULT_FREQUENCY_RANGE: FrequencyRange = {
-  min: 0,
-  max: 800,
-  resolution: 1,
-};
-
-const clampSliderRange = (range: FrequencyRange, minFrequency: number, maxFrequency: number) => {
-  const clampedMin = Math.max(Math.min(minFrequency, range.max), range.min);
-  const clampedMax = Math.min(Math.max(maxFrequency, range.min), range.max);
-  return { min: clampedMin, max: Math.max(clampedMin, clampedMax) };
-};
-
-const getBinRange = (
-  spectrumLength: number,
-  range: FrequencyRange,
-  minFrequency: number,
-  maxFrequency: number
-) => {
-  if (!spectrumLength) {
-    return { startBin: 0, endBin: -1 };
-  }
-
-  const { min: startFreq, max: endFreq } = clampSliderRange(range, minFrequency, maxFrequency);
-  const resolution = range.resolution > 0 ? range.resolution : 1;
-
-  const rawStart = Math.floor((startFreq - range.min) / resolution);
-  const rawEnd = Math.ceil((endFreq - range.min) / resolution);
-
-  const normalizedStart = Math.max(0, Math.min(spectrumLength - 1, rawStart));
-  const normalizedEnd = Math.max(normalizedStart, Math.min(spectrumLength - 1, rawEnd));
-
-  return { startBin: normalizedStart, endBin: normalizedEnd };
-};
+import { ACTUAL_RESOLUTION, MAX_FREQUENCY_SLIDER, MIN_FREQUENCY_SLIDER } from './constants';
+import { Slider } from './components/ui/slider';
 
 const spectrogramAtom = atom<number[]>();
 type PeakInfo = {
@@ -70,16 +22,10 @@ const Waterfall = ({
   canvasRef,
   width,
   height,
-  freqRange,
-  minFrequency,
-  maxFrequency,
 }: {
   canvasRef: RefObject<HTMLCanvasElement | null>;
   width: number;
   height: number;
-  freqRange: FrequencyRange;
-  minFrequency: number;
-  maxFrequency: number;
 }) => {
   const spectrum = useAtomValue(spectrogramAtom);
   useEffect(() => {
@@ -91,59 +37,48 @@ const Waterfall = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const { startBin, endBin } = getBinRange(
-      spectrum.length,
-      freqRange,
-      minFrequency,
-      maxFrequency
-    );
-
-    const binCount = endBin - startBin + 1;
-    const freqBinWidth = width / Math.max(binCount, 1);
     const yScale = height / MAX_TIME_SLICES;
     let min = Number.MAX_VALUE;
     let max = Number.MIN_VALUE;
-    for (let j = startBin; j <= endBin; j++) {
+    for (let j = 0; j < spectrum.length; j++) {
       const value = spectrum[j];
       min = Math.min(min, value);
       max = Math.max(max, value);
     }
     const rangeVal = max - min;
     const y = 0;
+    const freqBinWidth = width / spectrum.length;
     ctx.drawImage(canvas, 0, 1);
-    for (let j = startBin; j <= endBin; j++) {
+    for (let j = 0; j <= spectrum.length; j++) {
       const dbValue = spectrum[j];
       const val = (dbValue - min) / rangeVal;
       const r = Math.floor(val * 255);
       const g = Math.floor(val * 128);
       const b = Math.floor((1 - val) * 255);
       ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-      const x = (j - startBin) * freqBinWidth;
+      const x = j * freqBinWidth;
       ctx.fillRect(x, y, freqBinWidth + 1, yScale);
     }
-  }, [width, height, freqRange, minFrequency, maxFrequency]);
+  }, [width, height, spectrum]);
   return <></>;
 };
-function Spectrogram({
-  width = 800,
-  height = 300,
-  onPeakUpdate,
-  minFrequency = DEFAULT_FREQUENCY_RANGE.min,
-  maxFrequency = DEFAULT_FREQUENCY_RANGE.max,
-  onSetRange,
-}: SpectrogramProps) {
+
+function Spectrogram() {
   console.log('spec');
   const setSpectrogram = useSetAtom(spectrogramAtom);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [freqRange, setFreqRange] = useState<FrequencyRange>(DEFAULT_FREQUENCY_RANGE);
   const setPeak = useSetAtom(peakAtom);
+  const width = 800;
+  const height = 400;
+  const [freqRange, setFreqRange] = useState([MIN_FREQUENCY_SLIDER, MAX_FREQUENCY_SLIDER] as [
+    number,
+    number,
+  ]);
   useEffect(() => {
     const handleMessage = (e: MessageEvent<SpectrumSliceMessage>) => {
-      const { type, spectrum, freqRange: workerRange, peakFrequency, peakMagnitude } = e.data;
+      const { type, spectrum, peakFrequency, peakMagnitude } = e.data;
       if (type !== 'spectrumSlice') return;
       setSpectrogram(spectrum);
-
-      setFreqRange(workerRange);
 
       setPeak({
         frequency: peakFrequency,
@@ -155,16 +90,26 @@ function Spectrogram({
     return () => {
       spectrogramChannel.removeEventListener('message', handleMessage);
     };
-  }, [onPeakUpdate]);
-
-  useEffect(() => {
-    onSetRange?.(minFrequency, maxFrequency);
-  }, [minFrequency, maxFrequency, onSetRange]);
-
-  const sliderRange = clampSliderRange(freqRange, minFrequency, maxFrequency);
+  }, []);
 
   return (
     <div className="text-center">
+      <div className="mb-8 flex w-full max-w-md flex-col items-stretch gap-6">
+        <div className="flex min-w-[220px] flex-col items-start">
+          <label htmlFor="frequency-slider" className="mb-1 text-sm">
+            Frequency Range: {freqRange[0]}-{freqRange[1]} Hz
+          </label>
+          <Slider
+            id="frequency-slider"
+            min={MIN_FREQUENCY_SLIDER}
+            max={MAX_FREQUENCY_SLIDER}
+            step={1}
+            value={freqRange}
+            onValueChange={(v: [number, number]) => setFreqRange(v)}
+            className="w-full"
+          />
+        </div>
+      </div>
       <h3 className="mb-4 text-2xl font-semibold">Live Waterfall Spectrogram</h3>
       <canvas
         ref={canvasRef}
@@ -172,25 +117,12 @@ function Spectrogram({
         height={height}
         className="image-rendering-pixelated block border border-gray-300 bg-black"
       />
-      <Waterfall
-        canvasRef={canvasRef}
-        freqRange={freqRange}
-        height={height}
-        width={width}
-        maxFrequency={maxFrequency}
-        minFrequency={minFrequency}
-      />
+      <Waterfall canvasRef={canvasRef} height={height} width={width} />
       <div className="mt-2 flex flex-wrap justify-center gap-4 text-sm">
         <span>
           <Peak />
         </span>
-        <span>
-          Displaying: {sliderRange.min.toFixed(1)}-{sliderRange.max.toFixed(1)} Hz
-        </span>
-        <span>
-          Worker span: {freqRange.min.toFixed(1)}-{freqRange.max.toFixed(1)} Hz
-        </span>
-        <span>Resolution: {(freqRange.resolution || 1).toFixed(2)} Hz/bin</span>
+        <span>Resolution: {(ACTUAL_RESOLUTION || 1).toFixed(2)} Hz/bin</span>
         <span>Time Slices: {MAX_TIME_SLICES}</span>
       </div>
     </div>

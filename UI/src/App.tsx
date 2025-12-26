@@ -3,7 +3,8 @@ import { atom, useAtomValue, useSetAtom } from 'jotai';
 import './App.css';
 import Spectrogram from './Spectrogram';
 import type { DataSource } from './data-source';
-import { SerialDataSource, SimulationDataSource } from './data-source';
+import { SerialDataSource } from './data-source';
+import { SimulationPort } from './simulation-port';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -12,8 +13,6 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select';
-import { Slider } from '@/components/ui/slider';
-import { MAX_DISPLAY_FREQUENCY, MIN_FREQUENCY_SLIDER, MIN_SLIDER_GAP } from './constants';
 
 type Mode = 'simulation' | 'usb';
 
@@ -34,31 +33,34 @@ function App() {
   const setAdxlData = useSetAtom(adxlDataAtom);
   const setFrequency = useSetAtom(frequencyAtom);
   const [status, setStatus] = useState('Disconnected');
-  const [minFrequency, setMinFrequency] = useState(5);
-  const [maxFrequency, setMaxFrequency] = useState(150);
   const [selectedAxis, setSelectedAxis] = useState<'x' | 'y' | 'z'>('x');
   console.log('app');
   const [mode, setMode] = useState<Mode>('usb');
-  const [dataSource, setDataSource] = useState<DataSource | null>(() => {
-    // Initialize with serial data source by default
-    return new SerialDataSource(
-      (data) => setAdxlData(data),
-      (freq) => setFrequency(freq),
-      (stat) => setStatus(stat)
-    );
-  });
+  const [dataSource, setDataSource] = useState<DataSource | undefined>(undefined);
 
   useEffect(() => {
     return () => void dataSource?.stop();
   }, [dataSource]);
 
   const connect = async () => {
-    if (!dataSource) return false;
+    // Stop current data source
+    await dataSource?.stop();
 
-    const success = await dataSource.start();
-    if (success) {
-      setIsConnected(true);
-    }
+    // Switch data source based on mode
+    const port =
+      mode === 'simulation' ? new SimulationPort() : await navigator.serial.requestPort();
+    const newDataSource = new SerialDataSource(
+      port,
+      (data) => setAdxlData(data),
+      (freq) => setFrequency(freq),
+      (stat) => setStatus(stat)
+    );
+    setDataSource(newDataSource);
+    setStatus('Connecting');
+
+    const success = await newDataSource.start();
+    setIsConnected(success);
+    if (!success) setStatus('Disconnected');
     return success;
   };
 
@@ -72,48 +74,7 @@ function App() {
   const toggleSimulationMode = async () => {
     const newMode: Mode = mode === 'simulation' ? 'usb' : 'simulation';
 
-    // Stop current data source
-    await dataSource?.stop();
-
-    // Switch data source based on mode
-    if (newMode === 'simulation') {
-      const simulationDataSource = new SimulationDataSource(
-        (data) => setAdxlData(data),
-        (freq) => setFrequency(freq),
-        (stat) => setStatus(stat)
-      );
-      setDataSource(simulationDataSource);
-      simulationDataSource.start();
-      setStatus('Simulation Mode');
-      setIsConnected(true);
-    } else {
-      const serialDataSource = new SerialDataSource(
-        (data) => setAdxlData(data),
-        (freq) => setFrequency(freq),
-        (stat) => setStatus(stat)
-      );
-      setDataSource(serialDataSource);
-      setStatus('Disconnected');
-      setIsConnected(false);
-    }
-
     setMode(newMode);
-  };
-
-  const handleMinFrequencyChange = (value: number) => {
-    const clampedValue = Math.min(
-      value,
-      Math.max(MIN_FREQUENCY_SLIDER, maxFrequency - MIN_SLIDER_GAP)
-    );
-    setMinFrequency(Math.max(MIN_FREQUENCY_SLIDER, clampedValue));
-  };
-
-  const handleMaxFrequencyChange = (value: number) => {
-    const clampedValue = Math.max(
-      value,
-      Math.min(MAX_DISPLAY_FREQUENCY, minFrequency + MIN_SLIDER_GAP)
-    );
-    setMaxFrequency(Math.min(MAX_DISPLAY_FREQUENCY, clampedValue));
   };
 
   return (
@@ -137,7 +98,7 @@ function App() {
           onClick={toggleSimulationMode}
           variant={mode === 'simulation' ? 'secondary' : 'outline'}
         >
-          {mode === 'simulation' ? 'Stop Simulation' : 'Start Simulation'}
+          {mode === 'simulation' ? 'Simulation' : 'Serial'}
         </Button>
       </div>
       <div className="my-8 flex flex-wrap justify-center gap-4">
@@ -189,45 +150,7 @@ function App() {
               </SelectContent>
             </Select>
           </div>
-          <div className="mb-8 flex w-full max-w-md flex-col items-stretch gap-6">
-            <div className="flex min-w-[220px] flex-col items-start">
-              <label htmlFor="min-frequency-slider" className="mb-1 text-sm">
-                Min Frequency: {minFrequency} Hz
-              </label>
-              <Slider
-                id="min-frequency-slider"
-                min={MIN_FREQUENCY_SLIDER}
-                max={MAX_DISPLAY_FREQUENCY}
-                step={1}
-                value={[minFrequency]}
-                onValueChange={(value) => handleMinFrequencyChange(value[0])}
-                className="w-full"
-              />
-            </div>
-            <div className="flex min-w-[220px] flex-col items-start">
-              <label htmlFor="max-frequency-slider" className="mb-1 text-sm">
-                Max Frequency: {maxFrequency} Hz
-              </label>
-              <Slider
-                id="max-frequency-slider"
-                min={MIN_FREQUENCY_SLIDER}
-                max={MAX_DISPLAY_FREQUENCY}
-                step={1}
-                value={[maxFrequency]}
-                onValueChange={(value) => handleMaxFrequencyChange(value[0])}
-                className="w-full"
-              />
-            </div>
-          </div>
-          <Spectrogram
-            width={800}
-            height={300}
-            minFrequency={minFrequency}
-            maxFrequency={maxFrequency}
-            onSetRange={(min, max) => {
-              dataSource?.setRange(min, max);
-            }}
-          />
+          <Spectrogram />
         </div>
       )}
 
