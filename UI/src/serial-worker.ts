@@ -60,7 +60,7 @@ function fft(re: number[], im: number[]): void {
   }
 }
 
-function hammingWindow(size: number): number[] {
+function _hammingWindow(size: number): number[] {
   const window: number[] = new Array(size);
   for (let i = 0; i < size; i++) {
     window[i] = 0.54 - 0.46 * Math.cos((2 * Math.PI * i) / (size - 1));
@@ -74,10 +74,17 @@ function hannWindow(size: number): number[] {
   return window;
 }
 
+function windowSum(w: number[]): number {
+  let s = 0;
+  for (let i = 0; i < w.length; i++) s += w[i];
+  return s;
+}
+
 class WaterfallSpectrogramProcessor {
   buffer: number[];
   bufferIndex: number;
   windows: number[];
+  windowSum: number;
   re: number[];
   im: number[];
   magnitudes: number[];
@@ -86,6 +93,7 @@ class WaterfallSpectrogramProcessor {
     this.buffer = new Array(WINDOW_SIZE).fill(0);
     this.bufferIndex = 0;
     this.windows = hannWindow(WINDOW_SIZE); //hammingWindow(WINDOW_SIZE);
+    this.windowSum = windowSum(this.windows);
     this.re = new Array(WINDOW_SIZE);
     this.im = new Array(WINDOW_SIZE);
     this.magnitudes = new Array(WINDOW_SIZE / 2);
@@ -110,7 +118,7 @@ class WaterfallSpectrogramProcessor {
 
     fft(this.re, this.im);
 
-    const scale = 2 / WINDOW_SIZE;
+    const scale = 2 / this.windowSum;
     this.magnitudes[0] =
       Math.sqrt(this.re[0] * this.re[0] + this.im[0] * this.im[0]) * (scale * 0.5);
     for (let i = 1; i < WINDOW_SIZE / 2; i++) {

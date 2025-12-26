@@ -4,6 +4,7 @@ import {
   SIMULATION_AMPLITUDE,
   SIMULATION_MAX_FREQUENCY,
   SIMULATION_MIN_FREQUENCY,
+  SIMULATION_SWEEP_S,
 } from './constants';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -67,7 +68,10 @@ export class SimulationPort {
 
   private makeNextFrame(): Uint8Array {
     // Sweep (frequency changes smoothly, phase stays continuous)
-    this.simulationFrequency += 10 / FIXED_SAMPLE_RATE;
+    this.simulationFrequency +=
+      (SIMULATION_MAX_FREQUENCY - SIMULATION_MIN_FREQUENCY) /
+      SIMULATION_SWEEP_S /
+      FIXED_SAMPLE_RATE;
     if (this.simulationFrequency > SIMULATION_MAX_FREQUENCY)
       this.simulationFrequency = SIMULATION_MIN_FREQUENCY;
 

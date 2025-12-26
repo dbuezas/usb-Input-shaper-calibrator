@@ -24,6 +24,105 @@ const Peak = () => {
 };
 
 const MAX_TIME_SLICES = 100;
+
+const SpectrumScatter = ({
+  width,
+  height,
+  freqRange,
+}: {
+  width: number;
+  height: number;
+  freqRange: [number, number];
+}) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  return (
+    <>
+      <canvas
+        ref={canvasRef}
+        width={width}
+        height={height}
+        className="block border border-gray-300 bg-black"
+      />
+      <SpectrumScatter_render
+        canvasRef={canvasRef}
+        width={width}
+        height={height}
+        freqRange={freqRange}
+      />
+    </>
+  );
+};
+
+const SpectrumScatter_render = ({
+  canvasRef,
+  width,
+  height,
+  freqRange,
+}: {
+  canvasRef: RefObject<HTMLCanvasElement | null>;
+  width: number;
+  height: number;
+  freqRange: [number, number];
+}) => {
+  const spectrum = useAtomValue(spectrogramAtom);
+
+  useEffect(() => {
+    if (!spectrum?.length) return;
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const iMin = Math.max(0, Math.round((spectrum.length / (MAX_FREQ - MIN_FREQ)) * freqRange[0]));
+    const iMax = Math.min(
+      spectrum.length - 1,
+      Math.round((spectrum.length / (MAX_FREQ - MIN_FREQ)) * freqRange[1])
+    );
+    if (iMax <= iMin) return;
+
+    let min = Number.MAX_VALUE;
+    let max = Number.MIN_VALUE;
+    for (let i = iMin; i < iMax; i++) {
+      const value = spectrum[i];
+      min = Math.min(min, value);
+      max = Math.max(max, value);
+    }
+    const rangeVal = max - min;
+    const safeRange = rangeVal <= 0 ? 1 : rangeVal;
+
+    ctx.clearRect(0, 0, width, height);
+
+    // Axes (subtle)
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0.5, height - 0.5);
+    ctx.lineTo(width - 0.5, height - 0.5);
+    ctx.moveTo(0.5, 0.5);
+    ctx.lineTo(0.5, height - 0.5);
+    ctx.stroke();
+
+    const xScale = width / (iMax - iMin);
+    const pointRadius = 1.2;
+    ctx.fillStyle = 'rgba(0, 220, 255, 0.9)';
+
+    for (let i = iMin; i < iMax; i++) {
+      const dbValue = spectrum[i];
+      const norm = (dbValue - min) / safeRange;
+      const x = (i - iMin) * xScale;
+      const y = height - 1 - norm * (height - 2);
+      ctx.beginPath();
+      ctx.arc(x, y, pointRadius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }, [width, height, spectrum, freqRange]);
+
+  return <></>;
+};
+
 const Waterfall = ({
   width,
   height,
@@ -104,7 +203,7 @@ const Waterfall_render = ({
     }
     ctx.fillStyle = `rgb(255,255,255)`;
 
-    ctx.fillRect((peakIdx - iMin) * freqBinWidth - 1, y, freqBinWidth + 1, yScale);
+    ctx.fillRect((peakIdx - iMin) * freqBinWidth, y, freqBinWidth + 1, yScale);
 
     setPeak((old) => {
       const frequency = peakIdx * ACTUAL_RESOLUTION;
@@ -158,6 +257,8 @@ function Spectrogram() {
       <h3 className="mb-4 text-2xl font-semibold">Live Waterfall Spectrogram</h3>
 
       <Waterfall height={height} width={width} freqRange={freqRange} />
+      <h3 className="mt-10 mb-4 text-2xl font-semibold">Last Spectrum (Scatter)</h3>
+      <SpectrumScatter height={Math.round(height / 2)} width={width} freqRange={freqRange} />
       <div className="mt-2 flex flex-wrap justify-center gap-4 text-sm">
         <span>
           <Peak />
