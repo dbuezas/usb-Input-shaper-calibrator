@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
+import { atom, useAtomValue, useSetAtom } from 'jotai';
 import './App.css';
 import Spectrogram from './Spectrogram';
 import type { DataSource } from './data-source';
@@ -14,25 +15,29 @@ import {
 import { Slider } from '@/components/ui/slider';
 import { MAX_DISPLAY_FREQUENCY, MIN_FREQUENCY_SLIDER, MIN_SLIDER_GAP } from './constants';
 
-type PeakInfo = {
-  frequency: number;
-  magnitude: number;
-};
 type Mode = 'simulation' | 'usb';
+
+const adxlDataAtom = atom<Int16Array<ArrayBufferLike>>();
+const AdxlData = ({ i }: { i: number }) => {
+  const adxlData = useAtomValue(adxlDataAtom);
+  return adxlData?.[i];
+};
+
+const frequencyAtom = atom(0);
+const Frequency = () => {
+  const frequency = useAtomValue(frequencyAtom);
+  return frequency.toFixed(1);
+};
 
 function App() {
   const [isConnected, setIsConnected] = useState(false);
-  const [adxlData, setAdxlData] = useState<Int16Array<ArrayBufferLike>>();
+  const setAdxlData = useSetAtom(adxlDataAtom);
+  const setFrequency = useSetAtom(frequencyAtom);
   const [status, setStatus] = useState('Disconnected');
-  const [frequency, setFrequency] = useState(0);
   const [minFrequency, setMinFrequency] = useState(5);
   const [maxFrequency, setMaxFrequency] = useState(150);
   const [selectedAxis, setSelectedAxis] = useState<'x' | 'y' | 'z'>('x');
-  const [peakInfoByAxis, setPeakInfoByAxis] = useState<Record<'x' | 'y' | 'z', PeakInfo | null>>({
-    x: null,
-    y: null,
-    z: null,
-  });
+  console.log('app');
   const [mode, setMode] = useState<Mode>('usb');
   const [dataSource, setDataSource] = useState<DataSource | null>(() => {
     // Initialize with serial data source by default
@@ -46,13 +51,6 @@ function App() {
   useEffect(() => {
     return () => void dataSource?.stop();
   }, [dataSource]);
-
-  const handlePeakUpdate = useCallback(
-    (info: PeakInfo) => {
-      setPeakInfoByAxis((prev) => ({ ...prev, [selectedAxis]: info }));
-    },
-    [selectedAxis]
-  );
 
   const connect = async () => {
     if (!dataSource) return false;
@@ -68,7 +66,6 @@ function App() {
     if (dataSource) {
       await dataSource.stop();
       setIsConnected(false);
-      setPeakInfoByAxis({ x: null, y: null, z: null });
     }
   };
 
@@ -98,7 +95,6 @@ function App() {
       setDataSource(serialDataSource);
       setStatus('Disconnected');
       setIsConnected(false);
-      setPeakInfoByAxis({ x: null, y: null, z: null });
     }
 
     setMode(newMode);
@@ -120,7 +116,6 @@ function App() {
     setMaxFrequency(Math.min(MAX_DISPLAY_FREQUENCY, clampedValue));
   };
 
-  const currentPeak = peakInfoByAxis[selectedAxis];
   return (
     <div className="mx-auto max-w-4xl p-8 text-center font-sans">
       <h1 className="mb-8 text-4xl font-bold">ADXL Resonance Analyzer</h1>
@@ -143,26 +138,31 @@ function App() {
           variant={mode === 'simulation' ? 'secondary' : 'outline'}
         >
           {mode === 'simulation' ? 'Stop Simulation' : 'Start Simulation'}
-          {mode}
         </Button>
       </div>
       <div className="my-8 flex flex-wrap justify-center gap-4">
         <div className="max-w-[180px] min-w-[140px] flex-1 rounded-xl p-6 text-center shadow-sm">
           <h2 className="m-0 mb-4 text-xl">X Axis</h2>
-          <div className="font-mono text-3xl font-bold text-blue-600">{adxlData?.[0]}</div>
+          <div className="font-mono text-3xl font-bold text-blue-600">
+            <AdxlData i={0} />
+          </div>
         </div>
         <div className="max-w-[180px] min-w-[140px] flex-1 rounded-xl p-6 text-center shadow-sm">
           <h2 className="m-0 mb-4 text-xl">Y Axis</h2>
-          <div className="font-mono text-3xl font-bold text-blue-600">{adxlData?.[1]}</div>
+          <div className="font-mono text-3xl font-bold text-blue-600">
+            <AdxlData i={1} />
+          </div>
         </div>
         <div className="max-w-[180px] min-w-[140px] flex-1 rounded-xl p-6 text-center shadow-sm">
           <h2 className="m-0 mb-4 text-xl">Z Axis</h2>
-          <div className="font-mono text-3xl font-bold text-blue-600">{adxlData?.[2]}</div>
+          <div className="font-mono text-3xl font-bold text-blue-600">
+            <AdxlData i={2} />
+          </div>
         </div>
         <div className="max-w-[180px] min-w-[140px] flex-1 rounded-xl p-6 text-center shadow-sm">
           <h2 className="m-0 mb-4 text-xl">Frequency</h2>
           <div className="font-mono text-3xl font-bold text-blue-600">
-            {frequency.toFixed(1)} Hz
+            <Frequency /> Hz
           </div>
         </div>
       </div>
@@ -220,10 +220,8 @@ function App() {
             </div>
           </div>
           <Spectrogram
-            selectedAxis={selectedAxis}
             width={800}
             height={300}
-            onPeakUpdate={handlePeakUpdate}
             minFrequency={minFrequency}
             maxFrequency={maxFrequency}
             onSetRange={(min, max) => {
@@ -234,14 +232,6 @@ function App() {
       )}
 
       <div className="mt-8 text-sm leading-relaxed">
-        <div className="mb-2">
-          <span className="font-medium">Peak ({selectedAxis.toUpperCase()}): </span>
-          <strong>
-            {currentPeak
-              ? `${currentPeak.frequency.toFixed(1)} Hz @ ${currentPeak.magnitude.toFixed(1)}`
-              : '—'}
-          </strong>
-        </div>
         <p className="my-2">Make sure your device is connected and running the firmware.</p>
         <p className="my-2">
           This app requires a browser that supports the Web Serial API (Chrome, Edge, Opera).
