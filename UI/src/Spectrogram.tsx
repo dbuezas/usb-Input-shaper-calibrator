@@ -2,8 +2,15 @@ import { useRef, useEffect, useState, type RefObject } from 'react';
 import type { SpectrumSliceMessage } from './messages';
 import { spectrogramChannel } from './messages';
 import { atom, useAtomValue, useSetAtom } from 'jotai';
-import { ACTUAL_RESOLUTION, MAX_FREQUENCY_SLIDER, MIN_FREQUENCY_SLIDER } from './constants';
+import {
+  ACTUAL_RESOLUTION,
+  MAX_FREQ,
+  MAX_FREQUENCY_SLIDER,
+  MIN_FREQ,
+  MIN_FREQUENCY_SLIDER,
+} from './constants';
 import { Slider } from './components/ui/slider';
+import type { DataSource } from './data-source';
 
 const spectrogramAtom = atom<number[]>();
 type PeakInfo = {
@@ -22,10 +29,12 @@ const Waterfall = ({
   canvasRef,
   width,
   height,
+  freqRange,
 }: {
   canvasRef: RefObject<HTMLCanvasElement | null>;
   width: number;
   height: number;
+  freqRange: [number, number];
 }) => {
   const spectrum = useAtomValue(spectrogramAtom);
   useEffect(() => {
@@ -47,24 +56,25 @@ const Waterfall = ({
     }
     const rangeVal = max - min;
     const y = 0;
-    const freqBinWidth = width / spectrum.length;
+    const iMin = Math.round((spectrum.length / (MAX_FREQ - MIN_FREQ)) * freqRange[0]);
+    const iMax = Math.round((spectrum.length / (MAX_FREQ - MIN_FREQ)) * freqRange[1]);
+    const freqBinWidth = width / (iMax - iMin);
     ctx.drawImage(canvas, 0, 1);
-    for (let j = 0; j <= spectrum.length; j++) {
+    for (let j = iMin; j < iMax; j++) {
       const dbValue = spectrum[j];
       const val = (dbValue - min) / rangeVal;
       const r = Math.floor(val * 255);
       const g = Math.floor(val * 128);
       const b = Math.floor((1 - val) * 255);
       ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-      const x = j * freqBinWidth;
+      const x = (j - iMin) * freqBinWidth;
       ctx.fillRect(x, y, freqBinWidth + 1, yScale);
     }
   }, [width, height, spectrum]);
   return <></>;
 };
 
-function Spectrogram() {
-  console.log('spec');
+function Spectrogram({ dataSource }: { dataSource?: DataSource }) {
   const setSpectrogram = useSetAtom(spectrogramAtom);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const setPeak = useSetAtom(peakAtom);
@@ -74,6 +84,9 @@ function Spectrogram() {
     number,
     number,
   ]);
+  useEffect(() => {
+    dataSource?.setRange(freqRange[0], freqRange[1]);
+  }, freqRange);
   useEffect(() => {
     const handleMessage = (e: MessageEvent<SpectrumSliceMessage>) => {
       const { type, spectrum, peakFrequency, peakMagnitude } = e.data;
@@ -94,21 +107,19 @@ function Spectrogram() {
 
   return (
     <div className="text-center">
-      <div className="mb-8 flex w-full max-w-md flex-col items-stretch gap-6">
-        <div className="flex min-w-[220px] flex-col items-start">
-          <label htmlFor="frequency-slider" className="mb-1 text-sm">
-            Frequency Range: {freqRange[0]}-{freqRange[1]} Hz
-          </label>
-          <Slider
-            id="frequency-slider"
-            min={MIN_FREQUENCY_SLIDER}
-            max={MAX_FREQUENCY_SLIDER}
-            step={1}
-            value={freqRange}
-            onValueChange={(v: [number, number]) => setFreqRange(v)}
-            className="w-full"
-          />
-        </div>
+      <div className="mb-8 flex w-full flex-col items-stretch gap-6">
+        <label htmlFor="frequency-slider" className="mb-1 text-sm">
+          Frequency Range: {freqRange[0]}-{freqRange[1]} Hz
+        </label>
+        <Slider
+          id="frequency-slider"
+          min={MIN_FREQUENCY_SLIDER}
+          max={MAX_FREQUENCY_SLIDER}
+          step={1}
+          value={freqRange}
+          onValueChange={(v: [number, number]) => setFreqRange(v)}
+          className="w-full"
+        />
       </div>
       <h3 className="mb-4 text-2xl font-semibold">Live Waterfall Spectrogram</h3>
       <canvas
@@ -117,7 +128,7 @@ function Spectrogram() {
         height={height}
         className="image-rendering-pixelated block border border-gray-300 bg-black"
       />
-      <Waterfall canvasRef={canvasRef} height={height} width={width} />
+      <Waterfall canvasRef={canvasRef} height={height} width={width} freqRange={freqRange} />
       <div className="mt-2 flex flex-wrap justify-center gap-4 text-sm">
         <span>
           <Peak />

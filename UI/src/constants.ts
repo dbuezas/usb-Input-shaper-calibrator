@@ -26,4 +26,4 @@ export const BATCH_SIZE = 1000;
 // Simulation constants
 export const SIMULATION_MIN_FREQUENCY = 20;
 export const SIMULATION_AMPLITUDE = 1000;
-export const SIMULATION_MAX_FREQUENCY = 100;
+export const SIMULATION_MAX_FREQUENCY = 25;

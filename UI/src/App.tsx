@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { atom, useAtomValue, useSetAtom } from 'jotai';
-import './App.css';
 import Spectrogram from './Spectrogram';
 import type { DataSource } from './data-source';
 import { SerialDataSource } from './data-source';
@@ -102,25 +101,25 @@ function App() {
         </Button>
       </div>
       <div className="my-8 flex flex-wrap justify-center gap-4">
-        <div className="max-w-[180px] min-w-[140px] flex-1 rounded-xl p-6 text-center shadow-sm">
+        <div className="max-w-45 min-w-35 flex-1 rounded-xl p-6 text-center shadow-sm">
           <h2 className="m-0 mb-4 text-xl">X Axis</h2>
           <div className="font-mono text-3xl font-bold text-blue-600">
             <AdxlData i={0} />
           </div>
         </div>
-        <div className="max-w-[180px] min-w-[140px] flex-1 rounded-xl p-6 text-center shadow-sm">
+        <div className="max-w-45 min-w-35 flex-1 rounded-xl p-6 text-center shadow-sm">
           <h2 className="m-0 mb-4 text-xl">Y Axis</h2>
           <div className="font-mono text-3xl font-bold text-blue-600">
             <AdxlData i={1} />
           </div>
         </div>
-        <div className="max-w-[180px] min-w-[140px] flex-1 rounded-xl p-6 text-center shadow-sm">
+        <div className="max-w-45 min-w-35 flex-1 rounded-xl p-6 text-center shadow-sm">
           <h2 className="m-0 mb-4 text-xl">Z Axis</h2>
           <div className="font-mono text-3xl font-bold text-blue-600">
             <AdxlData i={2} />
           </div>
         </div>
-        <div className="max-w-[180px] min-w-[140px] flex-1 rounded-xl p-6 text-center shadow-sm">
+        <div className="max-w-45 min-w-35 flex-1 rounded-xl p-6 text-center shadow-sm">
           <h2 className="m-0 mb-4 text-xl">Frequency</h2>
           <div className="font-mono text-3xl font-bold text-blue-600">
             <Frequency /> Hz
@@ -140,7 +139,7 @@ function App() {
                 dataSource?.setSelectedAxis(axis);
               }}
             >
-              <SelectTrigger className="w-[180px]">
+              <SelectTrigger className="w-45">
                 <SelectValue placeholder="Select axis" />
               </SelectTrigger>
               <SelectContent>
@@ -150,7 +149,7 @@ function App() {
               </SelectContent>
             </Select>
           </div>
-          <Spectrogram />
+          <Spectrogram dataSource={dataSource} />
         </div>
       )}
 

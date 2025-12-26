@@ -1,5 +1,4 @@
 import {
-  AXIS_REPORT_RATE_HZ,
   BATCH_SIZE,
   FIXED_SAMPLE_RATE,
   SIMULATION_AMPLITUDE,
@@ -8,15 +7,6 @@ import {
 } from './constants';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-type SimulationPortOptions = {
-  minFrequency?: number;
-  maxFrequency?: number;
-  amplitude?: number;
-  sampleRate?: number;
-  batchSize?: number;
-  reportHz?: number;
-};
 
 export class SimulationPort {
   readable: ReadableStream<Uint8Array>;
@@ -27,27 +17,12 @@ export class SimulationPort {
 
   private t = 0;
   private simulationFrequency = SIMULATION_MIN_FREQUENCY;
-  private skipped = 0;
-
-  private readonly minFrequency: number;
-  private readonly maxFrequency: number;
-  private readonly amplitude: number;
-  private readonly sampleRate: number;
-  private readonly batchSize: number;
-  private readonly reportHz: number;
 
   // Used to carry a partially-written 6-byte frame across chunks.
   private pendingFrame: Uint8Array | null = null;
   private pendingFrameIndex = 0;
 
-  constructor(options: SimulationPortOptions = {}) {
-    this.minFrequency = options.minFrequency ?? SIMULATION_MIN_FREQUENCY;
-    this.maxFrequency = options.maxFrequency ?? SIMULATION_MAX_FREQUENCY;
-    this.amplitude = options.amplitude ?? SIMULATION_AMPLITUDE;
-    this.sampleRate = options.sampleRate ?? FIXED_SAMPLE_RATE;
-    this.batchSize = options.batchSize ?? BATCH_SIZE;
-    this.reportHz = options.reportHz ?? AXIS_REPORT_RATE_HZ;
-
+  constructor() {
     this.readable = this.createReadable();
   }
 
@@ -71,8 +46,7 @@ export class SimulationPort {
 
     // Reset simulation state on each open.
     this.t = 0;
-    this.simulationFrequency = this.minFrequency;
-    this.skipped = 0;
+    this.simulationFrequency = SIMULATION_MIN_FREQUENCY;
     this.pendingFrame = null;
     this.pendingFrameIndex = 0;
 
@@ -92,13 +66,14 @@ export class SimulationPort {
   }
 
   private makeNextFrame(): Uint8Array {
-    this.t += 1 / this.sampleRate;
+    this.t += 1 / FIXED_SAMPLE_RATE;
 
     // Sweep logic placeholder (currently constant, but keeps structure from prior SimulationDataSource).
-    this.simulationFrequency += 0.0;
-    if (this.simulationFrequency > this.maxFrequency) this.simulationFrequency = this.minFrequency;
+    this.simulationFrequency += 0.001;
+    if (this.simulationFrequency > SIMULATION_MAX_FREQUENCY)
+      this.simulationFrequency = SIMULATION_MIN_FREQUENCY;
 
-    const v = Math.sin(this.t * 2 * Math.PI * this.simulationFrequency) * this.amplitude;
+    const v = Math.sin(this.t * 2 * Math.PI * this.simulationFrequency) * SIMULATION_AMPLITUDE;
     const value = Math.round(v);
     const simulatedData = new Int16Array([value, value, value]);
 
@@ -116,11 +91,6 @@ export class SimulationPort {
     frame[4] = Number((packed >> 24n) & 0xffn);
     frame[5] = Number((packed >> 32n) & 0xffn);
 
-    // Keep same cadence as the original simulation for UI updates, but note: the UI is updated
-    // indirectly via the serial worker parsing this byte stream.
-    this.skipped++;
-    if (this.skipped > this.sampleRate / this.reportHz) this.skipped = 0;
-
     return frame;
   }
 
@@ -135,16 +105,16 @@ export class SimulationPort {
     return byte;
   }
 
-  private async pump(): Promise<void> {
+  private async pump() {
     const controller = this.controller;
     if (!controller) return;
 
-    const chunkDurationMs = (1000 * this.batchSize) / this.sampleRate / 6;
+    const chunkDurationMs = (1000 * BATCH_SIZE) / FIXED_SAMPLE_RATE / 6;
 
     let nextTime = performance.now();
 
     while (this.isOpen) {
-      const chunk = new Uint8Array(this.batchSize);
+      const chunk = new Uint8Array(BATCH_SIZE);
       for (let i = 0; i < chunk.length; i++) {
         chunk[i] = this.nextByte();
       }
