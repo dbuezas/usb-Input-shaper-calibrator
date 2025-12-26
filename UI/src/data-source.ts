@@ -7,7 +7,6 @@ export interface DataSource {
   start(): Promise<boolean>;
   stop(): Promise<void>;
   setSelectedAxis(axis: 'x' | 'y' | 'z'): void;
-  setRange(minFrequency: number, maxFrequency: number): void;
 }
 
 export type SerialLikePort = {
@@ -100,9 +99,5 @@ export class SerialDataSource implements DataSource {
 
   setSelectedAxis(axis: 'x' | 'y' | 'z'): void {
     serialWorker.postMessage({ type: 'setSelectedAxis', axis });
-  }
-
-  setRange(minFrequency: number, maxFrequency: number): void {
-    serialWorker.postMessage({ type: 'setRange', minFrequency, maxFrequency });
   }
 }

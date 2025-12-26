@@ -6,14 +6,6 @@ export interface RawDataMessage {
 export interface SpectrumSliceMessage {
   type: 'spectrumSlice';
   spectrum: number[];
-  peakFrequency: number;
-  peakMagnitude: number;
-}
-
-export interface SetRangeMessage {
-  type: 'setRange';
-  minFrequency: number;
-  maxFrequency: number;
 }
 
 export interface SetSelectedAxisMessage {

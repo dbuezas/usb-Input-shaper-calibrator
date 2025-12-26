@@ -10,7 +10,6 @@ import {
   MIN_FREQUENCY_SLIDER,
 } from './constants';
 import { Slider } from './components/ui/slider';
-import type { DataSource } from './data-source';
 
 const spectrogramAtom = atom<number[]>();
 type PeakInfo = {
@@ -26,6 +25,29 @@ const Peak = () => {
 
 const MAX_TIME_SLICES = 100;
 const Waterfall = ({
+  width,
+  height,
+  freqRange,
+}: {
+  width: number;
+  height: number;
+  freqRange: [number, number];
+}) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  return (
+    <>
+      <canvas
+        ref={canvasRef}
+        width={width}
+        height={height}
+        className="image-rendering-pixelated block border border-gray-300 bg-black"
+      />
+      <Waterfall_render canvasRef={canvasRef} width={width} height={height} freqRange={freqRange} />
+    </>
+  );
+};
+const Waterfall_render = ({
   canvasRef,
   width,
   height,
@@ -37,6 +59,7 @@ const Waterfall = ({
   freqRange: [number, number];
 }) => {
   const spectrum = useAtomValue(spectrogramAtom);
+  const setPeak = useSetAtom(peakAtom);
   useEffect(() => {
     if (!spectrum?.length) return;
 
@@ -47,37 +70,56 @@ const Waterfall = ({
     if (!ctx) return;
 
     const yScale = height / MAX_TIME_SLICES;
+    const iMin = Math.max(0, Math.round((spectrum.length / (MAX_FREQ - MIN_FREQ)) * freqRange[0]));
+    const iMax = Math.min(
+      spectrum.length - 1,
+      Math.round((spectrum.length / (MAX_FREQ - MIN_FREQ)) * freqRange[1])
+    );
+
     let min = Number.MAX_VALUE;
     let max = Number.MIN_VALUE;
-    for (let j = 0; j < spectrum.length; j++) {
-      const value = spectrum[j];
+    let peakIdx = 0;
+    for (let i = iMin; i < iMax; i++) {
+      const value = spectrum[i];
       min = Math.min(min, value);
-      max = Math.max(max, value);
+      if (max < value) {
+        peakIdx = i;
+        max = value;
+      }
     }
+    const freqBinWidth = width / (iMax - iMin);
     const rangeVal = max - min;
     const y = 0;
-    const iMin = Math.round((spectrum.length / (MAX_FREQ - MIN_FREQ)) * freqRange[0]);
-    const iMax = Math.round((spectrum.length / (MAX_FREQ - MIN_FREQ)) * freqRange[1]);
-    const freqBinWidth = width / (iMax - iMin);
     ctx.drawImage(canvas, 0, 1);
-    for (let j = iMin; j < iMax; j++) {
-      const dbValue = spectrum[j];
-      const val = (dbValue - min) / rangeVal;
+    for (let i = iMin; i < iMax; i++) {
+      const dbValue = spectrum[i];
+      let val = (dbValue - min) / rangeVal;
       const r = Math.floor(val * 255);
       const g = Math.floor(val * 128);
       const b = Math.floor((1 - val) * 255);
       ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-      const x = (j - iMin) * freqBinWidth;
+
+      const x = (i - iMin) * freqBinWidth;
       ctx.fillRect(x, y, freqBinWidth + 1, yScale);
     }
+    ctx.fillStyle = `rgb(255,255,255)`;
+
+    ctx.fillRect((peakIdx - iMin) * freqBinWidth - 1, y, freqBinWidth + 1, yScale);
+
+    setPeak((old) => {
+      const frequency = peakIdx * ACTUAL_RESOLUTION;
+      if (frequency === old?.frequency) return old;
+      return {
+        frequency,
+        magnitude: 1,
+      };
+    });
   }, [width, height, spectrum]);
   return <></>;
 };
 
-function Spectrogram({ dataSource }: { dataSource?: DataSource }) {
+function Spectrogram() {
   const setSpectrogram = useSetAtom(spectrogramAtom);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const setPeak = useSetAtom(peakAtom);
   const width = 800;
   const height = 400;
   const [freqRange, setFreqRange] = useState([MIN_FREQUENCY_SLIDER, MAX_FREQUENCY_SLIDER] as [
@@ -85,18 +127,10 @@ function Spectrogram({ dataSource }: { dataSource?: DataSource }) {
     number,
   ]);
   useEffect(() => {
-    dataSource?.setRange(freqRange[0], freqRange[1]);
-  }, freqRange);
-  useEffect(() => {
     const handleMessage = (e: MessageEvent<SpectrumSliceMessage>) => {
-      const { type, spectrum, peakFrequency, peakMagnitude } = e.data;
+      const { type, spectrum } = e.data;
       if (type !== 'spectrumSlice') return;
       setSpectrogram(spectrum);
-
-      setPeak({
-        frequency: peakFrequency,
-        magnitude: peakMagnitude,
-      });
     };
 
     spectrogramChannel.addEventListener('message', handleMessage);
@@ -122,13 +156,8 @@ function Spectrogram({ dataSource }: { dataSource?: DataSource }) {
         />
       </div>
       <h3 className="mb-4 text-2xl font-semibold">Live Waterfall Spectrogram</h3>
-      <canvas
-        ref={canvasRef}
-        width={width}
-        height={height}
-        className="image-rendering-pixelated block border border-gray-300 bg-black"
-      />
-      <Waterfall canvasRef={canvasRef} height={height} width={width} freqRange={freqRange} />
+
+      <Waterfall height={height} width={width} freqRange={freqRange} />
       <div className="mt-2 flex flex-wrap justify-center gap-4 text-sm">
         <span>
           <Peak />

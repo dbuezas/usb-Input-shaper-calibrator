@@ -2,7 +2,7 @@
 
 // Spectrogram processing constants
 export const FIXED_SAMPLE_RATE = 3200;
-export const RESOLUTION_HZ = 10;
+export const RESOLUTION_HZ = 0.1;
 export const REPORT_HZ_EVERY_MS = 1000;
 export const AXIS_REPORT_RATE_HZ = 10;
 export const BUFFER_SIZE = 1024 * 10; // 10KB circular buffer
@@ -26,4 +26,4 @@ export const BATCH_SIZE = 1000;
 // Simulation constants
 export const SIMULATION_MIN_FREQUENCY = 20;
 export const SIMULATION_AMPLITUDE = 1000;
-export const SIMULATION_MAX_FREQUENCY = 25;
+export const SIMULATION_MAX_FREQUENCY = 200;

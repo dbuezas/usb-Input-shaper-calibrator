@@ -12,9 +12,6 @@ import {
   FIXED_SAMPLE_RATE,
   WINDOW_SIZE,
   HOP_SIZE,
-  MIN_FREQ,
-  MAX_FREQ,
-  ACTUAL_RESOLUTION,
 } from './constants';
 
 interface SensorData {
@@ -24,10 +21,8 @@ interface SensorData {
 }
 
 interface WorkerMessage {
-  type: 'rawData' | 'reset' | 'setRange' | 'setSelectedAxis';
+  type: 'rawData' | 'reset' | 'setSelectedAxis';
   data?: Uint8Array;
-  minFrequency?: number;
-  maxFrequency?: number;
   axis?: 'x' | 'y' | 'z';
 }
 
@@ -72,13 +67,17 @@ function hammingWindow(size: number): number[] {
   }
   return window;
 }
+function hannWindow(size: number): number[] {
+  const window: number[] = new Array(size);
+
+  for (let i = 0; i < size; i++) window[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (size - 1)));
+  return window;
+}
 
 class WaterfallSpectrogramProcessor {
   buffer: number[];
   bufferIndex: number;
   windows: number[];
-  minFrequency: number;
-  maxFrequency: number;
   re: number[];
   im: number[];
   magnitudes: number[];
@@ -86,18 +85,11 @@ class WaterfallSpectrogramProcessor {
   constructor() {
     this.buffer = new Array(WINDOW_SIZE).fill(0);
     this.bufferIndex = 0;
-    this.windows = hammingWindow(WINDOW_SIZE);
-    this.minFrequency = 5;
-    this.maxFrequency = 150;
+    this.windows = hannWindow(WINDOW_SIZE); //hammingWindow(WINDOW_SIZE);
     this.re = new Array(WINDOW_SIZE);
     this.im = new Array(WINDOW_SIZE);
     this.magnitudes = new Array(WINDOW_SIZE / 2);
     console.log('new');
-  }
-
-  setRange(minFrequency: number, maxFrequency: number): void {
-    this.minFrequency = minFrequency;
-    this.maxFrequency = maxFrequency;
   }
 
   addSample(value: number): void {
@@ -125,31 +117,9 @@ class WaterfallSpectrogramProcessor {
       this.magnitudes[i] = Math.sqrt(this.re[i] * this.re[i] + this.im[i] * this.im[i]) * scale;
     }
 
-    const startFreq = Math.max(MIN_FREQ, this.minFrequency);
-    const endFreq = Math.min(MAX_FREQ, this.maxFrequency);
-    const startBin = Math.max(0, Math.floor((startFreq - MIN_FREQ) / ACTUAL_RESOLUTION));
-    const endBin = Math.min(
-      this.magnitudes.length - 1,
-      Math.ceil((endFreq - MIN_FREQ) / ACTUAL_RESOLUTION)
-    );
-
-    let peakIndex = startBin;
-    let peakMagnitude = this.magnitudes[peakIndex] ?? 0;
-    for (let idx = startBin + 1; idx <= endBin; idx++) {
-      const value = this.magnitudes[idx];
-      if (value > peakMagnitude) {
-        peakMagnitude = value;
-        peakIndex = idx;
-      }
-    }
-
-    const peakFrequency = MIN_FREQ + peakIndex * ACTUAL_RESOLUTION;
-
     spectrogramChannel.postMessage({
       type: 'spectrumSlice',
       spectrum: this.magnitudes,
-      peakFrequency,
-      peakMagnitude,
     } satisfies SpectrumSliceMessage);
   }
 }
@@ -271,7 +241,5 @@ self.onmessage = function (e: MessageEvent<WorkerMessage>) {
     console.log('selectaxis');
     dataProcessor.selectedAxis = e.data.axis!;
     dataProcessor.currentProcessor = new WaterfallSpectrogramProcessor();
-  } else if (type === 'setRange') {
-    dataProcessor.currentProcessor?.setRange(e.data.minFrequency!, e.data.maxFrequency!);
   }
 };

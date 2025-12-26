@@ -66,15 +66,17 @@ export class SimulationPort {
   }
 
   private makeNextFrame(): Uint8Array {
-    this.t += 1 / FIXED_SAMPLE_RATE;
-
-    // Sweep logic placeholder (currently constant, but keeps structure from prior SimulationDataSource).
-    this.simulationFrequency += 0.001;
+    // Sweep (frequency changes smoothly, phase stays continuous)
+    this.simulationFrequency += 10 / FIXED_SAMPLE_RATE;
     if (this.simulationFrequency > SIMULATION_MAX_FREQUENCY)
       this.simulationFrequency = SIMULATION_MIN_FREQUENCY;
 
-    const v = Math.sin(this.t * 2 * Math.PI * this.simulationFrequency) * SIMULATION_AMPLITUDE;
+    // Phase-accurate integration
+    this.t += (2 * Math.PI * this.simulationFrequency) / FIXED_SAMPLE_RATE;
+
+    const v = Math.sin(this.t) * SIMULATION_AMPLITUDE;
     const value = Math.round(v);
+
     const simulatedData = new Int16Array([value, value, value]);
 
     const frame = new Uint8Array(6);

@@ -149,7 +149,7 @@ function App() {
               </SelectContent>
             </Select>
           </div>
-          <Spectrogram dataSource={dataSource} />
+          <Spectrogram />
         </div>
       )}
 
