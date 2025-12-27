@@ -33,11 +33,6 @@ export const peakFrequencyAtom = atom((get) => {
   return peak ? peak.toFixed(1) : '';
 });
 
-const Peak = () => {
-  const peak = useAtomValue(peakAtom);
-  return peak != null ? `${peak.toFixed(1)} Hz` : '—';
-};
-
 const MAX_TIME_SLICES = 100;
 
 type SpectrumPlotMode = 'points' | 'line';
@@ -503,9 +498,6 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
         </>
       )}
       <div className="mt-2 flex flex-wrap justify-center gap-4 text-sm">
-        <span>
-          <Peak />
-        </span>
         <span>Resolution: {(ACTUAL_RESOLUTION || 1).toFixed(2)} Hz/bin</span>
         <span>Time Slices: {MAX_TIME_SLICES}</span>
       </div>

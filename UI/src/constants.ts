@@ -1,30 +1,69 @@
 // Global constants for the application
 
-// Spectrogram processing constants
-export const FIXED_SAMPLE_RATE = 3200;
-const RESOLUTION_HZ = 1;
-export const REPORT_HZ_EVERY_MS = 100;
-export const AXIS_REPORT_RATE_HZ = 10;
-export const BUFFER_SIZE = 1024 * 10; // 10KB circular buffer
+// === Serial + transport ===
 
+// Used by `src/data-source.ts` when opening the serial port.
+export const SERIAL_BAUD_RATE = 230400;
+
+// Bytes per chunk forwarded to the worker:
+// - `src/data-source.ts` accumulates raw bytes into `BATCH_SIZE` chunks before posting
+//   `{ type: 'rawData', data }` to `src/serial-worker.ts`.
+// - `src/simulation-port.ts` also emits `BATCH_SIZE` bytes per tick.
+export const BATCH_SIZE = 1000;
+
+// === Streaming / reporting ===
+
+// Fixed sample rate assumed by the DSP pipeline.
+// Used in `src/serial-worker.ts` (FFT/PSD scaling) and `src/simulation-port.ts` timing.
+export const FIXED_SAMPLE_RATE = 3200;
+
+// How often `src/serial-worker.ts` recomputes the input frequency estimate.
+export const REPORT_HZ_EVERY_MS = 100;
+
+// Throttles how often axis data is posted back to the UI from `src/serial-worker.ts`.
+export const AXIS_REPORT_RATE_HZ = 10;
+
+// Size (in bytes) of the raw input ring buffer inside `src/serial-worker.ts`.
+export const BUFFER_SIZE = 1024 * 10;
+
+// === Spectrogram / FFT sizing ===
+
+// Desired (target) bin resolution used to choose a power-of-two FFT window.
+// `WINDOW_SIZE` is derived from this and `FIXED_SAMPLE_RATE`.
+const RESOLUTION_HZ = 1;
+
+// Target window length in samples for the desired resolution.
 const TARGET_WINDOW_SIZE = FIXED_SAMPLE_RATE / RESOLUTION_HZ;
+
+// FFT size used by `src/serial-worker.ts`.
+// Rounded up to a power of two for efficient FFT.
 export const WINDOW_SIZE = 2 ** Math.ceil(Math.log2(TARGET_WINDOW_SIZE));
+
+// Actual bin resolution that results from the chosen `WINDOW_SIZE`.
+// Used by `src/Spectrogram.tsx` to convert bin index -> Hz (peak readout).
 export const ACTUAL_RESOLUTION = FIXED_SAMPLE_RATE / WINDOW_SIZE;
+
+// Step between successive FFT frames.
+// Used by `src/serial-worker.ts` to decide when to compute a new spectrogram slice.
 export const HOP_SIZE = Math.floor(WINDOW_SIZE / 256);
 
+// FFT bin -> frequency mapping helpers used in `src/Spectrogram.tsx`.
 export const MIN_FREQ = FIXED_SAMPLE_RATE / WINDOW_SIZE;
 export const MAX_FREQ = FIXED_SAMPLE_RATE / 2;
 
-// Sample rate and frequency constants
-export const MAX_FREQUENCY_SLIDER = 300; //FIXED_SAMPLE_RATE / 2;
+// === UI ranges ===
+
+// Frequency range slider bounds used in `src/Spectrogram.tsx`.
+// (Set lower than Nyquist for convenience/readability.)
+export const MAX_FREQUENCY_SLIDER = 300; // could be `FIXED_SAMPLE_RATE / 2`
 export const MIN_FREQUENCY_SLIDER = 0;
 
-// Serial communication constants
-export const SERIAL_BAUD_RATE = 230400;
-export const BATCH_SIZE = 1000;
+// === Simulation ===
 
-// Simulation constants
+// Sweep parameters for `src/simulation-port.ts`.
 export const SIMULATION_MIN_FREQUENCY = 1;
 export const SIMULATION_MAX_FREQUENCY = 200;
 export const SIMULATION_AMPLITUDE = 1000;
-export const SIMULATION_SWEEP_S = 5; // SECONDS
+
+// Seconds for a full sweep from min -> max before wrapping.
+export const SIMULATION_SWEEP_S = 5;

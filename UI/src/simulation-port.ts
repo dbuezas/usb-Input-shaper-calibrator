@@ -9,6 +9,17 @@ import {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+const clampInt16 = (v: number) => Math.max(-32768, Math.min(32767, v | 0));
+
+const randomNormal = () => {
+  // Box–Muller transform
+  let u = 0;
+  let v = 0;
+  while (u === 0) u = Math.random();
+  while (v === 0) v = Math.random();
+  return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+};
+
 export class SimulationPort {
   readable: ReadableStream<Uint8Array>;
 
@@ -87,7 +98,15 @@ export class SimulationPort {
     const v = Math.sin(this.t) * amplitude * SIMULATION_AMPLITUDE;
     const value = Math.round(v);
 
-    const simulatedData = new Int16Array([value, value, value]);
+    // Add purely random noise (independent per axis).
+    // Noise level is fixed relative to the configured simulation amplitude,
+    // so low-amplitude parts of the sweep still have the same noise floor.
+    const noiseStd = SIMULATION_AMPLITUDE * 0.15;
+    const valueX = clampInt16(Math.round(value + randomNormal() * noiseStd));
+    const valueY = clampInt16(Math.round(value + randomNormal() * noiseStd));
+    const valueZ = clampInt16(Math.round(value + randomNormal() * noiseStd));
+
+    const simulatedData = new Int16Array([valueX, valueY, valueZ]);
 
     const frame = new Uint8Array(6);
     frame[0] = 255;
