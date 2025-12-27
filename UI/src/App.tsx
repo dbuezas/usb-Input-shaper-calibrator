@@ -1,23 +1,31 @@
 import { useEffect, useState } from 'react';
-import { atom, useAtomValue, useSetAtom } from 'jotai';
+import { atom, useAtomValue, useSetAtom, type Atom } from 'jotai';
+import { atomFamily } from 'jotai-family';
 import Spectrogram, { SpectrogramControls } from './Spectrogram';
 import type { DataSource } from './data-source';
 import { SerialDataSource } from './data-source';
 import { SimulationPort } from './simulation-port';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 type Mode = 'simulation' | 'usb';
 
 const adxlDataAtom = atom<Int16Array<ArrayBufferLike>>();
-const AdxlData = ({ i }: { i: number }) => {
-  const adxlData = useAtomValue(adxlDataAtom);
-  return adxlData?.[i];
-};
-
 const frequencyAtom = atom(0);
-const Frequency = () => {
-  const frequency = useAtomValue(frequencyAtom);
-  return frequency.toFixed(1);
+
+const formattedAxisValueAtom = atomFamily((i: number) =>
+  atom((get) => {
+    const data = get(adxlDataAtom);
+    const value = data?.[i];
+    return value == null ? '' : String(value);
+  })
+);
+
+const formattedFrequencyAtom = atom((get) => get(frequencyAtom).toFixed(1));
+
+const AtomValue = ({ atom }: { atom: Atom<string> }) => {
+  const value = useAtomValue(atom);
+  return <>{value}</>;
 };
 
 function App() {
@@ -59,22 +67,31 @@ function App() {
     setIsConnected(false);
   };
 
-  const toggleSimulationMode = () => {
-    const newMode: Mode = mode === 'simulation' ? 'usb' : 'simulation';
-    setMode(newMode);
-  };
-
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6 p-6 font-sans md:flex-row">
       <aside className="border-border bg-card w-full rounded-xl border p-5 shadow-sm md:sticky md:top-6 md:h-[calc(100vh-3rem)] md:w-80 md:overflow-auto">
         <h1 className="text-2xl font-bold">ADXL Resonance Analyzer</h1>
-
-        <div className="bg-muted mt-5 rounded-lg p-3">
-          <div className="text-muted-foreground text-sm">Status</div>
-          <div className="mt-1 text-lg">
-            <span className={isConnected ? 'text-primary font-bold' : 'text-destructive font-bold'}>
-              {status}
-            </span>
+        <div>
+          <div className="text-muted-foreground text-sm">Source</div>
+          <div className="border-border mt-2 inline-flex rounded-md border p-1">
+            {(
+              [
+                { value: 'usb', label: 'Serial' },
+                { value: 'simulation', label: 'Simulation' },
+              ] as const
+            ).map((opt) => (
+              <Button
+                key={opt.value}
+                type="button"
+                size="sm"
+                variant={mode === opt.value ? 'secondary' : 'ghost'}
+                className="h-8 px-3"
+                aria-pressed={mode === opt.value}
+                onClick={() => setMode(opt.value)}
+              >
+                {opt.label}
+              </Button>
+            ))}
           </div>
         </div>
 
@@ -84,14 +101,15 @@ function App() {
           ) : (
             <Button onClick={disconnect}>Disconnect</Button>
           )}
-          <Button
-            onClick={toggleSimulationMode}
-            variant={mode === 'simulation' ? 'secondary' : 'outline'}
-          >
-            {mode === 'simulation' ? 'Simulation' : 'Serial'}
-          </Button>
         </div>
-
+        <div className="bg-muted mt-5 rounded-lg p-3">
+          <div className="text-muted-foreground text-sm">Status</div>
+          <div className="mt-1 text-lg">
+            <span className={isConnected ? 'text-primary font-bold' : 'text-destructive font-bold'}>
+              {status}
+            </span>
+          </div>
+        </div>
         {isConnected && (
           <div className="mt-6">
             <div className="text-muted-foreground text-sm">Axis</div>
@@ -134,31 +152,32 @@ function App() {
       </aside>
 
       <main className="min-w-0 flex-1">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="border-border bg-card rounded-xl border p-6 text-center shadow-sm">
-            <h2 className="m-0 mb-4 text-xl">X Axis</h2>
-            <div className="text-primary font-mono text-3xl font-bold">
-              <AdxlData i={0} />
-            </div>
-          </div>
-          <div className="border-border bg-card rounded-xl border p-6 text-center shadow-sm">
-            <h2 className="m-0 mb-4 text-xl">Y Axis</h2>
-            <div className="text-primary font-mono text-3xl font-bold">
-              <AdxlData i={1} />
-            </div>
-          </div>
-          <div className="border-border bg-card rounded-xl border p-6 text-center shadow-sm">
-            <h2 className="m-0 mb-4 text-xl">Z Axis</h2>
-            <div className="text-primary font-mono text-3xl font-bold">
-              <AdxlData i={2} />
-            </div>
-          </div>
-          <div className="border-border bg-card rounded-xl border p-6 text-center shadow-sm">
-            <h2 className="m-0 mb-4 text-xl">Frequency</h2>
-            <div className="text-primary font-mono text-3xl font-bold">
-              <Frequency /> Hz
-            </div>
-          </div>
+        <div className="grid grid-cols-4 gap-4">
+          {(
+            [
+              { key: 'x', title: 'X Axis', value: <AtomValue atom={formattedAxisValueAtom(0)} /> },
+              { key: 'y', title: 'Y Axis', value: <AtomValue atom={formattedAxisValueAtom(1)} /> },
+              { key: 'z', title: 'Z Axis', value: <AtomValue atom={formattedAxisValueAtom(2)} /> },
+              {
+                key: 'f',
+                title: 'Aquisition',
+                value: (
+                  <>
+                    <AtomValue atom={formattedFrequencyAtom} /> Hz
+                  </>
+                ),
+              },
+            ] as const
+          ).map((tile) => (
+            <Card key={tile.key} className="text-center">
+              <CardHeader>
+                <CardTitle>{tile.title}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="font-mono">{tile.value}</div>
+              </CardContent>
+            </Card>
+          ))}
         </div>
 
         {isConnected ? (

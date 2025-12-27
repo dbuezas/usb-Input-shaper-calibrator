@@ -347,23 +347,16 @@ export function SpectrogramControls({ dataSource }: { dataSource?: DataSource })
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {view === 'spectrum' ? (
-          <button
-            type="button"
-            className="bg-muted text-foreground hover:bg-muted/80 inline-flex items-center rounded-md px-3 py-2 text-sm"
-            onClick={() => setSpectrogramMaxHold([])}
-          >
-            Clear Spectrum Max-Hold
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="bg-muted text-foreground hover:bg-muted/80 inline-flex items-center rounded-md px-3 py-2 text-sm"
-            onClick={() => setWelchPsdMaxHold([])}
-          >
-            Clear Welch Max-Hold
-          </button>
-        )}
+        <button
+          type="button"
+          className="bg-muted text-foreground hover:bg-muted/80 inline-flex items-center rounded-md px-3 py-2 text-sm"
+          onClick={() => {
+            setSpectrogramMaxHold([]);
+            setWelchPsdMaxHold([]);
+          }}
+        >
+          Clear Max-Hold
+        </button>
       </div>
     </div>
   );
@@ -375,7 +368,7 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
   const setWelchPsd = useSetAtom(welchPsdAtom);
   const setWelchPsdMaxHold = useSetAtom(welchPsdMaxHoldAtom);
   const width = 800;
-  const height = 400;
+  const height = 200;
   const view = useAtomValue(viewAtom);
   const freqRange = useAtomValue(freqRangeAtom);
   useEffect(() => {
