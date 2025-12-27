@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState, type RefObject } from 'react';
 import type { SpectrumSliceMessage, WelchPsdSliceMessage } from './messages';
 import { spectrogramChannel } from './messages';
-import { atom, useAtomValue, useSetAtom } from 'jotai';
+import { atom, useAtomValue, useSetAtom, type Atom } from 'jotai';
 import {
   ACTUAL_RESOLUTION,
   MAX_FREQ,
@@ -11,9 +11,10 @@ import {
 } from './constants';
 import { Slider } from './components/ui/slider';
 
-const spectrogramAtom = atom<number[]>();
-const welchPsdAtom = atom<number[]>();
-const welchPsdMaxHoldAtom = atom<number[]>();
+const spectrogramAtom = atom<number[]>([]);
+const spectrogramMaxHoldAtom = atom<number[]>([]);
+const welchPsdAtom = atom<number[]>([]);
+const welchPsdMaxHoldAtom = atom<number[]>([]);
 type PeakInfo = {
   frequency: number;
   magnitude: number;
@@ -27,17 +28,26 @@ const Peak = () => {
 
 const MAX_TIME_SLICES = 100;
 
-const WelchPsdScatter = ({
+type SpectrumPlotMode = 'points' | 'line';
+
+const SpectrumPlot = ({
+  dataAtom,
   width,
   height,
   freqRange,
+  mode,
+  color,
+  dynamicRangeDb,
 }: {
+  dataAtom: Atom<number[]>;
   width: number;
   height: number;
   freqRange: [number, number];
+  mode: SpectrumPlotMode;
+  color: string;
+  dynamicRangeDb?: number;
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-
   return (
     <>
       <canvas
@@ -46,31 +56,43 @@ const WelchPsdScatter = ({
         height={height}
         className="block border border-gray-300 bg-black"
       />
-      <WelchPsdScatter_render
+      <SpectrumPlot_render
         canvasRef={canvasRef}
+        dataAtom={dataAtom}
         width={width}
         height={height}
         freqRange={freqRange}
+        mode={mode}
+        color={color}
+        dynamicRangeDb={dynamicRangeDb}
       />
     </>
   );
 };
 
-const WelchPsdScatter_render = ({
+const SpectrumPlot_render = ({
   canvasRef,
+  dataAtom,
   width,
   height,
   freqRange,
+  mode,
+  color,
+  dynamicRangeDb,
 }: {
   canvasRef: RefObject<HTMLCanvasElement | null>;
+  dataAtom: Atom<number[]>;
   width: number;
   height: number;
   freqRange: [number, number];
+  mode: SpectrumPlotMode;
+  color: string;
+  dynamicRangeDb?: number;
 }) => {
-  const psd = useAtomValue(welchPsdAtom);
+  const data = useAtomValue(dataAtom);
 
   useEffect(() => {
-    if (!psd?.length) return;
+    if (!data?.length) return;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -78,213 +100,31 @@ const WelchPsdScatter_render = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const iMin = Math.max(0, Math.round((psd.length / (MAX_FREQ - MIN_FREQ)) * freqRange[0]));
+    const iMin = Math.max(0, Math.round((data.length / (MAX_FREQ - MIN_FREQ)) * freqRange[0]));
     const iMax = Math.min(
-      psd.length - 1,
-      Math.round((psd.length / (MAX_FREQ - MIN_FREQ)) * freqRange[1])
+      data.length - 1,
+      Math.round((data.length / (MAX_FREQ - MIN_FREQ)) * freqRange[1])
     );
     if (iMax <= iMin) return;
 
-    // For PSD in dB, it's nicer to keep a stable dynamic range.
-    // Derive max from current frame and use a fixed window below it.
+    let min = Number.POSITIVE_INFINITY;
     let max = Number.NEGATIVE_INFINITY;
-    for (let i = iMin; i < iMax; i++) max = Math.max(max, psd[i]);
-    const min = max - 80;
 
-    ctx.clearRect(0, 0, width, height);
-
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0.5, height - 0.5);
-    ctx.lineTo(width - 0.5, height - 0.5);
-    ctx.moveTo(0.5, 0.5);
-    ctx.lineTo(0.5, height - 0.5);
-    ctx.stroke();
-
-    const xScale = width / (iMax - iMin);
-    const pointRadius = 1.2;
-    ctx.fillStyle = 'rgba(255, 180, 0, 0.9)';
-
-    const range = 80;
-    for (let i = iMin; i < iMax; i++) {
-      const dbValue = psd[i];
-      const norm = Math.min(1, Math.max(0, (dbValue - min) / range));
-      const x = (i - iMin) * xScale;
-      const y = height - 1 - norm * (height - 2);
-      ctx.beginPath();
-      ctx.arc(x, y, pointRadius, 0, Math.PI * 2);
-      ctx.fill();
+    if (dynamicRangeDb && dynamicRangeDb > 0) {
+      for (let i = iMin; i < iMax; i++) max = Math.max(max, data[i]);
+      min = max - dynamicRangeDb;
+    } else {
+      for (let i = iMin; i < iMax; i++) {
+        min = Math.min(min, data[i]);
+        max = Math.max(max, data[i]);
+      }
     }
-  }, [width, height, psd, freqRange]);
 
-  return <></>;
-};
-
-const WelchPsdMaxHoldScatter = ({
-  width,
-  height,
-  freqRange,
-}: {
-  width: number;
-  height: number;
-  freqRange: [number, number];
-}) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  return (
-    <>
-      <canvas
-        ref={canvasRef}
-        width={width}
-        height={height}
-        className="block border border-gray-300 bg-black"
-      />
-      <WelchPsdMaxHoldScatter_render
-        canvasRef={canvasRef}
-        width={width}
-        height={height}
-        freqRange={freqRange}
-      />
-    </>
-  );
-};
-
-const WelchPsdMaxHoldScatter_render = ({
-  canvasRef,
-  width,
-  height,
-  freqRange,
-}: {
-  canvasRef: RefObject<HTMLCanvasElement | null>;
-  width: number;
-  height: number;
-  freqRange: [number, number];
-}) => {
-  const psd = useAtomValue(welchPsdMaxHoldAtom);
-
-  useEffect(() => {
-    if (!psd?.length) return;
-
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const iMin = Math.max(0, Math.round((psd.length / (MAX_FREQ - MIN_FREQ)) * freqRange[0]));
-    const iMax = Math.min(
-      psd.length - 1,
-      Math.round((psd.length / (MAX_FREQ - MIN_FREQ)) * freqRange[1])
-    );
-    if (iMax <= iMin) return;
-
-    let max = Number.NEGATIVE_INFINITY;
-    for (let i = iMin; i < iMax; i++) max = Math.max(max, psd[i]);
-    const min = max - 80;
-
-    ctx.clearRect(0, 0, width, height);
-
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0.5, height - 0.5);
-    ctx.lineTo(width - 0.5, height - 0.5);
-    ctx.moveTo(0.5, 0.5);
-    ctx.lineTo(0.5, height - 0.5);
-    ctx.stroke();
-
-    const xScale = width / (iMax - iMin);
-    const range = 80;
-
-    ctx.strokeStyle = 'rgba(255, 80, 80, 0.95)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    for (let i = iMin; i < iMax; i++) {
-      const dbValue = psd[i];
-      const norm = Math.min(1, Math.max(0, (dbValue - min) / range));
-      const x = (i - iMin) * xScale;
-      const y = height - 1 - norm * (height - 2);
-      if (i === iMin) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-  }, [width, height, psd, freqRange]);
-
-  return <></>;
-};
-
-const SpectrumScatter = ({
-  width,
-  height,
-  freqRange,
-}: {
-  width: number;
-  height: number;
-  freqRange: [number, number];
-}) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  return (
-    <>
-      <canvas
-        ref={canvasRef}
-        width={width}
-        height={height}
-        className="block border border-gray-300 bg-black"
-      />
-      <SpectrumScatter_render
-        canvasRef={canvasRef}
-        width={width}
-        height={height}
-        freqRange={freqRange}
-      />
-    </>
-  );
-};
-
-const SpectrumScatter_render = ({
-  canvasRef,
-  width,
-  height,
-  freqRange,
-}: {
-  canvasRef: RefObject<HTMLCanvasElement | null>;
-  width: number;
-  height: number;
-  freqRange: [number, number];
-}) => {
-  const spectrum = useAtomValue(spectrogramAtom);
-
-  useEffect(() => {
-    if (!spectrum?.length) return;
-
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const iMin = Math.max(0, Math.round((spectrum.length / (MAX_FREQ - MIN_FREQ)) * freqRange[0]));
-    const iMax = Math.min(
-      spectrum.length - 1,
-      Math.round((spectrum.length / (MAX_FREQ - MIN_FREQ)) * freqRange[1])
-    );
-    if (iMax <= iMin) return;
-
-    let min = Number.MAX_VALUE;
-    let max = Number.MIN_VALUE;
-    for (let i = iMin; i < iMax; i++) {
-      const value = spectrum[i];
-      min = Math.min(min, value);
-      max = Math.max(max, value);
-    }
     const rangeVal = max - min;
     const safeRange = rangeVal <= 0 ? 1 : rangeVal;
 
     ctx.clearRect(0, 0, width, height);
 
-    // Axes (subtle)
     ctx.strokeStyle = 'rgba(255,255,255,0.15)';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -295,19 +135,33 @@ const SpectrumScatter_render = ({
     ctx.stroke();
 
     const xScale = width / (iMax - iMin);
-    const pointRadius = 1.2;
-    ctx.fillStyle = 'rgba(0, 220, 255, 0.9)';
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
 
+    if (mode === 'line') {
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (let i = iMin; i < iMax; i++) {
+        const norm = (data[i] - min) / safeRange;
+        const x = (i - iMin) * xScale;
+        const y = height - 1 - norm * (height - 2);
+        if (i === iMin) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      return;
+    }
+
+    const pointRadius = 1.2;
     for (let i = iMin; i < iMax; i++) {
-      const dbValue = spectrum[i];
-      const norm = (dbValue - min) / safeRange;
+      const norm = (data[i] - min) / safeRange;
       const x = (i - iMin) * xScale;
       const y = height - 1 - norm * (height - 2);
       ctx.beginPath();
       ctx.arc(x, y, pointRadius, 0, Math.PI * 2);
       ctx.fill();
     }
-  }, [width, height, spectrum, freqRange]);
+  }, [width, height, data, freqRange, mode, color, dynamicRangeDb]);
 
   return <></>;
 };
@@ -408,6 +262,7 @@ const Waterfall_render = ({
 
 function Spectrogram() {
   const setSpectrogram = useSetAtom(spectrogramAtom);
+  const setSpectrogramMaxHold = useSetAtom(spectrogramMaxHoldAtom);
   const setWelchPsd = useSetAtom(welchPsdAtom);
   const setWelchPsdMaxHold = useSetAtom(welchPsdMaxHoldAtom);
   const width = 800;
@@ -419,7 +274,16 @@ function Spectrogram() {
   useEffect(() => {
     const handleMessage = (e: MessageEvent<SpectrumSliceMessage | WelchPsdSliceMessage>) => {
       const msg = e.data;
-      if (msg.type === 'spectrumSlice') setSpectrogram(msg.spectrum);
+      if (msg.type === 'spectrumSlice') {
+        setSpectrogram(msg.spectrum);
+        setSpectrogramMaxHold((prev) => {
+          if (!prev?.length || prev.length !== msg.spectrum.length) return [...msg.spectrum];
+          const next = prev.slice();
+          for (let i = 0; i < msg.spectrum.length; i++)
+            next[i] = Math.max(next[i], msg.spectrum[i]);
+          return next;
+        });
+      }
       if (msg.type === 'welchPsdSlice') {
         setWelchPsd(msg.psd);
         setWelchPsdMaxHold((prev) => {
@@ -457,9 +321,42 @@ function Spectrogram() {
 
       <Waterfall height={height} width={width} freqRange={freqRange} />
       <h3 className="mt-10 mb-4 text-2xl font-semibold">Last Spectrum (Scatter)</h3>
-      <SpectrumScatter height={Math.round(height / 2)} width={width} freqRange={freqRange} />
+      <SpectrumPlot
+        dataAtom={spectrogramAtom}
+        height={Math.round(height / 2)}
+        width={width}
+        freqRange={freqRange}
+        mode="points"
+        color="rgba(0, 220, 255, 0.9)"
+      />
+      <div className="mt-10 mb-4 flex items-center justify-center gap-3">
+        <h3 className="text-2xl font-semibold">Spectrum (Accumulated Max-Hold)</h3>
+        <button
+          type="button"
+          className="rounded bg-gray-800 px-3 py-1 text-sm text-white hover:bg-gray-700"
+          onClick={() => setSpectrogramMaxHold([])}
+        >
+          Clear
+        </button>
+      </div>
+      <SpectrumPlot
+        dataAtom={spectrogramMaxHoldAtom}
+        height={Math.round(height / 2)}
+        width={width}
+        freqRange={freqRange}
+        mode="line"
+        color="rgba(0, 220, 255, 0.9)"
+      />
       <h3 className="mt-10 mb-4 text-2xl font-semibold">Welch PSD (Scatter)</h3>
-      <WelchPsdScatter height={Math.round(height / 2)} width={width} freqRange={freqRange} />
+      <SpectrumPlot
+        dataAtom={welchPsdAtom}
+        height={Math.round(height / 2)}
+        width={width}
+        freqRange={freqRange}
+        mode="points"
+        color="rgba(255, 180, 0, 0.9)"
+        dynamicRangeDb={80}
+      />
       <div className="mt-10 mb-4 flex items-center justify-center gap-3">
         <h3 className="text-2xl font-semibold">Welch PSD (Accumulated Max-Hold)</h3>
         <button
@@ -470,7 +367,15 @@ function Spectrogram() {
           Clear
         </button>
       </div>
-      <WelchPsdMaxHoldScatter height={Math.round(height / 2)} width={width} freqRange={freqRange} />
+      <SpectrumPlot
+        dataAtom={welchPsdMaxHoldAtom}
+        height={Math.round(height / 2)}
+        width={width}
+        freqRange={freqRange}
+        mode="line"
+        color="rgba(255, 80, 80, 0.95)"
+        dynamicRangeDb={80}
+      />
       <div className="mt-2 flex flex-wrap justify-center gap-4 text-sm">
         <span>
           <Peak />
