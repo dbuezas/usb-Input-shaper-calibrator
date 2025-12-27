@@ -142,13 +142,14 @@ class SpectralProcessor {
     this.windowSumSquares = windowSumSquares(this.windows);
     this.re = new Array(WINDOW_SIZE);
     this.im = new Array(WINDOW_SIZE);
-    this.magnitudes = new Array(WINDOW_SIZE / 2);
-    this.welchPsdDb = new Array(WINDOW_SIZE / 2);
+    const halfBins = WINDOW_SIZE / 2 + 1;
+    this.magnitudes = new Array(halfBins);
+    this.welchPsdDb = new Array(halfBins);
 
     this.welchAvgCount = 8;
     this.welchAvgWriteIndex = 0;
     this.welchPeriodogramRing = [];
-    this.welchPeriodogramSum = new Float64Array(WINDOW_SIZE / 2);
+    this.welchPeriodogramSum = new Float64Array(WINDOW_SIZE / 2 + 1);
   }
 
   addSample(value: number): void {
@@ -170,24 +171,43 @@ class SpectralProcessor {
     fft(this.re, this.im);
 
     // Magnitude spectrum (for existing waterfall/scatter)
+    const halfBins = WINDOW_SIZE / 2 + 1;
     const scale = 2 / this.windowSum;
+
+    // DC bin (no doubling in one-sided spectrum)
     this.magnitudes[0] =
       Math.sqrt(this.re[0] * this.re[0] + this.im[0] * this.im[0]) * (scale * 0.5);
-    for (let i = 1; i < WINDOW_SIZE / 2; i++) {
+
+    // Non-DC, non-Nyquist bins
+    for (let i = 1; i < halfBins - 1; i++) {
       this.magnitudes[i] = Math.sqrt(this.re[i] * this.re[i] + this.im[i] * this.im[i]) * scale;
     }
+
+    // Nyquist bin (no doubling in one-sided spectrum)
+    const nyquist = halfBins - 1;
+    this.magnitudes[nyquist] =
+      Math.sqrt(this.re[nyquist] * this.re[nyquist] + this.im[nyquist] * this.im[nyquist]) *
+      (scale * 0.5);
 
     // Welch PSD (one-sided) using the same FFT result
     const U = this.windowSumSquares / WINDOW_SIZE;
     const baseScale = 1 / (FIXED_SAMPLE_RATE * WINDOW_SIZE * U);
-    const halfBins = WINDOW_SIZE / 2;
     const periodogram = new Float64Array(halfBins);
 
+    // DC bin (not doubled)
     periodogram[0] = (this.re[0] * this.re[0] + this.im[0] * this.im[0]) * baseScale;
-    for (let k = 1; k < halfBins; k++) {
+
+    // Non-DC, non-Nyquist bins are doubled in the one-sided PSD
+    for (let k = 1; k < halfBins - 1; k++) {
       const power = this.re[k] * this.re[k] + this.im[k] * this.im[k];
       periodogram[k] = power * baseScale * 2;
     }
+
+    // Nyquist bin (not doubled)
+    periodogram[halfBins - 1] =
+      (this.re[halfBins - 1] * this.re[halfBins - 1] +
+        this.im[halfBins - 1] * this.im[halfBins - 1]) *
+      baseScale;
 
     if (this.welchPeriodogramRing.length < this.welchAvgCount) {
       this.welchPeriodogramRing.push(periodogram);
@@ -322,7 +342,7 @@ class DataProcessor {
     this.lastData = { x: 0, y: 0, z: 0 };
     this.frequency = 0;
     serialChannel.postMessage({
-      data: [new Int16Array([0, 0, 0])],
+      data: new Int16Array([0, 0, 0]),
       frequency: 0,
     });
   }

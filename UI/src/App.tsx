@@ -1,17 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { atom, useAtomValue, useSetAtom } from 'jotai';
 import Spectrogram from './Spectrogram';
 import type { DataSource } from './data-source';
 import { SerialDataSource } from './data-source';
 import { SimulationPort } from './simulation-port';
 import { Button } from '@/components/ui/button';
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from '@/components/ui/select';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 
 type Mode = 'simulation' | 'usb';
 
@@ -33,7 +27,6 @@ function App() {
   const setFrequency = useSetAtom(frequencyAtom);
   const [status, setStatus] = useState('Disconnected');
   const [selectedAxis, setSelectedAxis] = useState<'x' | 'y' | 'z'>('x');
-  console.log('app');
   const [mode, setMode] = useState<Mode>('usb');
   const [dataSource, setDataSource] = useState<DataSource | undefined>(undefined);
 
@@ -42,10 +35,8 @@ function App() {
   }, [dataSource]);
 
   const connect = async () => {
-    // Stop current data source
     await dataSource?.stop();
 
-    // Switch data source based on mode
     const port =
       mode === 'simulation' ? new SimulationPort() : await navigator.serial.requestPort();
     const newDataSource = new SerialDataSource(
@@ -64,21 +55,20 @@ function App() {
   };
 
   const disconnect = async () => {
-    if (dataSource) {
-      await dataSource.stop();
-      setIsConnected(false);
-    }
+    if (!dataSource) return;
+    await dataSource.stop();
+    setIsConnected(false);
   };
 
-  const toggleSimulationMode = async () => {
+  const toggleSimulationMode = () => {
     const newMode: Mode = mode === 'simulation' ? 'usb' : 'simulation';
-
     setMode(newMode);
   };
 
   return (
     <div className="mx-auto max-w-4xl p-8 text-center font-sans">
       <h1 className="mb-8 text-4xl font-bold">ADXL Resonance Analyzer</h1>
+
       <div className="my-4 text-xl">
         <p>
           Status:{' '}
@@ -87,6 +77,7 @@ function App() {
           </span>
         </p>
       </div>
+
       <div className="my-8 flex flex-wrap justify-center gap-4">
         {!isConnected ? (
           <Button onClick={connect}>Connect to Device</Button>
@@ -100,6 +91,7 @@ function App() {
           {mode === 'simulation' ? 'Simulation' : 'Serial'}
         </Button>
       </div>
+
       <div className="my-8 flex flex-wrap justify-center gap-4">
         <div className="max-w-45 min-w-35 flex-1 rounded-xl p-6 text-center shadow-sm">
           <h2 className="m-0 mb-4 text-xl">X Axis</h2>
@@ -131,7 +123,8 @@ function App() {
         <div className="my-8 flex flex-col items-center">
           <div className="mb-6 flex items-center gap-4">
             <span className="text-sm text-gray-600">Axis:</span>
-            <Select
+            <RadioGroup
+              className="flex items-center gap-4"
               value={selectedAxis}
               onValueChange={(value) => {
                 const axis = value as 'x' | 'y' | 'z';
@@ -139,16 +132,18 @@ function App() {
                 dataSource?.setSelectedAxis(axis);
               }}
             >
-              <SelectTrigger className="w-45">
-                <SelectValue placeholder="Select axis" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="x">X Axis</SelectItem>
-                <SelectItem value="y">Y Axis</SelectItem>
-                <SelectItem value="z">Z Axis</SelectItem>
-              </SelectContent>
-            </Select>
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <RadioGroupItem value="x" />X
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <RadioGroupItem value="y" />Y
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <RadioGroupItem value="z" />Z
+              </label>
+            </RadioGroup>
           </div>
+
           <Spectrogram dataSource={dataSource} />
         </div>
       )}
