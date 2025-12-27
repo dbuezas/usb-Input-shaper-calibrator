@@ -18,5 +18,12 @@ export interface SetSelectedAxisMessage {
   axis: 'x' | 'y' | 'z';
 }
 
+export type WindowFunctionType = 'hann' | 'hamming' | 'blackman' | 'rectangular';
+
+export interface SetWindowFunctionMessage {
+  type: 'setWindowFunction';
+  window: WindowFunctionType;
+}
+
 export const serialChannel = new BroadcastChannel('serial');
 export const spectrogramChannel = new BroadcastChannel('spectrogram');

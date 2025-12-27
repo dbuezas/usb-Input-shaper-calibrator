@@ -10,6 +10,15 @@ import {
   MIN_FREQUENCY_SLIDER,
 } from './constants';
 import { Slider } from './components/ui/slider';
+import type { DataSource } from './data-source';
+import type { WindowFunctionType } from './messages';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 const spectrogramAtom = atom<number[]>([]);
 const spectrogramMaxHoldAtom = atom<number[]>([]);
@@ -260,13 +269,14 @@ const Waterfall_render = ({
   return <></>;
 };
 
-function Spectrogram() {
+function Spectrogram({ dataSource }: { dataSource?: DataSource }) {
   const setSpectrogram = useSetAtom(spectrogramAtom);
   const setSpectrogramMaxHold = useSetAtom(spectrogramMaxHoldAtom);
   const setWelchPsd = useSetAtom(welchPsdAtom);
   const setWelchPsdMaxHold = useSetAtom(welchPsdMaxHoldAtom);
   const width = 800;
   const height = 400;
+  const [windowFunction, setWindowFunction] = useState<WindowFunctionType>('hann');
   const [freqRange, setFreqRange] = useState([MIN_FREQUENCY_SLIDER, MAX_FREQUENCY_SLIDER] as [
     number,
     number,
@@ -303,6 +313,27 @@ function Spectrogram() {
 
   return (
     <div className="text-center">
+      <div className="mb-6 flex items-center justify-center gap-3">
+        <span className="text-sm text-gray-600">Window:</span>
+        <Select
+          value={windowFunction}
+          onValueChange={(value) => {
+            const next = value as WindowFunctionType;
+            setWindowFunction(next);
+            dataSource?.setWindowFunction(next);
+          }}
+        >
+          <SelectTrigger className="w-48">
+            <SelectValue placeholder="Select window" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="hann">Hann</SelectItem>
+            <SelectItem value="hamming">Hamming</SelectItem>
+            <SelectItem value="blackman">Blackman</SelectItem>
+            <SelectItem value="rectangular">Rectangular</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
       <div className="mb-8 flex w-full flex-col items-stretch gap-6">
         <label htmlFor="frequency-slider" className="mb-1 text-sm">
           Frequency Range: {freqRange[0]}-{freqRange[1]} Hz

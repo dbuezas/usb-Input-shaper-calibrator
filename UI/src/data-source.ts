@@ -1,12 +1,14 @@
 import { serialChannel } from './messages';
 import SerialWorker from './serial-worker?worker';
 import { SERIAL_BAUD_RATE, BATCH_SIZE } from './constants';
+import type { WindowFunctionType } from './messages';
 const serialWorker = new SerialWorker();
 
 export interface DataSource {
   start(): Promise<boolean>;
   stop(): Promise<void>;
   setSelectedAxis(axis: 'x' | 'y' | 'z'): void;
+  setWindowFunction(window: WindowFunctionType): void;
 }
 
 export type SerialLikePort = {
@@ -99,5 +101,9 @@ export class SerialDataSource implements DataSource {
 
   setSelectedAxis(axis: 'x' | 'y' | 'z'): void {
     serialWorker.postMessage({ type: 'setSelectedAxis', axis });
+  }
+
+  setWindowFunction(window: WindowFunctionType): void {
+    serialWorker.postMessage({ type: 'setWindowFunction', window });
   }
 }

@@ -22,9 +22,10 @@ interface SensorData {
 }
 
 interface WorkerMessage {
-  type: 'rawData' | 'reset' | 'setSelectedAxis';
+  type: 'rawData' | 'reset' | 'setSelectedAxis' | 'setWindowFunction';
   data?: Uint8Array;
   axis?: 'x' | 'y' | 'z';
+  window?: 'hann' | 'hamming' | 'blackman' | 'rectangular';
 }
 
 function fft(re: number[], im: number[]): void {
@@ -68,6 +69,42 @@ function hannWindow(size: number): number[] {
   return window;
 }
 
+function hammingWindow(size: number): number[] {
+  const window: number[] = new Array(size);
+  for (let i = 0; i < size; i++) window[i] = 0.54 - 0.46 * Math.cos((2 * Math.PI * i) / (size - 1));
+  return window;
+}
+
+function blackmanWindow(size: number): number[] {
+  const window: number[] = new Array(size);
+  const a0 = 0.42;
+  const a1 = 0.5;
+  const a2 = 0.08;
+  for (let i = 0; i < size; i++) {
+    const phase = (2 * Math.PI * i) / (size - 1);
+    window[i] = a0 - a1 * Math.cos(phase) + a2 * Math.cos(2 * phase);
+  }
+  return window;
+}
+
+function rectangularWindow(size: number): number[] {
+  return new Array(size).fill(1);
+}
+
+function makeWindow(window: WorkerMessage['window'], size: number): number[] {
+  switch (window) {
+    case 'hamming':
+      return hammingWindow(size);
+    case 'blackman':
+      return blackmanWindow(size);
+    case 'rectangular':
+      return rectangularWindow(size);
+    case 'hann':
+    default:
+      return hannWindow(size);
+  }
+}
+
 function windowSum(w: number[]): number {
   let s = 0;
   for (let i = 0; i < w.length; i++) s += w[i];
@@ -97,10 +134,10 @@ class SpectralProcessor {
   welchPeriodogramRing: Float64Array[];
   welchPeriodogramSum: Float64Array;
 
-  constructor() {
+  constructor(window: WorkerMessage['window'] = 'hann') {
     this.buffer = new Array(WINDOW_SIZE).fill(0);
     this.bufferIndex = 0;
-    this.windows = hannWindow(WINDOW_SIZE);
+    this.windows = makeWindow(window, WINDOW_SIZE);
     this.windowSum = windowSum(this.windows);
     this.windowSumSquares = windowSumSquares(this.windows);
     this.re = new Array(WINDOW_SIZE);
@@ -189,6 +226,7 @@ class DataProcessor {
   lastData: SensorData;
   processor: SpectralProcessor | null;
   selectedAxis: 'x' | 'y' | 'z';
+  windowFunction: WorkerMessage['window'];
   lastSent: number;
 
   constructor() {
@@ -197,9 +235,14 @@ class DataProcessor {
     this.intervalStartTime = 0;
     this.frequency = 0;
     this.lastData = { x: 0, y: 0, z: 0 };
-    this.processor = new SpectralProcessor();
+    this.windowFunction = 'hann';
+    this.processor = new SpectralProcessor(this.windowFunction);
     this.selectedAxis = 'x';
     this.lastSent = 0;
+  }
+
+  resetSpectralProcessor(): void {
+    this.processor = new SpectralProcessor(this.windowFunction);
   }
 
   processRawData(rawData: Uint8Array): void {
@@ -297,6 +340,9 @@ self.onmessage = function (e: MessageEvent<WorkerMessage>) {
   } else if (type === 'setSelectedAxis') {
     console.log('selectaxis');
     dataProcessor.selectedAxis = e.data.axis!;
-    dataProcessor.processor = new SpectralProcessor();
+    dataProcessor.resetSpectralProcessor();
+  } else if (type === 'setWindowFunction') {
+    dataProcessor.windowFunction = e.data.window ?? 'hann';
+    dataProcessor.resetSpectralProcessor();
   }
 };
