@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, type RefObject } from 'react';
 import type { Atom } from 'jotai';
 import { useAtomValue } from 'jotai';
 import { scaleLinear } from 'd3-scale';
-import { ACTUAL_RESOLUTION, MAX_FREQ, MIN_FREQ } from '@/constants';
+import { ACTUAL_RESOLUTION, MAX_FREQ, MIN_FREQ, SPECTROGRAM_MAX_TIME_SLICES } from '@/constants';
 import { DEFAULT_AXIS_PADDING, getInnerSize, useD3Axes } from './axis';
 import { Tooltip, useRafThrottledHover } from './tooltip';
 
@@ -12,7 +12,6 @@ export const Waterfall = ({
   freqRange,
   dataAtom,
   scaleMax,
-  maxTimeSlices,
   onPeakFrequency,
 }: {
   width: number;
@@ -20,7 +19,6 @@ export const Waterfall = ({
   freqRange: [number, number];
   dataAtom: Atom<number[]>;
   scaleMax?: number;
-  maxTimeSlices: number;
   onPeakFrequency: (freqHz: number) => void;
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -40,8 +38,8 @@ export const Waterfall = ({
   );
 
   const yScale = useMemo(
-    () => scaleLinear().domain([maxTimeSlices, 0]).range([innerHeight, 0]),
-    [innerHeight, maxTimeSlices]
+    () => scaleLinear().domain([SPECTROGRAM_MAX_TIME_SLICES, 0]).range([innerHeight, 0]),
+    [innerHeight]
   );
 
   useD3Axes({
@@ -49,7 +47,7 @@ export const Waterfall = ({
     width,
     height,
     xDomain: [freqRange[0], freqRange[1]],
-    yDomain: [maxTimeSlices, 0],
+    yDomain: [SPECTROGRAM_MAX_TIME_SLICES, 0],
     xTicks: 6,
     yTicks: 4,
     xTickFormat: (v) => `${Math.round(v)}`,
@@ -90,7 +88,7 @@ export const Waterfall = ({
         ref={canvasRef}
         width={width}
         height={height}
-        className="image-rendering-pixelated block border border-gray-300 bg-black"
+        className="image-rendering-pixelated block border bg-black"
       />
       <svg
         ref={svgRef}
@@ -105,7 +103,6 @@ export const Waterfall = ({
         freqRange={freqRange}
         dataAtom={dataAtom}
         scaleMax={scaleMax}
-        maxTimeSlices={maxTimeSlices}
         onPeakFrequency={onPeakFrequency}
       />
       <Tooltip hover={hover} />
@@ -120,7 +117,6 @@ const Waterfall_render = ({
   freqRange,
   dataAtom,
   scaleMax,
-  maxTimeSlices,
   onPeakFrequency,
 }: {
   canvasRef: RefObject<HTMLCanvasElement | null>;
@@ -129,7 +125,6 @@ const Waterfall_render = ({
   freqRange: [number, number];
   dataAtom: Atom<number[]>;
   scaleMax?: number;
-  maxTimeSlices: number;
   onPeakFrequency: (freqHz: number) => void;
 }) => {
   const spectrum = useAtomValue(dataAtom);
@@ -149,7 +144,7 @@ const Waterfall_render = ({
     const bottom = height - DEFAULT_AXIS_PADDING.bottom;
     const plotWidth = Math.max(1, right - left);
     const plotHeight = Math.max(1, bottom - top);
-    const yScale = plotHeight / maxTimeSlices;
+    const yScale = plotHeight / SPECTROGRAM_MAX_TIME_SLICES;
 
     const iMin = Math.max(0, Math.round((spectrum.length / (MAX_FREQ - MIN_FREQ)) * freqRange[0]));
     const iMax = Math.min(
@@ -202,17 +197,7 @@ const Waterfall_render = ({
     ctx.fillRect(left + (peakIdx - iMin) * freqBinWidth, y, freqBinWidth + 1, yScale);
 
     onPeakFrequency(peakIdx * ACTUAL_RESOLUTION);
-  }, [
-    width,
-    height,
-    spectrum,
-    freqRange,
-    scaleMax,
-    maxTimeSlices,
-    canvasRef,
-    dataAtom,
-    onPeakFrequency,
-  ]);
+  }, [width, height, spectrum, freqRange, scaleMax, canvasRef, dataAtom, onPeakFrequency]);
 
   return null;
 };

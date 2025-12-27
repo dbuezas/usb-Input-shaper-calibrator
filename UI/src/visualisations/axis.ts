@@ -3,15 +3,11 @@ import { select } from 'd3-selection';
 import { axisBottom, axisLeft } from 'd3-axis';
 import { scaleLinear } from 'd3-scale';
 import { format } from 'd3-format';
+import { VIS_AXIS_PADDING } from '@/constants';
 
-export const DEFAULT_AXIS_PADDING = {
-  left: 44,
-  right: 12,
-  top: 10,
-  bottom: 28,
-} as const;
+export const DEFAULT_AXIS_PADDING = VIS_AXIS_PADDING;
 
-export type AxisPadding = typeof DEFAULT_AXIS_PADDING;
+export type AxisPadding = typeof VIS_AXIS_PADDING;
 
 export const getInnerSize = ({
   width,

@@ -2,7 +2,14 @@ import { useEffect } from 'react';
 import type { SpectrumSliceMessage, WelchPsdSliceMessage } from './messages';
 import { spectrogramChannel } from './messages';
 import { atom, useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { ACTUAL_RESOLUTION, MAX_FREQUENCY_SLIDER, MIN_FREQUENCY_SLIDER } from './constants';
+import {
+  ACTUAL_RESOLUTION,
+  MAX_FREQUENCY_SLIDER,
+  MIN_FREQUENCY_SLIDER,
+  SPECTROGRAM_MAX_TIME_SLICES,
+  SPECTROGRAM_PLOT_WIDTH,
+  SPECTROGRAM_WATERFALL_HEIGHT,
+} from './constants';
 import { Slider } from './components/ui/slider';
 import type { DataSource } from './data-source';
 import { SpectrumPlot } from './visualisations/SpectrumPlot';
@@ -28,8 +35,6 @@ export const peakFrequencyAtom = atom((get) => {
   const peak = get(peakAtom);
   return peak ? peak.toFixed(1) : '';
 });
-
-const MAX_TIME_SLICES = 100;
 
 export function SpectrogramControls({ dataSource }: { dataSource?: DataSource }) {
   const [windowFunction, setWindowFunction] = useAtom(windowFunctionAtom);
@@ -138,8 +143,8 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
   const setSpectrogramScaleMax = useSetAtom(spectrogramScaleMaxAtom);
   const setWelchPsdScaleMax = useSetAtom(welchPsdScaleMaxAtom);
   const setPeak = useSetAtom(peakAtom);
-  const width = 800;
-  const height = 200;
+  const width = SPECTROGRAM_PLOT_WIDTH;
+  const height = SPECTROGRAM_WATERFALL_HEIGHT;
   const view = useAtomValue(viewAtom);
   const freqRange = useAtomValue(freqRangeAtom);
   const spectrogramScaleMax = useAtomValue(spectrogramScaleMaxAtom);
@@ -187,7 +192,7 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
 
   return (
     <div className="text-center">
-      <h3 className="mb-4 text-2xl font-semibold">Live Waterfall Spectrogram</h3>
+      <h3 className="mb-2 font-semibold">Live Waterfall Spectrogram</h3>
 
       <Waterfall
         height={height}
@@ -195,27 +200,26 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
         freqRange={freqRange}
         dataAtom={view === 'spectrum' ? spectrogramAtom : welchPsdAtom}
         scaleMax={activeScaleMax}
-        maxTimeSlices={MAX_TIME_SLICES}
         onPeakFrequency={(freqHz) => setPeak(freqHz)}
       />
       {view === 'spectrum' ? (
         <>
-          <h3 className="mt-10 mb-4 text-2xl font-semibold">Last Spectrum (Scatter)</h3>
+          <h3 className="mt-4 mb-2 font-semibold">Last Spectrum (Scatter)</h3>
           <SpectrumPlot
             dataAtom={spectrogramAtom}
-            height={Math.round(height / 2)}
+            height={height}
             width={width}
             freqRange={freqRange}
             mode="points"
             color="rgba(0, 220, 255, 0.9)"
             scaleMax={spectrogramScaleMax}
           />
-          <div className="mt-10 mb-4 flex items-center justify-center gap-3">
-            <h3 className="text-2xl font-semibold">Spectrum (Accumulated Max-Hold)</h3>
+          <div className="mt-4 mb-2 flex items-center justify-center gap-3">
+            <h3 className="font-semibold">Spectrum (Accumulated Max-Hold)</h3>
           </div>
           <SpectrumPlot
             dataAtom={spectrogramMaxHoldAtom}
-            height={Math.round(height / 2)}
+            height={height}
             width={width}
             freqRange={freqRange}
             mode="line"
@@ -225,10 +229,10 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
         </>
       ) : (
         <>
-          <h3 className="mt-10 mb-4 text-2xl font-semibold">Welch PSD (Scatter)</h3>
+          <h3 className="mt-4 mb-2 font-semibold">Welch PSD (Scatter)</h3>
           <SpectrumPlot
             dataAtom={welchPsdAtom}
-            height={Math.round(height / 2)}
+            height={height}
             width={width}
             freqRange={freqRange}
             mode="points"
@@ -236,12 +240,12 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
             dynamicRangeDb={80}
             scaleMax={welchPsdScaleMax}
           />
-          <div className="mt-10 mb-4 flex items-center justify-center gap-3">
-            <h3 className="text-2xl font-semibold">Welch PSD (Accumulated Max-Hold)</h3>
+          <div className="mt-4 mb-2 flex items-center justify-center gap-3">
+            <h3 className="font-semibold">Welch PSD (Accumulated Max-Hold)</h3>
           </div>
           <SpectrumPlot
             dataAtom={welchPsdMaxHoldAtom}
-            height={Math.round(height / 2)}
+            height={height}
             width={width}
             freqRange={freqRange}
             mode="line"
@@ -253,7 +257,7 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
       )}
       <div className="mt-2 flex flex-wrap justify-center gap-4 text-sm">
         <span>Resolution: {(ACTUAL_RESOLUTION || 1).toFixed(2)} Hz/bin</span>
-        <span>Time Slices: {MAX_TIME_SLICES}</span>
+        <span>Time Slices: {SPECTROGRAM_MAX_TIME_SLICES}</span>
       </div>
     </div>
   );

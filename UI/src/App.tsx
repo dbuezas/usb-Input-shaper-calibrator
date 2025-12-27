@@ -194,7 +194,7 @@ function App() {
         <div className="flex flex-wrap gap-4">{topTiles}</div>
 
         {isConnected ? (
-          <div className="mt-8">
+          <div className="mt-4">
             <Spectrogram dataSource={dataSource} />
           </div>
         ) : (

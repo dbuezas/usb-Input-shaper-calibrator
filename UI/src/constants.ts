@@ -58,6 +58,23 @@ export const MAX_FREQ = FIXED_SAMPLE_RATE / 2;
 export const MAX_FREQUENCY_SLIDER = 300; // could be `FIXED_SAMPLE_RATE / 2`
 export const MIN_FREQUENCY_SLIDER = 0;
 
+// === Visualisations ===
+
+// Shared plot padding used by canvas renders and D3 axis overlays.
+export const VIS_AXIS_PADDING = {
+  left: 44,
+  right: 12,
+  top: 10,
+  bottom: 28,
+} as const;
+
+// Default spectrogram plot dimensions.
+export const SPECTROGRAM_PLOT_WIDTH = 800;
+export const SPECTROGRAM_WATERFALL_HEIGHT = 200;
+
+// Number of historic rows shown in the waterfall.
+export const SPECTROGRAM_MAX_TIME_SLICES = 100;
+
 // === Simulation ===
 
 // Sweep parameters for `src/simulation-port.ts`.
@@ -66,4 +83,4 @@ export const SIMULATION_MAX_FREQUENCY = 200;
 export const SIMULATION_AMPLITUDE = 1000;
 
 // Seconds for a full sweep from min -> max before wrapping.
-export const SIMULATION_SWEEP_S = 5;
+export const SIMULATION_SWEEP_S = 20;

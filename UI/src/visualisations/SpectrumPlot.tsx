@@ -193,12 +193,7 @@ export const SpectrumPlot = ({
         });
       }}
     >
-      <canvas
-        ref={canvasRef}
-        width={width}
-        height={height}
-        className="block border border-gray-300 bg-black"
-      />
+      <canvas ref={canvasRef} width={width} height={height} className="block border bg-black" />
       <svg
         ref={svgRef}
         width={width}
