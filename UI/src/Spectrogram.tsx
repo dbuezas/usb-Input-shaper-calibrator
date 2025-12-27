@@ -1,7 +1,7 @@
-import { useRef, useEffect, useState, type RefObject } from 'react';
+import { useRef, useEffect, type RefObject } from 'react';
 import type { SpectrumSliceMessage, WelchPsdSliceMessage } from './messages';
 import { spectrogramChannel } from './messages';
-import { atom, useAtomValue, useSetAtom, type Atom } from 'jotai';
+import { atom, useAtom, useAtomValue, useSetAtom, type Atom } from 'jotai';
 import {
   ACTUAL_RESOLUTION,
   MAX_FREQ,
@@ -12,12 +12,16 @@ import {
 import { Slider } from './components/ui/slider';
 import type { DataSource } from './data-source';
 import type { WindowFunctionType } from './messages';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Button } from '@/components/ui/button';
 
 const spectrogramAtom = atom<number[]>([]);
 const spectrogramMaxHoldAtom = atom<number[]>([]);
 const welchPsdAtom = atom<number[]>([]);
 const welchPsdMaxHoldAtom = atom<number[]>([]);
+
+const windowFunctionAtom = atom<WindowFunctionType>('hann');
+const viewAtom = atom<'spectrum' | 'welch'>('welch');
+const freqRangeAtom = atom<[number, number]>([MIN_FREQUENCY_SLIDER, MAX_FREQUENCY_SLIDER]);
 type PeakInfo = {
   frequency: number;
   magnitude: number;
@@ -263,19 +267,117 @@ const Waterfall_render = ({
   return <></>;
 };
 
-function Spectrogram({ dataSource }: { dataSource?: DataSource }) {
+export function SpectrogramControls({ dataSource }: { dataSource?: DataSource }) {
+  const [windowFunction, setWindowFunction] = useAtom(windowFunctionAtom);
+  const [view, setView] = useAtom(viewAtom);
+  const [freqRange, setFreqRange] = useAtom(freqRangeAtom);
+  const setSpectrogramMaxHold = useSetAtom(spectrogramMaxHoldAtom);
+  const setWelchPsdMaxHold = useSetAtom(welchPsdMaxHoldAtom);
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div>
+        <div className="text-muted-foreground text-sm">Window</div>
+        <div className="border-border mt-2 inline-flex flex-wrap gap-1 rounded-md border p-1">
+          {(
+            [
+              { value: 'hann', label: 'Hann' },
+              { value: 'hamming', label: 'Hamming' },
+              { value: 'blackman', label: 'Blackman' },
+              { value: 'rectangular', label: 'Rectangular' },
+            ] as const
+          ).map((opt) => (
+            <Button
+              key={opt.value}
+              type="button"
+              size="sm"
+              variant={windowFunction === opt.value ? 'secondary' : 'ghost'}
+              className="h-8"
+              aria-pressed={windowFunction === opt.value}
+              onClick={() => {
+                setWindowFunction(opt.value);
+                dataSource?.setWindowFunction(opt.value);
+              }}
+            >
+              {opt.label}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="text-muted-foreground text-sm">View</div>
+        <div className="border-border mt-2 inline-flex rounded-md border p-1">
+          {(
+            [
+              { value: 'spectrum', label: 'Spectrum' },
+              { value: 'welch', label: 'Welch PSD' },
+            ] as const
+          ).map((opt) => (
+            <Button
+              key={opt.value}
+              type="button"
+              size="sm"
+              variant={view === opt.value ? 'secondary' : 'ghost'}
+              className="h-8"
+              aria-pressed={view === opt.value}
+              onClick={() => setView(opt.value)}
+            >
+              {opt.label}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <label htmlFor="frequency-slider" className="text-muted-foreground text-sm">
+          Frequency Range: {freqRange[0]}-{freqRange[1]} Hz
+        </label>
+        <div className="mt-3">
+          <Slider
+            id="frequency-slider"
+            min={MIN_FREQUENCY_SLIDER}
+            max={MAX_FREQUENCY_SLIDER}
+            step={1}
+            value={freqRange}
+            onValueChange={(v: [number, number]) => setFreqRange(v)}
+            className="w-full"
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {view === 'spectrum' ? (
+          <button
+            type="button"
+            className="bg-muted text-foreground hover:bg-muted/80 inline-flex items-center rounded-md px-3 py-2 text-sm"
+            onClick={() => setSpectrogramMaxHold([])}
+          >
+            Clear Spectrum Max-Hold
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="bg-muted text-foreground hover:bg-muted/80 inline-flex items-center rounded-md px-3 py-2 text-sm"
+            onClick={() => setWelchPsdMaxHold([])}
+          >
+            Clear Welch Max-Hold
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
   const setSpectrogram = useSetAtom(spectrogramAtom);
   const setSpectrogramMaxHold = useSetAtom(spectrogramMaxHoldAtom);
   const setWelchPsd = useSetAtom(welchPsdAtom);
   const setWelchPsdMaxHold = useSetAtom(welchPsdMaxHoldAtom);
   const width = 800;
   const height = 400;
-  const [windowFunction, setWindowFunction] = useState<WindowFunctionType>('hann');
-  const [view, setView] = useState<'spectrum' | 'welch'>('welch');
-  const [freqRange, setFreqRange] = useState([MIN_FREQUENCY_SLIDER, MAX_FREQUENCY_SLIDER] as [
-    number,
-    number,
-  ]);
+  const view = useAtomValue(viewAtom);
+  const freqRange = useAtomValue(freqRangeAtom);
   useEffect(() => {
     const handleMessage = (e: MessageEvent<SpectrumSliceMessage | WelchPsdSliceMessage>) => {
       const msg = e.data;
@@ -308,69 +410,6 @@ function Spectrogram({ dataSource }: { dataSource?: DataSource }) {
 
   return (
     <div className="text-center">
-      <div className="mb-6 flex flex-col items-center justify-center gap-3">
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-600">Window:</span>
-          <RadioGroup
-            className="flex flex-wrap items-center justify-center gap-4"
-            value={windowFunction}
-            onValueChange={(value) => {
-              const next = value as WindowFunctionType;
-              setWindowFunction(next);
-              dataSource?.setWindowFunction(next);
-            }}
-          >
-            <label className="flex cursor-pointer items-center gap-2 text-sm">
-              <RadioGroupItem value="hann" />
-              Hann
-            </label>
-            <label className="flex cursor-pointer items-center gap-2 text-sm">
-              <RadioGroupItem value="hamming" />
-              Hamming
-            </label>
-            <label className="flex cursor-pointer items-center gap-2 text-sm">
-              <RadioGroupItem value="blackman" />
-              Blackman
-            </label>
-            <label className="flex cursor-pointer items-center gap-2 text-sm">
-              <RadioGroupItem value="rectangular" />
-              Rectangular
-            </label>
-          </RadioGroup>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-600">View:</span>
-          <RadioGroup
-            className="flex items-center gap-4"
-            value={view}
-            onValueChange={(value) => setView(value as 'spectrum' | 'welch')}
-          >
-            <label className="flex cursor-pointer items-center gap-2 text-sm">
-              <RadioGroupItem value="spectrum" />
-              Spectrum
-            </label>
-            <label className="flex cursor-pointer items-center gap-2 text-sm">
-              <RadioGroupItem value="welch" />
-              Welch PSD
-            </label>
-          </RadioGroup>
-        </div>
-      </div>
-      <div className="mb-8 flex w-full flex-col items-stretch gap-6">
-        <label htmlFor="frequency-slider" className="mb-1 text-sm">
-          Frequency Range: {freqRange[0]}-{freqRange[1]} Hz
-        </label>
-        <Slider
-          id="frequency-slider"
-          min={MIN_FREQUENCY_SLIDER}
-          max={MAX_FREQUENCY_SLIDER}
-          step={1}
-          value={freqRange}
-          onValueChange={(v: [number, number]) => setFreqRange(v)}
-          className="w-full"
-        />
-      </div>
       <h3 className="mb-4 text-2xl font-semibold">Live Waterfall Spectrogram</h3>
 
       <Waterfall height={height} width={width} freqRange={freqRange} />
@@ -387,13 +426,6 @@ function Spectrogram({ dataSource }: { dataSource?: DataSource }) {
           />
           <div className="mt-10 mb-4 flex items-center justify-center gap-3">
             <h3 className="text-2xl font-semibold">Spectrum (Accumulated Max-Hold)</h3>
-            <button
-              type="button"
-              className="rounded bg-gray-800 px-3 py-1 text-sm text-white hover:bg-gray-700"
-              onClick={() => setSpectrogramMaxHold([])}
-            >
-              Clear
-            </button>
           </div>
           <SpectrumPlot
             dataAtom={spectrogramMaxHoldAtom}
@@ -418,13 +450,6 @@ function Spectrogram({ dataSource }: { dataSource?: DataSource }) {
           />
           <div className="mt-10 mb-4 flex items-center justify-center gap-3">
             <h3 className="text-2xl font-semibold">Welch PSD (Accumulated Max-Hold)</h3>
-            <button
-              type="button"
-              className="rounded bg-gray-800 px-3 py-1 text-sm text-white hover:bg-gray-700"
-              onClick={() => setWelchPsdMaxHold([])}
-            >
-              Clear
-            </button>
           </div>
           <SpectrumPlot
             dataAtom={welchPsdMaxHoldAtom}

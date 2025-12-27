@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
 import { atom, useAtomValue, useSetAtom } from 'jotai';
-import Spectrogram from './Spectrogram';
+import Spectrogram, { SpectrogramControls } from './Spectrogram';
 import type { DataSource } from './data-source';
 import { SerialDataSource } from './data-source';
 import { SimulationPort } from './simulation-port';
 import { Button } from '@/components/ui/button';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 
 type Mode = 'simulation' | 'usb';
 
@@ -96,25 +95,33 @@ function App() {
         {isConnected && (
           <div className="mt-6">
             <div className="text-muted-foreground text-sm">Axis</div>
-            <RadioGroup
-              className="mt-2 flex items-center gap-4"
-              value={selectedAxis}
-              onValueChange={(value) => {
-                const axis = value as 'x' | 'y' | 'z';
-                setSelectedAxis(axis);
-                dataSource?.setSelectedAxis(axis);
-              }}
-            >
-              <label className="flex cursor-pointer items-center gap-2 text-sm">
-                <RadioGroupItem value="x" />X
-              </label>
-              <label className="flex cursor-pointer items-center gap-2 text-sm">
-                <RadioGroupItem value="y" />Y
-              </label>
-              <label className="flex cursor-pointer items-center gap-2 text-sm">
-                <RadioGroupItem value="z" />Z
-              </label>
-            </RadioGroup>
+            <div className="border-border mt-2 inline-flex rounded-md border p-1">
+              {(['x', 'y', 'z'] as const).map((axis) => (
+                <Button
+                  key={axis}
+                  type="button"
+                  size="sm"
+                  variant={selectedAxis === axis ? 'secondary' : 'ghost'}
+                  className="h-8 px-3"
+                  aria-pressed={selectedAxis === axis}
+                  onClick={() => {
+                    setSelectedAxis(axis);
+                    dataSource?.setSelectedAxis(axis);
+                  }}
+                >
+                  {axis.toUpperCase()}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {isConnected && (
+          <div className="mt-8">
+            <div className="text-muted-foreground text-sm">Spectrogram</div>
+            <div className="mt-3">
+              <SpectrogramControls dataSource={dataSource} />
+            </div>
           </div>
         )}
 
