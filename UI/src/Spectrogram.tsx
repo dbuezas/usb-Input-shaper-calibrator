@@ -18,9 +18,9 @@ import type { WindowFunctionType } from './messages';
 import { Button } from '@/components/ui/button';
 
 const spectrogramAtom = atom<number[]>([]);
-const spectrogramMaxHoldAtom = atom<number[]>([]);
+export const spectrogramMaxHoldAtom = atom<number[]>([]);
 const welchPsdAtom = atom<number[]>([]);
-const welchPsdMaxHoldAtom = atom<number[]>([]);
+export const welchPsdMaxHoldAtom = atom<number[]>([]);
 
 const spectrogramScaleMaxAtom = atom<number | undefined>(undefined);
 const welchPsdScaleMaxAtom = atom<number | undefined>(undefined);
