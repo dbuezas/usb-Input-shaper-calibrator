@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react';
 import { atom, useAtomValue, useSetAtom, type Atom } from 'jotai';
 import { atomFamily } from 'jotai/utils';
-import Spectrogram, { SpectrogramControls, peakFrequencyAtom } from './Spectrogram';
+import Spectrogram, {
+  SpectrogramControls,
+  historicPeakFrequencyAtom,
+  peakFrequencyAtom,
+} from './Spectrogram';
 import type { DataSource } from './data-source';
 import { SerialDataSource } from './data-source';
 import { SimulationPort } from './simulation-port';
@@ -23,6 +27,7 @@ const formattedAxisValueAtom = atomFamily((i: number) =>
 
 const formattedFrequencyAtom = atom((get) => get(frequencyAtom).toFixed(1));
 const formattedPeakFrequencyAtom = atom((get) => get(peakFrequencyAtom));
+const formattedHistoricPeakFrequencyAtom = atom((get) => get(historicPeakFrequencyAtom));
 
 const AtomValue = ({ atom }: { atom: Atom<string> }) => {
   const value = useAtomValue(atom);
@@ -78,7 +83,19 @@ function App() {
         title: 'Peak',
         value: (
           <>
-            <AtomValue atom={formattedPeakFrequencyAtom} /> Hz
+            <div>
+              <span className="tabular-nums">
+                <AtomValue atom={formattedPeakFrequencyAtom} />
+              </span>{' '}
+              Hz
+            </div>
+            <div className="text-muted-foreground mt-1 text-xs">
+              max-hold:{' '}
+              <span className="tabular-nums">
+                <AtomValue atom={formattedHistoricPeakFrequencyAtom} />
+              </span>{' '}
+              Hz
+            </div>
           </>
         ),
       },

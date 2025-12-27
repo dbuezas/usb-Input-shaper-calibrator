@@ -30,9 +30,15 @@ const viewAtom = atom<'spectrum' | 'welch'>('welch');
 const freqRangeAtom = atom<[number, number]>([MIN_FREQUENCY_SLIDER, MAX_FREQUENCY_SLIDER]);
 
 const peakAtom = atom<number>();
+const historicPeakAtom = atom<number>();
 
 export const peakFrequencyAtom = atom((get) => {
   const peak = get(peakAtom);
+  return peak ? peak.toFixed(1) : '';
+});
+
+export const historicPeakFrequencyAtom = atom((get) => {
+  const peak = get(historicPeakAtom);
   return peak ? peak.toFixed(1) : '';
 });
 
@@ -44,6 +50,7 @@ export function SpectrogramControls({ dataSource }: { dataSource?: DataSource })
   const setWelchPsdMaxHold = useSetAtom(welchPsdMaxHoldAtom);
   const setSpectrogramScaleMax = useSetAtom(spectrogramScaleMaxAtom);
   const setWelchPsdScaleMax = useSetAtom(welchPsdScaleMaxAtom);
+  const setHistoricPeak = useSetAtom(historicPeakAtom);
 
   return (
     <div className="flex flex-col gap-5">
@@ -126,6 +133,7 @@ export function SpectrogramControls({ dataSource }: { dataSource?: DataSource })
             setWelchPsdMaxHold([]);
             setSpectrogramScaleMax(undefined);
             setWelchPsdScaleMax(undefined);
+            setHistoricPeak(undefined);
           }}
         >
           Clear Max-Hold
@@ -135,6 +143,27 @@ export function SpectrogramControls({ dataSource }: { dataSource?: DataSource })
   );
 }
 
+const peakFromSeries = (series: number[]) => {
+  let max = Number.NEGATIVE_INFINITY;
+  let peakIdx = -1;
+  for (let i = 0; i < series.length; i++) {
+    const v = series[i];
+    if (v > max) {
+      max = v;
+      peakIdx = i;
+    }
+  }
+  if (peakIdx < 0) return undefined;
+  return peakIdx * ACTUAL_RESOLUTION;
+};
+
+const updateMaxHold = (prev: number[] | undefined, nextSlice: number[]) => {
+  if (!prev?.length || prev.length !== nextSlice.length) return [...nextSlice];
+  const next = prev.slice();
+  for (let i = 0; i < nextSlice.length; i++) next[i] = Math.max(next[i], nextSlice[i]);
+  return next;
+};
+
 function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
   const setSpectrogram = useSetAtom(spectrogramAtom);
   const setSpectrogramMaxHold = useSetAtom(spectrogramMaxHoldAtom);
@@ -143,6 +172,7 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
   const setSpectrogramScaleMax = useSetAtom(spectrogramScaleMaxAtom);
   const setWelchPsdScaleMax = useSetAtom(welchPsdScaleMaxAtom);
   const setPeak = useSetAtom(peakAtom);
+  const setHistoricPeak = useSetAtom(historicPeakAtom);
   const width = SPECTROGRAM_PLOT_WIDTH;
   const height = SPECTROGRAM_WATERFALL_HEIGHT;
   const view = useAtomValue(viewAtom);
@@ -161,10 +191,8 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
           return next === Number.NEGATIVE_INFINITY ? undefined : next;
         });
         setSpectrogramMaxHold((prev) => {
-          if (!prev?.length || prev.length !== msg.spectrum.length) return [...msg.spectrum];
-          const next = prev.slice();
-          for (let i = 0; i < msg.spectrum.length; i++)
-            next[i] = Math.max(next[i], msg.spectrum[i]);
+          const next = updateMaxHold(prev, msg.spectrum);
+          setHistoricPeak(peakFromSeries(next));
           return next;
         });
       }
@@ -176,9 +204,8 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
           return next === Number.NEGATIVE_INFINITY ? undefined : next;
         });
         setWelchPsdMaxHold((prev) => {
-          if (!prev?.length || prev.length !== msg.psd.length) return [...msg.psd];
-          const next = prev.slice();
-          for (let i = 0; i < msg.psd.length; i++) next[i] = Math.max(next[i], msg.psd[i]);
+          const next = updateMaxHold(prev, msg.psd);
+          setHistoricPeak(peakFromSeries(next));
           return next;
         });
       }
@@ -206,24 +233,21 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
         <>
           <h3 className="mt-4 mb-2 font-semibold">Last Spectrum (Scatter)</h3>
           <SpectrumPlot
-            dataAtom={spectrogramAtom}
+            traces={[
+              {
+                dataAtom: spectrogramAtom,
+                mode: 'points',
+                color: 'rgba(0, 220, 255, 0.9)',
+              },
+              {
+                dataAtom: spectrogramMaxHoldAtom,
+                mode: 'line',
+                color: 'rgba(0, 220, 255, 0.55)',
+              },
+            ]}
             height={height}
             width={width}
             freqRange={freqRange}
-            mode="points"
-            color="rgba(0, 220, 255, 0.9)"
-            scaleMax={spectrogramScaleMax}
-          />
-          <div className="mt-4 mb-2 flex items-center justify-center gap-3">
-            <h3 className="font-semibold">Spectrum (Accumulated Max-Hold)</h3>
-          </div>
-          <SpectrumPlot
-            dataAtom={spectrogramMaxHoldAtom}
-            height={height}
-            width={width}
-            freqRange={freqRange}
-            mode="line"
-            color="rgba(0, 220, 255, 0.9)"
             scaleMax={spectrogramScaleMax}
           />
         </>
@@ -231,25 +255,21 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
         <>
           <h3 className="mt-4 mb-2 font-semibold">Welch PSD (Scatter)</h3>
           <SpectrumPlot
-            dataAtom={welchPsdAtom}
+            traces={[
+              {
+                dataAtom: welchPsdAtom,
+                mode: 'points',
+                color: 'rgba(255, 180, 0, 0.9)',
+              },
+              {
+                dataAtom: welchPsdMaxHoldAtom,
+                mode: 'line',
+                color: 'rgba(255, 80, 80, 0.95)',
+              },
+            ]}
             height={height}
             width={width}
             freqRange={freqRange}
-            mode="points"
-            color="rgba(255, 180, 0, 0.9)"
-            dynamicRangeDb={80}
-            scaleMax={welchPsdScaleMax}
-          />
-          <div className="mt-4 mb-2 flex items-center justify-center gap-3">
-            <h3 className="font-semibold">Welch PSD (Accumulated Max-Hold)</h3>
-          </div>
-          <SpectrumPlot
-            dataAtom={welchPsdMaxHoldAtom}
-            height={height}
-            width={width}
-            freqRange={freqRange}
-            mode="line"
-            color="rgba(255, 80, 80, 0.95)"
             dynamicRangeDb={80}
             scaleMax={welchPsdScaleMax}
           />

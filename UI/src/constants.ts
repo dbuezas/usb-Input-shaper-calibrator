@@ -70,7 +70,7 @@ export const VIS_AXIS_PADDING = {
 
 // Default spectrogram plot dimensions.
 export const SPECTROGRAM_PLOT_WIDTH = 800;
-export const SPECTROGRAM_WATERFALL_HEIGHT = 200;
+export const SPECTROGRAM_WATERFALL_HEIGHT = 300;
 
 // Number of historic rows shown in the waterfall.
 export const SPECTROGRAM_MAX_TIME_SLICES = 100;

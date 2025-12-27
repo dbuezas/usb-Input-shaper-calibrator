@@ -9,30 +9,35 @@ import { MAX_FREQ, MIN_FREQ } from '@/constants';
 
 export type SpectrumPlotMode = 'points' | 'line';
 
+export type SpectrumPlotTrace = {
+  dataAtom: Atom<number[]>;
+  mode: SpectrumPlotMode;
+  color: string;
+};
+
 const SpectrumPlot_render = ({
   canvasRef,
-  dataAtom,
+  traces,
   width,
   height,
   freqRange,
-  mode,
-  color,
   scaleMax,
   dynamicRangeDb,
 }: {
   canvasRef: RefObject<HTMLCanvasElement | null>;
-  dataAtom: Atom<number[]>;
+  traces: SpectrumPlotTrace[];
   width: number;
   height: number;
   freqRange: [number, number];
-  mode: SpectrumPlotMode;
-  color: string;
   scaleMax?: number;
   dynamicRangeDb?: number;
 }) => {
-  const data = useAtomValue(dataAtom);
+  const datasets = traces.map(({ dataAtom }) => useAtomValue(dataAtom));
 
   useEffect(() => {
+    if (!traces.length) return;
+
+    const data = datasets[0];
     if (!data?.length) return;
 
     const canvas = canvasRef.current;
@@ -51,9 +56,14 @@ const SpectrumPlot_render = ({
     let min = Number.POSITIVE_INFINITY;
     let max = Number.NEGATIVE_INFINITY;
 
-    for (let i = iMin; i < iMax; i++) {
-      min = Math.min(min, data[i]);
-      max = Math.max(max, data[i]);
+    for (const series of datasets) {
+      if (!series?.length) continue;
+      if (series.length !== data.length) continue;
+
+      for (let i = iMin; i < iMax; i++) {
+        min = Math.min(min, series[i]);
+        max = Math.max(max, series[i]);
+      }
     }
     if (scaleMax != null) max = Math.max(max, scaleMax);
     if (dynamicRangeDb && dynamicRangeDb > 0) min = max - dynamicRangeDb;
@@ -73,53 +83,58 @@ const SpectrumPlot_render = ({
     const bottom = height - DEFAULT_AXIS_PADDING.bottom;
     const xScale = innerWidth / (iMax - iMin);
 
-    ctx.strokeStyle = color;
-    ctx.fillStyle = color;
+    for (let t = 0; t < traces.length; t++) {
+      const trace = traces[t];
+      if (!trace) continue;
 
-    if (mode === 'line') {
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
+      const series = datasets[t];
+      if (!series?.length) continue;
+      if (series.length !== data.length) continue;
+
+      ctx.strokeStyle = trace.color;
+      ctx.fillStyle = trace.color;
+
+      if (trace.mode === 'line') {
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        for (let i = iMin; i < iMax; i++) {
+          const norm = (series[i] - min) / safeRange;
+          const x = left + (i - iMin) * xScale;
+          const y = bottom - norm * innerHeight;
+          if (i === iMin) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        continue;
+      }
+
+      const pointRadius = 1.2;
       for (let i = iMin; i < iMax; i++) {
-        const norm = (data[i] - min) / safeRange;
+        const norm = (series[i] - min) / safeRange;
         const x = left + (i - iMin) * xScale;
         const y = bottom - norm * innerHeight;
-        if (i === iMin) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+        ctx.beginPath();
+        ctx.arc(x, y, pointRadius, 0, Math.PI * 2);
+        ctx.fill();
       }
-      ctx.stroke();
-      return;
     }
-
-    const pointRadius = 1.2;
-    for (let i = iMin; i < iMax; i++) {
-      const norm = (data[i] - min) / safeRange;
-      const x = left + (i - iMin) * xScale;
-      const y = bottom - norm * innerHeight;
-      ctx.beginPath();
-      ctx.arc(x, y, pointRadius, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }, [width, height, data, freqRange, mode, color, dynamicRangeDb, scaleMax, canvasRef, dataAtom]);
+  }, [width, height, datasets, freqRange, traces, dynamicRangeDb, scaleMax, canvasRef]);
 
   return null;
 };
 
 export const SpectrumPlot = ({
-  dataAtom,
+  traces,
   width,
   height,
   freqRange,
-  mode,
-  color,
   scaleMax,
   dynamicRangeDb,
 }: {
-  dataAtom: Atom<number[]>;
+  traces: SpectrumPlotTrace[];
   width: number;
   height: number;
   freqRange: [number, number];
-  mode: SpectrumPlotMode;
-  color: string;
   scaleMax?: number;
   dynamicRangeDb?: number;
 }) => {
@@ -202,12 +217,10 @@ export const SpectrumPlot = ({
       />
       <SpectrumPlot_render
         canvasRef={canvasRef}
-        dataAtom={dataAtom}
+        traces={traces}
         width={width}
         height={height}
         freqRange={freqRange}
-        mode={mode}
-        color={color}
         scaleMax={scaleMax}
         dynamicRangeDb={dynamicRangeDb}
       />

@@ -30,6 +30,26 @@ export class SimulationPort {
   private t = 0;
   private simulationFrequency = SIMULATION_MIN_FREQUENCY;
 
+  // Simple 2nd-order resonator (biquad) state to emulate a printer axis response.
+  // We drive the system with a swept sine (input), then observe a resonant response
+  // centered at RESONANCE_HZ.
+  private readonly resonance = {
+    // Target resonance frequency (Hz)
+    f0Hz: 55,
+    // Controls peak sharpness; higher Q => narrower peak.
+    q: 8,
+    // Biquad coefficients (band-pass, constant skirt gain; peak gain = Q)
+    b0: 0,
+    b1: 0,
+    b2: 0,
+    a1: 0,
+    a2: 0,
+    // Direct Form 2 Transposed states per axis
+    x: { z1: 0, z2: 0 },
+    y: { z1: 0, z2: 0 },
+    z: { z1: 0, z2: 0 },
+  };
+
   // Used to carry a partially-written 6-byte frame across chunks.
   private pendingFrame: Uint8Array | null = null;
   private pendingFrameIndex = 0;
@@ -62,7 +82,50 @@ export class SimulationPort {
     this.pendingFrame = null;
     this.pendingFrameIndex = 0;
 
+    this.resetResonator();
+
     this.pumpPromise = this.pump();
+  }
+
+  private resetResonator() {
+    const { f0Hz, q } = this.resonance;
+
+    // RBJ biquad cookbook (band-pass, constant skirt gain; peak gain = Q)
+    const w0 = (2 * Math.PI * f0Hz) / FIXED_SAMPLE_RATE;
+    const cosw0 = Math.cos(w0);
+    const sinw0 = Math.sin(w0);
+    const alpha = sinw0 / (2 * q);
+
+    const b0 = alpha;
+    const b1 = 0;
+    const b2 = -alpha;
+    const a0 = 1 + alpha;
+    const a1 = -2 * cosw0;
+    const a2 = 1 - alpha;
+
+    // Normalize so a0 = 1
+    this.resonance.b0 = b0 / a0;
+    this.resonance.b1 = b1 / a0;
+    this.resonance.b2 = b2 / a0;
+    this.resonance.a1 = a1 / a0;
+    this.resonance.a2 = a2 / a0;
+
+    this.resonance.x.z1 = 0;
+    this.resonance.x.z2 = 0;
+    this.resonance.y.z1 = 0;
+    this.resonance.y.z2 = 0;
+    this.resonance.z.z1 = 0;
+    this.resonance.z.z2 = 0;
+  }
+
+  private resonatorStep(input: number, state: { z1: number; z2: number }): number {
+    const { b0, b1, b2, a1, a2 } = this.resonance;
+
+    // Direct Form II Transposed
+    const y = b0 * input + state.z1;
+    state.z1 = b1 * input - a1 * y + state.z2;
+    state.z2 = b2 * input - a2 * y;
+    return y;
   }
 
   async close(): Promise<void> {
@@ -89,22 +152,23 @@ export class SimulationPort {
     // Phase-accurate integration
     this.t += (2 * Math.PI * this.simulationFrequency) / FIXED_SAMPLE_RATE;
 
-    const amplitude = Math.pow(
-      Math.sin(
-        (Math.PI * this.simulationFrequency) / (SIMULATION_MAX_FREQUENCY - SIMULATION_MIN_FREQUENCY)
-      ),
-      2
-    );
-    const v = Math.sin(this.t) * amplitude * SIMULATION_AMPLITUDE;
-    const value = Math.round(v);
+    // Input excitation: swept sine of constant amplitude.
+    // The observed signal is the resonator's response, which peaks near 55Hz.
+    const drive = Math.sin(this.t) * SIMULATION_AMPLITUDE;
+
+    // Axis responses: slightly different gains and independent noise, but same resonance.
+    // This mimics how a printer's accelerometer axes respond differently.
+    const respX = this.resonatorStep(drive, this.resonance.x) * 1.0;
+    const respY = this.resonatorStep(drive, this.resonance.y) * 0.85;
+    const respZ = this.resonatorStep(drive, this.resonance.z) * 0.65;
 
     // Add purely random noise (independent per axis).
     // Noise level is fixed relative to the configured simulation amplitude,
     // so low-amplitude parts of the sweep still have the same noise floor.
-    const noiseStd = SIMULATION_AMPLITUDE * 0.15;
-    const valueX = clampInt16(Math.round(value + randomNormal() * noiseStd));
-    const valueY = clampInt16(Math.round(value + randomNormal() * noiseStd));
-    const valueZ = clampInt16(Math.round(value + randomNormal() * noiseStd));
+    const noiseStd = SIMULATION_AMPLITUDE * 0.12;
+    const valueX = clampInt16(Math.round(respX + randomNormal() * noiseStd));
+    const valueY = clampInt16(Math.round(respY + randomNormal() * noiseStd));
+    const valueZ = clampInt16(Math.round(respZ + randomNormal() * noiseStd));
 
     const simulatedData = new Int16Array([valueX, valueY, valueZ]);
 
