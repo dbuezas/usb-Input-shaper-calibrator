@@ -3,6 +3,7 @@ import {
   spectrogramChannel,
   type RawDataMessage,
   type SpectrumSliceMessage,
+  type WelchPsdSliceMessage,
 } from './messages';
 import { CircularBuffer } from './circular-buffer';
 import {
@@ -60,13 +61,6 @@ function fft(re: number[], im: number[]): void {
   }
 }
 
-function _hammingWindow(size: number): number[] {
-  const window: number[] = new Array(size);
-  for (let i = 0; i < size; i++) {
-    window[i] = 0.54 - 0.46 * Math.cos((2 * Math.PI * i) / (size - 1));
-  }
-  return window;
-}
 function hannWindow(size: number): number[] {
   const window: number[] = new Array(size);
 
@@ -78,6 +72,103 @@ function windowSum(w: number[]): number {
   let s = 0;
   for (let i = 0; i < w.length; i++) s += w[i];
   return s;
+}
+
+function windowSumSquares(w: number[]): number {
+  let s = 0;
+  for (let i = 0; i < w.length; i++) s += w[i] * w[i];
+  return s;
+}
+
+class WelchSpectrogramProcessor {
+  buffer: number[];
+  bufferIndex: number;
+  windows: number[];
+  windowSum: number;
+  windowSumSquares: number;
+  re: number[];
+  im: number[];
+  spectrumDb: number[];
+
+  // Welch averaging over the last N (overlapped) periodograms
+  avgCount: number;
+  avgWriteIndex: number;
+  periodogramRing: Float64Array[];
+  periodogramSum: Float64Array;
+
+  constructor() {
+    this.buffer = new Array(WINDOW_SIZE).fill(0);
+    this.bufferIndex = 0;
+    this.windows = hannWindow(WINDOW_SIZE); //hammingWindow(WINDOW_SIZE);
+    this.windowSum = windowSum(this.windows);
+    this.windowSumSquares = windowSumSquares(this.windows);
+    this.re = new Array(WINDOW_SIZE);
+    this.im = new Array(WINDOW_SIZE);
+    this.spectrumDb = new Array(WINDOW_SIZE / 2);
+
+    // A small, fixed Welch average keeps CPU predictable while reducing noise.
+    this.avgCount = 8;
+    this.avgWriteIndex = 0;
+    this.periodogramRing = [];
+    this.periodogramSum = new Float64Array(WINDOW_SIZE / 2);
+    console.log('new');
+  }
+
+  addSample(value: number): void {
+    this.buffer[this.bufferIndex] = value;
+    this.bufferIndex = (this.bufferIndex + 1) % WINDOW_SIZE;
+
+    if (this.bufferIndex % HOP_SIZE === 0) {
+      this.computeSpectrogram();
+    }
+  }
+
+  computeSpectrogram(): void {
+    for (let i = 0; i < WINDOW_SIZE; i++) {
+      const idx = (this.bufferIndex + i) % WINDOW_SIZE;
+      this.re[i] = this.buffer[idx] * this.windows[i];
+      this.im[i] = 0;
+    }
+
+    fft(this.re, this.im);
+
+    // Periodogram -> PSD scaling (one-sided), then Welch average, then dB.
+    // U is the window power normalization factor.
+    const U = this.windowSumSquares / WINDOW_SIZE;
+    const baseScale = 1 / (FIXED_SAMPLE_RATE * WINDOW_SIZE * U);
+    const halfBins = WINDOW_SIZE / 2;
+    const periodogram = new Float64Array(halfBins);
+
+    // DC bin (not doubled in one-sided PSD)
+    periodogram[0] = (this.re[0] * this.re[0] + this.im[0] * this.im[0]) * baseScale;
+    for (let k = 1; k < halfBins; k++) {
+      const power = this.re[k] * this.re[k] + this.im[k] * this.im[k];
+      periodogram[k] = power * baseScale * 2;
+    }
+
+    // Maintain rolling Welch average of the last avgCount periodograms.
+    if (this.periodogramRing.length < this.avgCount) {
+      this.periodogramRing.push(periodogram);
+      for (let k = 0; k < halfBins; k++) this.periodogramSum[k] += periodogram[k];
+    } else {
+      const old = this.periodogramRing[this.avgWriteIndex];
+      for (let k = 0; k < halfBins; k++) this.periodogramSum[k] += periodogram[k] - old[k];
+      this.periodogramRing[this.avgWriteIndex] = periodogram;
+      this.avgWriteIndex = (this.avgWriteIndex + 1) % this.avgCount;
+    }
+
+    const denom = this.periodogramRing.length;
+    const eps = 1e-30;
+    for (let k = 0; k < halfBins; k++) {
+      const avgPxx = this.periodogramSum[k] / denom;
+      this.spectrumDb[k] = 10 * Math.log10(avgPxx + eps);
+    }
+
+    spectrogramChannel.postMessage({
+      type: 'welchPsdSlice',
+      psd: this.spectrumDb,
+    } satisfies WelchPsdSliceMessage);
+  }
 }
 
 class WaterfallSpectrogramProcessor {
@@ -92,12 +183,11 @@ class WaterfallSpectrogramProcessor {
   constructor() {
     this.buffer = new Array(WINDOW_SIZE).fill(0);
     this.bufferIndex = 0;
-    this.windows = hannWindow(WINDOW_SIZE); //hammingWindow(WINDOW_SIZE);
+    this.windows = hannWindow(WINDOW_SIZE);
     this.windowSum = windowSum(this.windows);
     this.re = new Array(WINDOW_SIZE);
     this.im = new Array(WINDOW_SIZE);
     this.magnitudes = new Array(WINDOW_SIZE / 2);
-    console.log('new');
   }
 
   addSample(value: number): void {
@@ -139,6 +229,7 @@ class DataProcessor {
   frequency: number;
   lastData: SensorData;
   currentProcessor: WaterfallSpectrogramProcessor | null;
+  welchProcessor: WelchSpectrogramProcessor | null;
   selectedAxis: 'x' | 'y' | 'z';
   lastSent: number;
 
@@ -149,6 +240,7 @@ class DataProcessor {
     this.frequency = 0;
     this.lastData = { x: 0, y: 0, z: 0 };
     this.currentProcessor = new WaterfallSpectrogramProcessor();
+    this.welchProcessor = new WelchSpectrogramProcessor();
     this.selectedAxis = 'x';
     this.lastSent = 0;
   }
@@ -212,6 +304,7 @@ class DataProcessor {
       // Add to spectrogram processor
       const sample = this.selectedAxis === 'x' ? x : this.selectedAxis === 'y' ? y : z;
       this.currentProcessor?.addSample(sample);
+      this.welchProcessor?.addSample(sample);
 
       if (++this.lastSent > FIXED_SAMPLE_RATE / AXIS_REPORT_RATE_HZ) {
         this.lastSent = 0;
@@ -249,5 +342,6 @@ self.onmessage = function (e: MessageEvent<WorkerMessage>) {
     console.log('selectaxis');
     dataProcessor.selectedAxis = e.data.axis!;
     dataProcessor.currentProcessor = new WaterfallSpectrogramProcessor();
+    dataProcessor.welchProcessor = new WelchSpectrogramProcessor();
   }
 };
