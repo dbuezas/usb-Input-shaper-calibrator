@@ -19,18 +19,23 @@ const spectrogramMaxHoldAtom = atom<number[]>([]);
 const welchPsdAtom = atom<number[]>([]);
 const welchPsdMaxHoldAtom = atom<number[]>([]);
 
+const spectrogramScaleMaxAtom = atom<number | undefined>(undefined);
+const welchPsdScaleMaxAtom = atom<number | undefined>(undefined);
+
 const windowFunctionAtom = atom<WindowFunctionType>('hann');
 const viewAtom = atom<'spectrum' | 'welch'>('welch');
 const freqRangeAtom = atom<[number, number]>([MIN_FREQUENCY_SLIDER, MAX_FREQUENCY_SLIDER]);
-type PeakInfo = {
-  frequency: number;
-  magnitude: number;
-};
-const peakAtom = atom<PeakInfo>();
+
+const peakAtom = atom<number>();
+
+export const peakFrequencyAtom = atom((get) => {
+  const peak = get(peakAtom);
+  return peak ? peak.toFixed(1) : '';
+});
 
 const Peak = () => {
   const peak = useAtomValue(peakAtom);
-  return peak ? `${peak.frequency.toFixed(1)} Hz @ ${peak.magnitude.toFixed(1)}` : '—';
+  return peak != null ? `${peak.toFixed(1)} Hz` : '—';
 };
 
 const MAX_TIME_SLICES = 100;
@@ -44,6 +49,7 @@ const SpectrumPlot = ({
   freqRange,
   mode,
   color,
+  scaleMax,
   dynamicRangeDb,
 }: {
   dataAtom: Atom<number[]>;
@@ -52,6 +58,7 @@ const SpectrumPlot = ({
   freqRange: [number, number];
   mode: SpectrumPlotMode;
   color: string;
+  scaleMax?: number;
   dynamicRangeDb?: number;
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -71,6 +78,7 @@ const SpectrumPlot = ({
         freqRange={freqRange}
         mode={mode}
         color={color}
+        scaleMax={scaleMax}
         dynamicRangeDb={dynamicRangeDb}
       />
     </>
@@ -85,6 +93,7 @@ const SpectrumPlot_render = ({
   freqRange,
   mode,
   color,
+  scaleMax,
   dynamicRangeDb,
 }: {
   canvasRef: RefObject<HTMLCanvasElement | null>;
@@ -94,6 +103,7 @@ const SpectrumPlot_render = ({
   freqRange: [number, number];
   mode: SpectrumPlotMode;
   color: string;
+  scaleMax?: number;
   dynamicRangeDb?: number;
 }) => {
   const data = useAtomValue(dataAtom);
@@ -117,15 +127,12 @@ const SpectrumPlot_render = ({
     let min = Number.POSITIVE_INFINITY;
     let max = Number.NEGATIVE_INFINITY;
 
-    if (dynamicRangeDb && dynamicRangeDb > 0) {
-      for (let i = iMin; i < iMax; i++) max = Math.max(max, data[i]);
-      min = max - dynamicRangeDb;
-    } else {
-      for (let i = iMin; i < iMax; i++) {
-        min = Math.min(min, data[i]);
-        max = Math.max(max, data[i]);
-      }
+    for (let i = iMin; i < iMax; i++) {
+      min = Math.min(min, data[i]);
+      max = Math.max(max, data[i]);
     }
+    if (scaleMax != null) max = Math.max(max, scaleMax);
+    if (dynamicRangeDb && dynamicRangeDb > 0) min = max - dynamicRangeDb;
 
     const rangeVal = max - min;
     const safeRange = rangeVal <= 0 ? 1 : rangeVal;
@@ -177,10 +184,14 @@ const Waterfall = ({
   width,
   height,
   freqRange,
+  dataAtom,
+  scaleMax,
 }: {
   width: number;
   height: number;
   freqRange: [number, number];
+  dataAtom: Atom<number[]>;
+  scaleMax?: number;
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -192,7 +203,14 @@ const Waterfall = ({
         height={height}
         className="image-rendering-pixelated block border border-gray-300 bg-black"
       />
-      <Waterfall_render canvasRef={canvasRef} width={width} height={height} freqRange={freqRange} />
+      <Waterfall_render
+        canvasRef={canvasRef}
+        width={width}
+        height={height}
+        freqRange={freqRange}
+        dataAtom={dataAtom}
+        scaleMax={scaleMax}
+      />
     </>
   );
 };
@@ -201,13 +219,17 @@ const Waterfall_render = ({
   width,
   height,
   freqRange,
+  dataAtom,
+  scaleMax,
 }: {
   canvasRef: RefObject<HTMLCanvasElement | null>;
   width: number;
   height: number;
   freqRange: [number, number];
+  dataAtom: Atom<number[]>;
+  scaleMax?: number;
 }) => {
-  const spectrum = useAtomValue(spectrogramAtom);
+  const spectrum = useAtomValue(dataAtom);
   const setPeak = useSetAtom(peakAtom);
   useEffect(() => {
     if (!spectrum?.length) return;
@@ -236,13 +258,16 @@ const Waterfall_render = ({
         max = value;
       }
     }
+
+    if (scaleMax != null) max = Math.max(max, scaleMax);
     const freqBinWidth = width / (iMax - iMin);
     const rangeVal = max - min;
+    const safeRange = rangeVal <= 0 ? 1 : rangeVal;
     const y = 0;
     ctx.drawImage(canvas, 0, 1);
     for (let i = iMin; i < iMax; i++) {
       const dbValue = spectrum[i];
-      let val = (dbValue - min) / rangeVal;
+      const val = (dbValue - min) / safeRange;
       const r = Math.floor(val * 255);
       const g = Math.floor(val * 128);
       const b = Math.floor((1 - val) * 255);
@@ -255,14 +280,7 @@ const Waterfall_render = ({
 
     ctx.fillRect((peakIdx - iMin) * freqBinWidth, y, freqBinWidth + 1, yScale);
 
-    setPeak((old) => {
-      const frequency = peakIdx * ACTUAL_RESOLUTION;
-      if (frequency === old?.frequency) return old;
-      return {
-        frequency,
-        magnitude: 1,
-      };
-    });
+    setPeak(peakIdx * ACTUAL_RESOLUTION);
   }, [width, height, spectrum]);
   return <></>;
 };
@@ -273,6 +291,8 @@ export function SpectrogramControls({ dataSource }: { dataSource?: DataSource })
   const [freqRange, setFreqRange] = useAtom(freqRangeAtom);
   const setSpectrogramMaxHold = useSetAtom(spectrogramMaxHoldAtom);
   const setWelchPsdMaxHold = useSetAtom(welchPsdMaxHoldAtom);
+  const setSpectrogramScaleMax = useSetAtom(spectrogramScaleMaxAtom);
+  const setWelchPsdScaleMax = useSetAtom(welchPsdScaleMaxAtom);
 
   return (
     <div className="flex flex-col gap-5">
@@ -353,6 +373,8 @@ export function SpectrogramControls({ dataSource }: { dataSource?: DataSource })
           onClick={() => {
             setSpectrogramMaxHold([]);
             setWelchPsdMaxHold([]);
+            setSpectrogramScaleMax(undefined);
+            setWelchPsdScaleMax(undefined);
           }}
         >
           Clear Max-Hold
@@ -367,15 +389,25 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
   const setSpectrogramMaxHold = useSetAtom(spectrogramMaxHoldAtom);
   const setWelchPsd = useSetAtom(welchPsdAtom);
   const setWelchPsdMaxHold = useSetAtom(welchPsdMaxHoldAtom);
+  const setSpectrogramScaleMax = useSetAtom(spectrogramScaleMaxAtom);
+  const setWelchPsdScaleMax = useSetAtom(welchPsdScaleMaxAtom);
   const width = 800;
   const height = 200;
   const view = useAtomValue(viewAtom);
   const freqRange = useAtomValue(freqRangeAtom);
+  const spectrogramScaleMax = useAtomValue(spectrogramScaleMaxAtom);
+  const welchPsdScaleMax = useAtomValue(welchPsdScaleMaxAtom);
+  const activeScaleMax = view === 'spectrum' ? spectrogramScaleMax : welchPsdScaleMax;
   useEffect(() => {
     const handleMessage = (e: MessageEvent<SpectrumSliceMessage | WelchPsdSliceMessage>) => {
       const msg = e.data;
       if (msg.type === 'spectrumSlice') {
         setSpectrogram(msg.spectrum);
+        setSpectrogramScaleMax((prev) => {
+          let next = prev ?? Number.NEGATIVE_INFINITY;
+          for (const v of msg.spectrum) next = Math.max(next, v);
+          return next === Number.NEGATIVE_INFINITY ? undefined : next;
+        });
         setSpectrogramMaxHold((prev) => {
           if (!prev?.length || prev.length !== msg.spectrum.length) return [...msg.spectrum];
           const next = prev.slice();
@@ -386,6 +418,11 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
       }
       if (msg.type === 'welchPsdSlice') {
         setWelchPsd(msg.psd);
+        setWelchPsdScaleMax((prev) => {
+          let next = prev ?? Number.NEGATIVE_INFINITY;
+          for (const v of msg.psd) next = Math.max(next, v);
+          return next === Number.NEGATIVE_INFINITY ? undefined : next;
+        });
         setWelchPsdMaxHold((prev) => {
           if (!prev?.length || prev.length !== msg.psd.length) return [...msg.psd];
           const next = prev.slice();
@@ -405,7 +442,13 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
     <div className="text-center">
       <h3 className="mb-4 text-2xl font-semibold">Live Waterfall Spectrogram</h3>
 
-      <Waterfall height={height} width={width} freqRange={freqRange} />
+      <Waterfall
+        height={height}
+        width={width}
+        freqRange={freqRange}
+        dataAtom={view === 'spectrum' ? spectrogramAtom : welchPsdAtom}
+        scaleMax={activeScaleMax}
+      />
       {view === 'spectrum' ? (
         <>
           <h3 className="mt-10 mb-4 text-2xl font-semibold">Last Spectrum (Scatter)</h3>
@@ -416,6 +459,7 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
             freqRange={freqRange}
             mode="points"
             color="rgba(0, 220, 255, 0.9)"
+            scaleMax={spectrogramScaleMax}
           />
           <div className="mt-10 mb-4 flex items-center justify-center gap-3">
             <h3 className="text-2xl font-semibold">Spectrum (Accumulated Max-Hold)</h3>
@@ -427,6 +471,7 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
             freqRange={freqRange}
             mode="line"
             color="rgba(0, 220, 255, 0.9)"
+            scaleMax={spectrogramScaleMax}
           />
         </>
       ) : (
@@ -440,6 +485,7 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
             mode="points"
             color="rgba(255, 180, 0, 0.9)"
             dynamicRangeDb={80}
+            scaleMax={welchPsdScaleMax}
           />
           <div className="mt-10 mb-4 flex items-center justify-center gap-3">
             <h3 className="text-2xl font-semibold">Welch PSD (Accumulated Max-Hold)</h3>
@@ -452,6 +498,7 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
             mode="line"
             color="rgba(255, 80, 80, 0.95)"
             dynamicRangeDb={80}
+            scaleMax={welchPsdScaleMax}
           />
         </>
       )}

@@ -78,7 +78,13 @@ export class SimulationPort {
     // Phase-accurate integration
     this.t += (2 * Math.PI * this.simulationFrequency) / FIXED_SAMPLE_RATE;
 
-    const v = Math.sin(this.t) * SIMULATION_AMPLITUDE;
+    const amplitude = Math.pow(
+      Math.sin(
+        (Math.PI * this.simulationFrequency) / (SIMULATION_MAX_FREQUENCY - SIMULATION_MIN_FREQUENCY)
+      ),
+      2
+    );
+    const v = Math.sin(this.t) * amplitude * SIMULATION_AMPLITUDE;
     const value = Math.round(v);
 
     const simulatedData = new Int16Array([value, value, value]);

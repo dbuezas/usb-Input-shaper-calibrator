@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { atom, useAtomValue, useSetAtom, type Atom } from 'jotai';
-import { atomFamily } from 'jotai-family';
-import Spectrogram, { SpectrogramControls } from './Spectrogram';
+import { atomFamily } from 'jotai/utils';
+import Spectrogram, { SpectrogramControls, peakFrequencyAtom } from './Spectrogram';
 import type { DataSource } from './data-source';
 import { SerialDataSource } from './data-source';
 import { SimulationPort } from './simulation-port';
@@ -22,6 +22,7 @@ const formattedAxisValueAtom = atomFamily((i: number) =>
 );
 
 const formattedFrequencyAtom = atom((get) => get(frequencyAtom).toFixed(1));
+const formattedPeakFrequencyAtom = atom((get) => get(peakFrequencyAtom));
 
 const AtomValue = ({ atom }: { atom: Atom<string> }) => {
   const value = useAtomValue(atom);
@@ -67,11 +68,47 @@ function App() {
     setIsConnected(false);
   };
 
+  const topTiles = (
+    [
+      { key: 'x', title: 'X Axis', value: <AtomValue atom={formattedAxisValueAtom(0)} /> },
+      { key: 'y', title: 'Y Axis', value: <AtomValue atom={formattedAxisValueAtom(1)} /> },
+      { key: 'z', title: 'Z Axis', value: <AtomValue atom={formattedAxisValueAtom(2)} /> },
+      {
+        key: 'peak',
+        title: 'Peak',
+        value: (
+          <>
+            <AtomValue atom={formattedPeakFrequencyAtom} /> Hz
+          </>
+        ),
+      },
+      {
+        key: 'acq',
+        title: 'Acquisition',
+        value: (
+          <>
+            <AtomValue atom={formattedFrequencyAtom} /> Hz
+          </>
+        ),
+      },
+    ] as const
+  ).map((tile) => (
+    <Card key={tile.key} className="w-full flex-1 text-center sm:min-w-0">
+      <CardHeader className="pb-3">
+        <CardTitle>{tile.title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div>{tile.value}</div>
+      </CardContent>
+    </Card>
+  ));
+
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6 p-6 font-sans md:flex-row">
       <aside className="border-border bg-card w-full rounded-xl border p-5 shadow-sm md:sticky md:top-6 md:h-[calc(100vh-3rem)] md:w-80 md:overflow-auto">
         <h1 className="text-2xl font-bold">ADXL Resonance Analyzer</h1>
-        <div>
+
+        <div className="mt-5">
           <div className="text-muted-foreground text-sm">Source</div>
           <div className="border-border mt-2 inline-flex rounded-md border p-1">
             {(
@@ -102,6 +139,7 @@ function App() {
             <Button onClick={disconnect}>Disconnect</Button>
           )}
         </div>
+
         <div className="bg-muted mt-5 rounded-lg p-3">
           <div className="text-muted-foreground text-sm">Status</div>
           <div className="mt-1 text-lg">
@@ -110,6 +148,7 @@ function App() {
             </span>
           </div>
         </div>
+
         {isConnected && (
           <div className="mt-6">
             <div className="text-muted-foreground text-sm">Axis</div>
@@ -152,33 +191,7 @@ function App() {
       </aside>
 
       <main className="min-w-0 flex-1">
-        <div className="grid grid-cols-4 gap-4">
-          {(
-            [
-              { key: 'x', title: 'X Axis', value: <AtomValue atom={formattedAxisValueAtom(0)} /> },
-              { key: 'y', title: 'Y Axis', value: <AtomValue atom={formattedAxisValueAtom(1)} /> },
-              { key: 'z', title: 'Z Axis', value: <AtomValue atom={formattedAxisValueAtom(2)} /> },
-              {
-                key: 'f',
-                title: 'Aquisition',
-                value: (
-                  <>
-                    <AtomValue atom={formattedFrequencyAtom} /> Hz
-                  </>
-                ),
-              },
-            ] as const
-          ).map((tile) => (
-            <Card key={tile.key} className="text-center">
-              <CardHeader>
-                <CardTitle>{tile.title}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="font-mono">{tile.value}</div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <div className="flex flex-wrap gap-4">{topTiles}</div>
 
         {isConnected ? (
           <div className="mt-8">
