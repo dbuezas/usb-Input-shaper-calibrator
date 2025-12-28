@@ -1,16 +1,13 @@
 import { useEffect, useState } from 'react';
 import { atom, useAtomValue, useSetAtom, type Atom } from 'jotai';
 import { atomFamily } from 'jotai/utils';
-import Spectrogram, {
-  SpectrogramControls,
-  historicPeakFrequencyAtom,
-  peakFrequencyAtom,
-} from '@/Spectrogram';
-import type { DataSource } from '@/data-source';
-import { SerialDataSource } from '@/data-source';
-import { SimulationPort } from '@/simulation-port';
+import Spectrogram, { SpectrogramControls } from './Spectrogram';
+import type { DataSource } from '@/screens/AnalyzerScreen/data-source';
+import { SerialDataSource } from '@/screens/AnalyzerScreen/data-source';
+import { SimulationPort } from '@/screens/AnalyzerScreen/simulation-port';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { historicPeakFrequencyAtom, peakFrequencyAtom } from './atoms';
 
 const adxlDataAtom = atom<Int16Array<ArrayBufferLike>>();
 const frequencyAtom = atom(0);
@@ -24,8 +21,6 @@ const formattedAxisValueAtom = atomFamily((i: number) =>
 );
 
 const formattedFrequencyAtom = atom((get) => get(frequencyAtom).toFixed(1));
-const formattedPeakFrequencyAtom = atom((get) => get(peakFrequencyAtom));
-const formattedHistoricPeakFrequencyAtom = atom((get) => get(historicPeakFrequencyAtom));
 
 const AtomValue = ({ atom }: { atom: Atom<string> }) => {
   const value = useAtomValue(atom);
@@ -82,14 +77,14 @@ export default function AnalyzerScreen() {
           <>
             <div>
               <span className="tabular-nums">
-                <AtomValue atom={formattedPeakFrequencyAtom} />
+                <AtomValue atom={peakFrequencyAtom} />
               </span>{' '}
               Hz
             </div>
             <div className="text-muted-foreground mt-1 text-xs">
               max:{' '}
               <span className="tabular-nums">
-                <AtomValue atom={formattedHistoricPeakFrequencyAtom} />
+                <AtomValue atom={historicPeakFrequencyAtom} />
               </span>{' '}
               Hz
             </div>

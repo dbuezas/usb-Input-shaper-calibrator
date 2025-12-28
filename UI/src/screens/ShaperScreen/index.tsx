@@ -11,14 +11,31 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
   applyShaperToMagnitudeSpectrum,
-  applyShaperToWelchPsdDb,
+  applyShaperToWelchPsd,
+  klipperScoreFromMagnitudeSpectrum,
   type InputShaperType,
   type ShaperParams,
-  shaperMagnitudeAtHz,
-} from '@/input-shaper';
-import { spectrogramMaxHoldAtom, welchPsdMaxHoldAtom } from '@/Spectrogram';
+} from './input-shaper';
+import ShaperOptimiserWorker from './shaper-optimiser.worker?worker';
+import { spectrogramMaxHoldAtom, welchPsdMaxHoldAtom } from '../AnalyzerScreen/atoms';
 
 type OptimisationResult = { params: ShaperParams; score: number };
+type BestByType = Partial<Record<InputShaperType, OptimisationResult>>;
+
+type OptimiserWorkerProgress = {
+  type: 'progress';
+  percent: number;
+  iterationsDone: number;
+  iterationsTotal: number;
+  current?: OptimisationResult;
+  best?: OptimisationResult;
+  bestByType?: BestByType;
+};
+
+type OptimiserWorkerDone = { type: 'done'; best?: OptimisationResult; bestByType?: BestByType };
+type OptimiserWorkerError = { type: 'error'; message: string };
+
+type OptimiserWorkerOut = OptimiserWorkerProgress | OptimiserWorkerDone | OptimiserWorkerError;
 
 type OptimisationProgress = {
   percent: number;
@@ -30,26 +47,6 @@ type OptimisationProgress = {
 
 const binToHz = (bin: number, bins: number) => bin * (FIXED_SAMPLE_RATE / (2 * (bins - 1)));
 
-const weightedEnergyScore = (magnitudes: number[], shaped: number[], f0Hz: number) => {
-  if (!magnitudes.length || magnitudes.length !== shaped.length) return Number.POSITIVE_INFINITY;
-
-  const bins = magnitudes.length;
-  const sigmaHz = 8;
-  let num = 0;
-  let den = 0;
-
-  for (let i = 0; i < bins; i++) {
-    const f = binToHz(i, bins);
-    const w0 = Math.exp(-0.5 * Math.pow((f - f0Hz) / sigmaHz, 2));
-    const w = 0.15 + 0.85 * w0;
-    const base = magnitudes[i] ?? 0;
-    const out = shaped[i] ?? 0;
-    num += w * out * out;
-    den += w * base * base;
-  }
-  return den > 0 ? num / den : Number.POSITIVE_INFINITY;
-};
-
 const estimatePeakHz = (magnitudes: number[]) => {
   if (!magnitudes.length) return 55;
   let peakIdx = 0;
@@ -58,23 +55,6 @@ const estimatePeakHz = (magnitudes: number[]) => {
   }
   return binToHz(peakIdx, magnitudes.length);
 };
-
-const lengthPenaltyForType = (type: InputShaperType) =>
-  type === 'zv'
-    ? 0.0
-    : type === 'zvd'
-      ? 0.002
-      : type === 'mzv'
-        ? 0.003
-        : type === 'zvdd'
-          ? 0.006
-          : type === 'ei'
-            ? 0.006
-            : type === '2hei'
-              ? 0.01
-              : type === 'zvddd'
-                ? 0.013
-                : 0.013;
 
 const shaperTypeAtom = atom<InputShaperType>('zvd');
 const shaperF0Atom = atom(55);
@@ -97,7 +77,14 @@ const shapedSpectrumAtom = atom((get) => {
 const shapedWelchAtom = atom((get) => {
   const base = get(welchPsdMaxHoldAtom);
   if (!base?.length) return [];
-  return applyShaperToWelchPsdDb(get(shaperParamsAtom), base);
+  return applyShaperToWelchPsd(get(shaperParamsAtom), base);
+});
+
+const currentScoreAtom = atom((get) => {
+  const base = get(spectrogramMaxHoldAtom);
+  if (!base?.length) return undefined;
+  const score = klipperScoreFromMagnitudeSpectrum(base, get(shaperParamsAtom));
+  return Number.isFinite(score) ? score : undefined;
 });
 
 export default function ShaperScreen() {
@@ -111,9 +98,14 @@ export default function ShaperScreen() {
 
   const maxHoldSpectrum = useAtomValue(spectrogramMaxHoldAtom);
   const maxHoldWelch = useAtomValue(welchPsdMaxHoldAtom);
+  const currentScore = useAtomValue(currentScoreAtom);
 
   const [isOptimising, setIsOptimising] = useState(false);
   const [optimiseProgress, setOptimiseProgress] = useState<OptimisationProgress | null>(null);
+  const [bestByType, setBestByType] = useState<BestByType>({});
+  const [optimisePreviewMode, setOptimisePreviewMode] = useState<'best' | 'current'>('best');
+  const optimisePreviewModeRef = useRef<'best' | 'current'>('best');
+  const optimiserWorkerRef = useRef<Worker | null>(null);
   const cancelRef = useRef(false);
 
   useEffect(() => {
@@ -123,89 +115,112 @@ export default function ShaperScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    optimisePreviewModeRef.current = optimisePreviewMode;
+  }, [optimisePreviewMode]);
+
+  useEffect(() => {
+    return () => {
+      optimiserWorkerRef.current?.terminate();
+      optimiserWorkerRef.current = null;
+    };
+  }, []);
+
   const runAutoOptimise = async () => {
     if (!maxHoldSpectrum.length) return;
     setIsOptimising(true);
+    cancelRef.current = false;
 
     const magnitudes = maxHoldSpectrum;
     const peakHz = estimatePeakHz(magnitudes);
+
     const types: InputShaperType[] = ['zv', 'zvd', 'zvdd', 'zvddd', 'mzv', 'ei', '2hei', '3hei'];
-
-    const fMin = Math.max(10, peakHz - 30);
-    const fMax = Math.min(200, peakHz + 30);
-
+    const fStep = 0.2;
     const zetas = [0.03, 0.05, 0.07, 0.1, 0.14, 0.18, 0.22, 0.28, 0.34];
     const vtols = [0.02, 0.05, 0.08, 0.1, 0.14, 0.2, 0.28, 0.38];
 
-    let iterationsTotal = 0;
-    for (const t of types) {
-      const vtolCount = t === 'ei' || t === '2hei' || t === '3hei' ? vtols.length : 1;
-      const fCount = Math.floor((fMax - fMin) / 0.5) + 1;
-      iterationsTotal += fCount * zetas.length * vtolCount;
-    }
-    let iterationsDone = 0;
-    let best: OptimisationResult | null = null;
+    const fMin = Math.max(10, peakHz - 60);
+    const fMax = Math.min(150, peakHz + 60);
 
-    // Yield once so the UI can update the button state before the CPU-heavy search.
-    await new Promise((r) => setTimeout(r, 0));
+    optimiserWorkerRef.current?.terminate();
+    optimiserWorkerRef.current = new ShaperOptimiserWorker();
+
+    const worker = optimiserWorkerRef.current;
 
     try {
-      let lastUiUpdate = performance.now();
+      let cleanup: (() => void) | undefined;
 
-      for (const candidateType of types) {
-        for (let f = fMin; f <= fMax; f += 0.5) {
-          for (const zeta of zetas) {
-            const vtolCandidates =
-              candidateType === 'ei' || candidateType === '2hei' || candidateType === '3hei'
-                ? vtols
-                : [0.1];
-            for (const vtol of vtolCandidates) {
-              if (cancelRef.current) return;
-              iterationsDone++;
-              const params: ShaperParams = { type: candidateType, fHz: f, zeta, vtol };
+      const completion = new Promise<void>((resolve) => {
+        const handleMessage = (evt: MessageEvent<OptimiserWorkerOut>) => {
+          const msg = evt.data;
+          if (msg.type === 'progress') {
+            setOptimiseProgress(msg);
+            if (msg.bestByType) setBestByType(msg.bestByType);
 
-              const hPeak = shaperMagnitudeAtHz(params, peakHz);
-              if (!Number.isFinite(hPeak) || hPeak > 2.5) continue;
-
-              const shaped = applyShaperToMagnitudeSpectrum(params, magnitudes);
-              const score = weightedEnergyScore(magnitudes, shaped, peakHz);
-              if (!Number.isFinite(score)) continue;
-
-              const total = score + lengthPenaltyForType(candidateType);
-              const current: OptimisationResult = { params, score: total };
-              if (!best || total < best.score) best = current;
-
-              const now = performance.now();
-              if (now - lastUiUpdate > 75) {
-                lastUiUpdate = now;
-
-                // Live-update the sliders and plots with the currently-tried candidate.
-                setType(params.type);
-                setF0(params.fHz);
-                setZeta(params.zeta);
-                setVtol(params.vtol);
-
-                setOptimiseProgress({
-                  percent: (100 * iterationsDone) / Math.max(1, iterationsTotal),
-                  iterationsDone,
-                  iterationsTotal,
-                  current,
-                  best: best ?? undefined,
-                });
-
-                await new Promise((r) => setTimeout(r, 0));
-              }
+            const previewParams =
+              optimisePreviewModeRef.current === 'current' ? msg.current?.params : msg.best?.params;
+            if (previewParams) {
+              setType(previewParams.type);
+              setF0(previewParams.fHz);
+              setZeta(previewParams.zeta);
+              setVtol(previewParams.vtol);
             }
+            return;
           }
-        }
-      }
 
-      if (!best) return;
-      setType(best.params.type);
-      setF0(best.params.fHz);
-      setZeta(best.params.zeta);
-      setVtol(best.params.vtol);
+          if (msg.type === 'error') {
+            // eslint-disable-next-line no-console
+            console.error('[shaper-optimiser.worker] error:', msg.message);
+            cleanup?.();
+            resolve();
+            return;
+          }
+
+          if (msg.type === 'done') {
+            if (msg.best) {
+              setType(msg.best.params.type);
+              setF0(msg.best.params.fHz);
+              setZeta(msg.best.params.zeta);
+              setVtol(msg.best.params.vtol);
+            }
+            if (msg.bestByType) setBestByType(msg.bestByType);
+            cleanup?.();
+            resolve();
+          }
+        };
+
+        worker.addEventListener('message', handleMessage);
+        worker.postMessage({
+          type: 'start',
+          magnitudes,
+          fMin,
+          fMax,
+          fStep,
+          types,
+          zetas,
+          vtols,
+          peakHz,
+          uiUpdateEveryMs: 75,
+        });
+
+        const cancelPoll = window.setInterval(() => {
+          if (!cancelRef.current) return;
+          worker.postMessage({ type: 'cancel' });
+          window.clearInterval(cancelPoll);
+        }, 100);
+
+        cleanup = () => {
+          window.clearInterval(cancelPoll);
+          worker.removeEventListener('message', handleMessage);
+        };
+      });
+
+      await new Promise((r) => setTimeout(r, 0));
+      await completion;
     } finally {
+      cancelRef.current && worker.postMessage({ type: 'cancel' });
+      worker.terminate();
+      if (optimiserWorkerRef.current === worker) optimiserWorkerRef.current = null;
       setIsOptimising(false);
       setOptimiseProgress(null);
     }
@@ -241,7 +256,15 @@ export default function ShaperScreen() {
                 variant={type === opt.value ? 'secondary' : 'ghost'}
                 className="h-8"
                 aria-pressed={type === opt.value}
-                onClick={() => setType(opt.value)}
+                onClick={() => {
+                  setType(opt.value);
+                  const best = bestByType[opt.value];
+                  if (best) {
+                    setF0(best.params.fHz);
+                    setZeta(best.params.zeta);
+                    setVtol(best.params.vtol);
+                  }
+                }}
               >
                 {opt.label}
               </Button>
@@ -258,8 +281,41 @@ export default function ShaperScreen() {
           >
             {isOptimising ? 'Optimising…' : 'Auto optimise'}
           </Button>
+          {!isOptimising && (
+            <div className="text-muted-foreground mt-2 text-xs">
+              Current score:{' '}
+              <span className="font-medium">
+                {currentScore != null ? currentScore.toFixed(9) : '—'}
+              </span>
+            </div>
+          )}
           {optimiseProgress && (
             <div className="mt-3 rounded-md border border-dashed p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="text-muted-foreground text-xs">Preview</div>
+                <div className="border-border inline-flex gap-1 rounded-md border p-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={optimisePreviewMode === 'best' ? 'secondary' : 'ghost'}
+                    className="h-7 px-2"
+                    aria-pressed={optimisePreviewMode === 'best'}
+                    onClick={() => setOptimisePreviewMode('best')}
+                  >
+                    Best
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={optimisePreviewMode === 'current' ? 'secondary' : 'ghost'}
+                    className="h-7 px-2"
+                    aria-pressed={optimisePreviewMode === 'current'}
+                    onClick={() => setOptimisePreviewMode('current')}
+                  >
+                    Current
+                  </Button>
+                </div>
+              </div>
               <div className="text-muted-foreground text-xs">
                 {optimiseProgress.percent.toFixed(0)}% ({optimiseProgress.iterationsDone}/
                 {optimiseProgress.iterationsTotal})
@@ -273,13 +329,13 @@ export default function ShaperScreen() {
               <div className="text-muted-foreground mt-2 text-xs">
                 Current score:{' '}
                 <span className="font-medium">
-                  {optimiseProgress.current ? optimiseProgress.current.score.toFixed(4) : '—'}
+                  {optimiseProgress.current ? optimiseProgress.current.score.toFixed(9) : '—'}
                 </span>
               </div>
               <div className="text-muted-foreground mt-1 text-xs">
                 Best score:{' '}
                 <span className="font-medium">
-                  {optimiseProgress.best ? optimiseProgress.best.score.toFixed(4) : '—'}
+                  {optimiseProgress.best ? optimiseProgress.best.score.toFixed(9) : '—'}
                 </span>
               </div>
             </div>
@@ -402,7 +458,6 @@ export default function ShaperScreen() {
               height={height}
               width={width}
               freqRange={[0, 200]}
-              dynamicRangeDb={80}
               scaleMax={maxHoldWelch.length ? Math.max(...maxHoldWelch) : undefined}
             />
           </div>

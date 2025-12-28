@@ -1,6 +1,6 @@
 import { serialChannel } from './messages';
 import SerialWorker from './serial-worker?worker';
-import { SERIAL_BAUD_RATE, BATCH_SIZE } from './constants';
+import { SERIAL_BAUD_RATE, BATCH_SIZE } from '../../constants';
 import type { WindowFunctionType } from './messages';
 const serialWorker = new SerialWorker();
 

@@ -1,6 +1,10 @@
 import { useEffect } from 'react';
-import type { SpectrumSliceMessage, WelchPsdSliceMessage } from './messages';
-import { spectrogramChannel } from './messages';
+import type {
+  SpectrumSliceMessage,
+  WelchPsdSliceMessage,
+  WindowFunctionType,
+} from '@/screens/AnalyzerScreen/messages';
+import { spectrogramChannel } from '@/screens/AnalyzerScreen/messages';
 import { atom, useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
   ACTUAL_RESOLUTION,
@@ -9,18 +13,16 @@ import {
   SPECTROGRAM_MAX_TIME_SLICES,
   SPECTROGRAM_PLOT_WIDTH,
   SPECTROGRAM_WATERFALL_HEIGHT,
-} from './constants';
-import { Slider } from './components/ui/slider';
-import type { DataSource } from './data-source';
-import { SpectrumPlot } from './visualisations/SpectrumPlot';
-import { Waterfall } from './visualisations/Waterfall';
-import type { WindowFunctionType } from './messages';
+} from '@/constants';
+import { Slider } from '@/components/ui/slider';
+import type { DataSource } from '@/screens/AnalyzerScreen/data-source';
+import { SpectrumPlot } from '@/visualisations/SpectrumPlot';
+import { Waterfall } from '@/visualisations/Waterfall';
 import { Button } from '@/components/ui/button';
+import { historicPeakAtom, peakAtom, spectrogramMaxHoldAtom, welchPsdMaxHoldAtom } from './atoms';
 
 const spectrogramAtom = atom<number[]>([]);
-export const spectrogramMaxHoldAtom = atom<number[]>([]);
 const welchPsdAtom = atom<number[]>([]);
-export const welchPsdMaxHoldAtom = atom<number[]>([]);
 
 const spectrogramScaleMaxAtom = atom<number | undefined>(undefined);
 const welchPsdScaleMaxAtom = atom<number | undefined>(undefined);
@@ -28,19 +30,6 @@ const welchPsdScaleMaxAtom = atom<number | undefined>(undefined);
 const windowFunctionAtom = atom<WindowFunctionType>('hann');
 const viewAtom = atom<'spectrum' | 'welch'>('welch');
 const freqRangeAtom = atom<[number, number]>([MIN_FREQUENCY_SLIDER, MAX_FREQUENCY_SLIDER]);
-
-const peakAtom = atom<number>();
-const historicPeakAtom = atom<number>();
-
-export const peakFrequencyAtom = atom((get) => {
-  const peak = get(peakAtom);
-  return peak ? peak.toFixed(1) : '';
-});
-
-export const historicPeakFrequencyAtom = atom((get) => {
-  const peak = get(historicPeakAtom);
-  return peak ? peak.toFixed(1) : '';
-});
 
 export function SpectrogramControls({ dataSource }: { dataSource?: DataSource }) {
   const [windowFunction, setWindowFunction] = useAtom(windowFunctionAtom);
@@ -180,6 +169,7 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
   const spectrogramScaleMax = useAtomValue(spectrogramScaleMaxAtom);
   const welchPsdScaleMax = useAtomValue(welchPsdScaleMaxAtom);
   const activeScaleMax = view === 'spectrum' ? spectrogramScaleMax : welchPsdScaleMax;
+
   useEffect(() => {
     const handleMessage = (e: MessageEvent<SpectrumSliceMessage | WelchPsdSliceMessage>) => {
       const msg = e.data;
@@ -270,7 +260,6 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
             height={height}
             width={width}
             freqRange={freqRange}
-            dynamicRangeDb={80}
             scaleMax={welchPsdScaleMax}
           />
         </>

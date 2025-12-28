@@ -13,7 +13,7 @@ import {
   FIXED_SAMPLE_RATE,
   WINDOW_SIZE,
   HOP_SIZE,
-} from './constants';
+} from '@/constants';
 
 interface SensorData {
   x: number;
@@ -126,7 +126,7 @@ class SpectralProcessor {
   re: number[];
   im: number[];
   magnitudes: number[];
-  welchPsdDb: number[];
+  welchPsd: number[];
 
   // Welch averaging over the last N (overlapped) periodograms
   welchAvgCount: number;
@@ -144,7 +144,7 @@ class SpectralProcessor {
     this.im = new Array(WINDOW_SIZE);
     const halfBins = WINDOW_SIZE / 2 + 1;
     this.magnitudes = new Array(halfBins);
-    this.welchPsdDb = new Array(halfBins);
+    this.welchPsd = new Array(halfBins);
 
     this.welchAvgCount = 8;
     this.welchAvgWriteIndex = 0;
@@ -220,10 +220,9 @@ class SpectralProcessor {
     }
 
     const denom = this.welchPeriodogramRing.length;
-    const eps = 1e-30;
     for (let k = 0; k < halfBins; k++) {
       const avgPxx = this.welchPeriodogramSum[k] / denom;
-      this.welchPsdDb[k] = 10 * Math.log10(avgPxx + eps);
+      this.welchPsd[k] = avgPxx;
     }
 
     spectrogramChannel.postMessage({
@@ -233,7 +232,7 @@ class SpectralProcessor {
 
     spectrogramChannel.postMessage({
       type: 'welchPsdSlice',
-      psd: this.welchPsdDb,
+      psd: this.welchPsd,
     } satisfies WelchPsdSliceMessage);
   }
 }
