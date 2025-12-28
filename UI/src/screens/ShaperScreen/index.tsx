@@ -8,11 +8,12 @@ import {
 } from '@/constants';
 import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { ConfiguredTooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import {
   applyShaperToMagnitudeSpectrum,
   applyShaperToWelchPsd,
+  computeMarlinShaperTaps,
   klipperScoreFromMagnitudeSpectrum,
   klipperSuggestedMaxAccel,
   type InputShaperType,
@@ -96,6 +97,16 @@ const currentMaxAccelAtom = atom((get) => {
   return Number.isFinite(maxAccel) ? maxAccel : undefined;
 });
 
+const delayCentroidSecondsAtom = atom((get) => {
+  const { a, t } = computeMarlinShaperTaps(get(shaperParamsAtom));
+  const sumA = a.reduce((s, v) => s + v, 0);
+  if (!Number.isFinite(sumA) || sumA === 0) return undefined;
+  let centroid = 0;
+  for (let i = 0; i < a.length; i++) centroid += (a[i] ?? 0) * (t[i] ?? 0);
+  centroid /= sumA;
+  return Number.isFinite(centroid) ? centroid : undefined;
+});
+
 export default function ShaperScreen() {
   const width = SPECTROGRAM_PLOT_WIDTH;
   const height = SPECTROGRAM_WATERFALL_HEIGHT;
@@ -109,6 +120,7 @@ export default function ShaperScreen() {
   const maxHoldWelch = useAtomValue(welchPsdMaxHoldAtom);
   const currentScore = useAtomValue(currentScoreAtom);
   const currentMaxAccel = useAtomValue(currentMaxAccelAtom);
+  const delayCentroidSeconds = useAtomValue(delayCentroidSecondsAtom);
 
   const [isOptimising, setIsOptimising] = useState(false);
   const [optimiseProgress, setOptimiseProgress] = useState<OptimisationProgress | null>(null);
@@ -117,6 +129,14 @@ export default function ShaperScreen() {
   const optimisePreviewModeRef = useRef<'best' | 'current'>('best');
   const optimiserWorkerRef = useRef<Worker | null>(null);
   const cancelRef = useRef(false);
+
+  const explain = (title: string, accurate: string, intuition: string) => (
+    <div className="max-w-[360px] leading-snug">
+      <h3 className="text-sm font-semibold">{title}</h3>
+      <div className="mt-2">{accurate}</div>
+      <div className="text-muted-foreground mt-2">{intuition}</div>
+    </div>
+  );
 
   useEffect(() => {
     cancelRef.current = false;
@@ -263,28 +283,92 @@ export default function ShaperScreen() {
   );
 
   const maxAccelTooltip = (
-    <div className="max-w-85 leading-snug">
-      <h3 className="text-sm font-semibold">Suggested max accel</h3>
-      <div className="mt-1">
-        A projection of the highest acceleration where Klipper’s smoothing model stays under a fixed
-        threshold.
-      </div>
+    <div className="max-w-[360px] leading-snug">
+      {explain(
+        'Suggested max accel',
+        'A projection of the highest acceleration where Klipper’s smoothing model stays under a fixed threshold: smoothing(taps, accel, scv=5) ≤ 0.12. It’s found via bisection search.',
+        'If you push accel above this, the shaper tends to “round off” corners more (it’s trading sharpness for reduced ringing).'
+      )}
       <div className="mt-2">
-        We search for the largest <span className="font-mono">accel</span> such that:
-      </div>
-      <div className="mt-1 font-mono">smoothing(taps, accel, scv=5) ≤ 0.12</div>
-      <div className="mt-2">
-        It’s found with a bisection search (same approach as Klipper). Higher than this and the
-        model predicts noticeably more corner rounding.
-      </div>
-      <div className="mt-2">
-        <h4 className="text-sm font-semibold">What is SCV?</h4>
+        <h4 className="text-sm font-semibold">SCV</h4>
         <div className="mt-1">
-          <span className="font-mono">scv</span> is “square corner velocity” (mm/s): the speed that
-          motion planning tries to maintain through sharp corners. Higher{' '}
-          <span className="font-mono">scv</span> means less slowing at corners, which makes
-          cornering more demanding and increases the smoothing predicted by the model.
+          <span className="font-mono">scv</span> (square corner velocity) is the speed the planner
+          tries to maintain through sharp corners. Higher <span className="font-mono">scv</span>{' '}
+          means less slowing down at corners → the model predicts more smoothing.
         </div>
+      </div>
+    </div>
+  );
+
+  const shaperFamilyTooltip = explain(
+    'Shaper type',
+    'Selects the input shaper impulse train (tap pattern). More taps generally reduce ringing more broadly, but increase smoothing and can require lower accel.',
+    'It’s like choosing a “filter”: stronger filters can quiet more vibration, but they smear the command more.'
+  );
+
+  const autoOptimiseTooltip = explain(
+    'Auto optimise',
+    'Brute-force searches shaper type + frequency + damping (+ tolerance for EI/HEI) to minimize the Klipper-like score, using your Analyzer max-hold spectrum as input.',
+    'It tries lots of reasonable candidates and picks the one that best balances “quiet” vs “sharp”.'
+  );
+
+  const previewModeTooltip = explain(
+    'Preview',
+    'During optimisation, chooses whether the UI controls reflect the current candidate or the best-so-far candidate.',
+    '“Current” lets you watch the search explore; “Best” keeps the UI stable on the best result found so far.'
+  );
+
+  const f0Tooltip = explain(
+    'Resonance f0',
+    'Center frequency (Hz) the shaper is tuned for. It controls the tap spacing so the shaper cancels motion near that resonance frequency.',
+    'Aim this near your main peak. Too low/high and the shaper misses the ringing you’re trying to cancel.'
+  );
+
+  const zetaTooltip = explain(
+    'Damping (ζ)',
+    'Assumed damping ratio of the resonance used to compute the tap weights. Higher ζ means the resonance dies out faster.',
+    'If the system is more “bouncy” (rings longer), use a smaller ζ; if it settles quickly, a larger ζ can work.'
+  );
+
+  const vtolTooltip = explain(
+    'Tolerance (vtol)',
+    'Only used by EI/HEI shapers. It widens how forgiving the shaper is to frequency mismatch by trading extra smoothing for robustness.',
+    'If your resonance shifts with temperature or belt tension, higher vtol can keep prints consistent (but may blur a bit more).'
+  );
+
+  const shaperTapTooltip = (label: string, shaperType: InputShaperType) => {
+    const taps = computeMarlinShaperTaps({ type: shaperType, fHz: f0, zeta, vtol });
+    const phasePercent = taps.t.map((t) => t * f0 * 100);
+    const phaseText = phasePercent.map((v) => v.toFixed(1)).join(', ');
+
+    return (
+      <div className="max-w-[360px] leading-snug">
+        <h3 className="text-sm font-semibold">{label}</h3>
+        <div className="mt-2">Tap count: {taps.t.length}</div>
+        <div className="mt-2">
+          Tap phases (% of a cycle): <span className="font-mono">[{phaseText}]</span>
+        </div>
+        <div className="text-muted-foreground mt-2">
+          These are tap times expressed as a fraction of one period at{' '}
+          <span className="font-mono">f0</span>, so you can compare shapes without thinking in
+          milliseconds.
+        </div>
+      </div>
+    );
+  };
+
+  const delayCentroidTooltip = (
+    <div className="max-w-[360px] leading-snug">
+      <h3 className="text-sm font-semibold">Delay centroid</h3>
+      <div className="mt-2">
+        A rough “center of mass” of the shaper taps in time:{' '}
+        <span className="font-mono">Σ(aᵢ·tᵢ) / Σ(aᵢ)</span>.
+      </div>
+      <div className="text-muted-foreground mt-2">
+        This matters because a shaper spreads a single motion command over time. At a 90° corner
+        (finish X, then start Y), the delayed tail of X can overlap with the start of Y. That
+        overlap is one reason corners look rounded: you’re effectively moving in X and Y at the same
+        time for a short moment.
       </div>
     </div>
   );
@@ -298,7 +382,16 @@ export default function ShaperScreen() {
         </div>
 
         <div className="mt-5">
-          <div className="text-muted-foreground text-sm">Shaper</div>
+          <ConfiguredTooltip>
+            <TooltipTrigger asChild>
+              <div className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
+                Shaper
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>
+              {shaperFamilyTooltip}
+            </TooltipContent>
+          </ConfiguredTooltip>
           <div className="border-border mt-2 inline-flex flex-wrap gap-1 rounded-md border p-1">
             {(
               [
@@ -312,42 +405,55 @@ export default function ShaperScreen() {
                 { value: '3hei', label: '3HEI' },
               ] as const
             ).map((opt) => (
-              <Button
-                key={opt.value}
-                type="button"
-                size="sm"
-                variant={type === opt.value ? 'secondary' : 'ghost'}
-                className="h-8"
-                aria-pressed={type === opt.value}
-                onClick={() => {
-                  setType(opt.value);
-                  const best = bestByType[opt.value];
-                  if (best) {
-                    setF0(best.params.fHz);
-                    setZeta(best.params.zeta);
-                    setVtol(best.params.vtol);
-                  }
-                }}
-              >
-                {opt.label}
-              </Button>
+              <ConfiguredTooltip key={opt.value}>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={type === opt.value ? 'secondary' : 'ghost'}
+                    className="h-8"
+                    aria-pressed={type === opt.value}
+                    onClick={() => {
+                      setType(opt.value);
+                      const best = bestByType[opt.value];
+                      if (best) {
+                        setF0(best.params.fHz);
+                        setZeta(best.params.zeta);
+                        setVtol(best.params.vtol);
+                      }
+                    }}
+                  >
+                    {opt.label}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={6}>
+                  {shaperTapTooltip(opt.label, opt.value)}
+                </TooltipContent>
+              </ConfiguredTooltip>
             ))}
           </div>
         </div>
 
         <div className="mt-5">
-          <Button
-            type="button"
-            className="w-full"
-            onClick={() => void runAutoOptimise()}
-            disabled={!maxHoldSpectrum.length || isOptimising}
-          >
-            {isOptimising ? 'Optimising…' : 'Auto optimise'}
-          </Button>
+          <ConfiguredTooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                className="w-full"
+                onClick={() => void runAutoOptimise()}
+                disabled={!maxHoldSpectrum.length || isOptimising}
+              >
+                {isOptimising ? 'Optimising…' : 'Auto optimise'}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>
+              {autoOptimiseTooltip}
+            </TooltipContent>
+          </ConfiguredTooltip>
           {!isOptimising && (
             <div className="text-muted-foreground mt-2 text-xs">
               Current score:{' '}
-              <Tooltip>
+              <ConfiguredTooltip>
                 <TooltipTrigger asChild>
                   <span className="font-medium underline decoration-dotted underline-offset-2">
                     {currentScore != null ? currentScore.toFixed(9) : '—'}
@@ -356,13 +462,13 @@ export default function ShaperScreen() {
                 <TooltipContent side="top" sideOffset={6}>
                   {scoreTooltip}
                 </TooltipContent>
-              </Tooltip>
+              </ConfiguredTooltip>
             </div>
           )}
           {!isOptimising && (
             <div className="text-muted-foreground mt-1 text-xs">
               Suggested max accel:{' '}
-              <Tooltip>
+              <ConfiguredTooltip>
                 <TooltipTrigger asChild>
                   <span className="font-medium underline decoration-dotted underline-offset-2">
                     {currentMaxAccel != null ? Math.round(currentMaxAccel / 100) * 100 : '—'}
@@ -371,14 +477,40 @@ export default function ShaperScreen() {
                 <TooltipContent side="top" sideOffset={6}>
                   {maxAccelTooltip}
                 </TooltipContent>
-              </Tooltip>{' '}
+              </ConfiguredTooltip>{' '}
               mm/s²
+            </div>
+          )}
+          {!isOptimising && (
+            <div className="text-muted-foreground mt-1 text-xs">
+              Delay centroid:{' '}
+              <ConfiguredTooltip>
+                <TooltipTrigger asChild>
+                  <span className="font-medium underline decoration-dotted underline-offset-2">
+                    {delayCentroidSeconds != null
+                      ? `${(delayCentroidSeconds * 1000).toFixed(2)} ms`
+                      : '—'}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={6}>
+                  {delayCentroidTooltip}
+                </TooltipContent>
+              </ConfiguredTooltip>
             </div>
           )}
           {optimiseProgress && (
             <div className="mt-3 rounded-md border border-dashed p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
-                <div className="text-muted-foreground text-xs">Preview</div>
+                <ConfiguredTooltip>
+                  <TooltipTrigger asChild>
+                    <div className="text-muted-foreground text-xs underline decoration-dotted underline-offset-2">
+                      Preview
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" sideOffset={6}>
+                    {previewModeTooltip}
+                  </TooltipContent>
+                </ConfiguredTooltip>
                 <div className="border-border inline-flex gap-1 rounded-md border p-1">
                   <Button
                     type="button"
@@ -414,7 +546,7 @@ export default function ShaperScreen() {
               </div>
               <div className="text-muted-foreground mt-2 text-xs">
                 Current score:{' '}
-                <Tooltip>
+                <ConfiguredTooltip>
                   <TooltipTrigger asChild>
                     <span className="font-medium underline decoration-dotted underline-offset-2">
                       {optimiseProgress.current ? optimiseProgress.current.score.toFixed(9) : '—'}
@@ -423,11 +555,11 @@ export default function ShaperScreen() {
                   <TooltipContent side="top" sideOffset={6}>
                     {scoreTooltip}
                   </TooltipContent>
-                </Tooltip>
+                </ConfiguredTooltip>
               </div>
               <div className="text-muted-foreground mt-1 text-xs">
                 Best score:{' '}
-                <Tooltip>
+                <ConfiguredTooltip>
                   <TooltipTrigger asChild>
                     <span className="font-medium underline decoration-dotted underline-offset-2">
                       {optimiseProgress.best ? optimiseProgress.best.score.toFixed(9) : '—'}
@@ -436,7 +568,7 @@ export default function ShaperScreen() {
                   <TooltipContent side="top" sideOffset={6}>
                     {scoreTooltip}
                   </TooltipContent>
-                </Tooltip>
+                </ConfiguredTooltip>
               </div>
             </div>
           )}
@@ -449,7 +581,16 @@ export default function ShaperScreen() {
 
         <div className="mt-5 grid gap-4">
           <div>
-            <label className="text-muted-foreground text-sm">Resonance f0: {f0} Hz</label>
+            <ConfiguredTooltip>
+              <TooltipTrigger asChild>
+                <label className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
+                  Resonance f0: {f0} Hz
+                </label>
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={6}>
+                {f0Tooltip}
+              </TooltipContent>
+            </ConfiguredTooltip>
             <div className="mt-3">
               <Slider
                 min={10}
@@ -463,7 +604,16 @@ export default function ShaperScreen() {
           </div>
 
           <div>
-            <label className="text-muted-foreground text-sm">Damping (ζ): {zeta.toFixed(3)}</label>
+            <ConfiguredTooltip>
+              <TooltipTrigger asChild>
+                <label className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
+                  Damping (ζ): {zeta.toFixed(3)}
+                </label>
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={6}>
+                {zetaTooltip}
+              </TooltipContent>
+            </ConfiguredTooltip>
             <div className="mt-3">
               <Slider
                 min={0}
@@ -487,9 +637,16 @@ export default function ShaperScreen() {
                 : ''
             )}
           >
-            <label className="text-muted-foreground text-sm">
-              Tolerance (vtol): {vtol.toFixed(3)}
-            </label>
+            <ConfiguredTooltip>
+              <TooltipTrigger asChild>
+                <label className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
+                  Tolerance (vtol): {vtol.toFixed(3)}
+                </label>
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={6}>
+                {vtolTooltip}
+              </TooltipContent>
+            </ConfiguredTooltip>
             <div className="mt-3">
               <Slider
                 min={0}
