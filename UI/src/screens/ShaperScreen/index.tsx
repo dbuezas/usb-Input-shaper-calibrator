@@ -8,11 +8,13 @@ import {
 } from '@/constants';
 import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import {
   applyShaperToMagnitudeSpectrum,
   applyShaperToWelchPsd,
   klipperScoreFromMagnitudeSpectrum,
+  klipperSuggestedMaxAccel,
   type InputShaperType,
   type ShaperParams,
 } from './input-shaper';
@@ -87,6 +89,13 @@ const currentScoreAtom = atom((get) => {
   return Number.isFinite(score) ? score : undefined;
 });
 
+const currentMaxAccelAtom = atom((get) => {
+  const base = get(spectrogramMaxHoldAtom);
+  if (!base?.length) return undefined;
+  const maxAccel = klipperSuggestedMaxAccel(get(shaperParamsAtom), 5, 0.12);
+  return Number.isFinite(maxAccel) ? maxAccel : undefined;
+});
+
 export default function ShaperScreen() {
   const width = SPECTROGRAM_PLOT_WIDTH;
   const height = SPECTROGRAM_WATERFALL_HEIGHT;
@@ -99,6 +108,7 @@ export default function ShaperScreen() {
   const maxHoldSpectrum = useAtomValue(spectrogramMaxHoldAtom);
   const maxHoldWelch = useAtomValue(welchPsdMaxHoldAtom);
   const currentScore = useAtomValue(currentScoreAtom);
+  const currentMaxAccel = useAtomValue(currentMaxAccelAtom);
 
   const [isOptimising, setIsOptimising] = useState(false);
   const [optimiseProgress, setOptimiseProgress] = useState<OptimisationProgress | null>(null);
@@ -226,6 +236,59 @@ export default function ShaperScreen() {
     }
   };
 
+  const scoreTooltip = (
+    <div className="max-w-[340px] leading-snug">
+      <h3 className="text-sm font-semibold">Score</h3>
+      <div className="mt-1">
+        One number that trades off “ringing left” vs “motion blur”. Lower is better.
+      </div>
+      <div className="mt-2 font-mono">score = smoothing × (vibrs^1.5 + vibrs×0.2 + 0.01)</div>
+      <div className="mt-2">
+        <h4 className="text-sm font-semibold">vibrs</h4>
+        <div className="mt-1">
+          remaining/total vibration (after ignoring PSD below{' '}
+          <span className="font-mono">max(PSD)/20</span>), worst-case over damping ratios{' '}
+          <span className="font-mono">[0.075, 0.1, 0.15]</span>.
+        </div>
+      </div>
+      <div className="mt-2">
+        <h4 className="text-sm font-semibold">smoothing</h4>
+        <div className="mt-1">
+          time-spread from the shaper taps using Klipper’s cornering model (
+          <span className="font-mono">accel=5000</span>, <span className="font-mono">scv=5</span>).
+          Bigger smoothing rounds corners more.
+        </div>
+      </div>
+    </div>
+  );
+
+  const maxAccelTooltip = (
+    <div className="max-w-85 leading-snug">
+      <h3 className="text-sm font-semibold">Suggested max accel</h3>
+      <div className="mt-1">
+        A projection of the highest acceleration where Klipper’s smoothing model stays under a fixed
+        threshold.
+      </div>
+      <div className="mt-2">
+        We search for the largest <span className="font-mono">accel</span> such that:
+      </div>
+      <div className="mt-1 font-mono">smoothing(taps, accel, scv=5) ≤ 0.12</div>
+      <div className="mt-2">
+        It’s found with a bisection search (same approach as Klipper). Higher than this and the
+        model predicts noticeably more corner rounding.
+      </div>
+      <div className="mt-2">
+        <h4 className="text-sm font-semibold">What is SCV?</h4>
+        <div className="mt-1">
+          <span className="font-mono">scv</span> is “square corner velocity” (mm/s): the speed that
+          motion planning tries to maintain through sharp corners. Higher{' '}
+          <span className="font-mono">scv</span> means less slowing at corners, which makes
+          cornering more demanding and increases the smoothing predicted by the model.
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex flex-col gap-6 md:flex-row">
       <aside className="border-border bg-card w-full rounded-xl border p-5 shadow-sm md:sticky md:top-6 md:h-[calc(100vh-7.5rem)] md:w-80 md:overflow-auto">
@@ -284,9 +347,32 @@ export default function ShaperScreen() {
           {!isOptimising && (
             <div className="text-muted-foreground mt-2 text-xs">
               Current score:{' '}
-              <span className="font-medium">
-                {currentScore != null ? currentScore.toFixed(9) : '—'}
-              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="font-medium underline decoration-dotted underline-offset-2">
+                    {currentScore != null ? currentScore.toFixed(9) : '—'}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={6}>
+                  {scoreTooltip}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          )}
+          {!isOptimising && (
+            <div className="text-muted-foreground mt-1 text-xs">
+              Suggested max accel:{' '}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="font-medium underline decoration-dotted underline-offset-2">
+                    {currentMaxAccel != null ? Math.round(currentMaxAccel / 100) * 100 : '—'}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={6}>
+                  {maxAccelTooltip}
+                </TooltipContent>
+              </Tooltip>{' '}
+              mm/s²
             </div>
           )}
           {optimiseProgress && (
@@ -328,15 +414,29 @@ export default function ShaperScreen() {
               </div>
               <div className="text-muted-foreground mt-2 text-xs">
                 Current score:{' '}
-                <span className="font-medium">
-                  {optimiseProgress.current ? optimiseProgress.current.score.toFixed(9) : '—'}
-                </span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="font-medium underline decoration-dotted underline-offset-2">
+                      {optimiseProgress.current ? optimiseProgress.current.score.toFixed(9) : '—'}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" sideOffset={6}>
+                    {scoreTooltip}
+                  </TooltipContent>
+                </Tooltip>
               </div>
               <div className="text-muted-foreground mt-1 text-xs">
                 Best score:{' '}
-                <span className="font-medium">
-                  {optimiseProgress.best ? optimiseProgress.best.score.toFixed(9) : '—'}
-                </span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="font-medium underline decoration-dotted underline-offset-2">
+                      {optimiseProgress.best ? optimiseProgress.best.score.toFixed(9) : '—'}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" sideOffset={6}>
+                    {scoreTooltip}
+                  </TooltipContent>
+                </Tooltip>
               </div>
             </div>
           )}

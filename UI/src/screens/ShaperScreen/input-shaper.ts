@@ -220,6 +220,44 @@ const klipperSmoothing = (a: number[], t: number[], accel = 5000, scv = 5) => {
   return Math.max(offset90, offset180);
 };
 
+const bisectMaxTrue = (predicate: (x: number) => boolean) => {
+  let left = 1;
+  let right = 1;
+
+  if (!predicate(1e-9)) return 0;
+
+  while (!predicate(left)) {
+    right = left;
+    left *= 0.5;
+  }
+
+  if (right === left) {
+    while (predicate(right)) right *= 2;
+  }
+
+  while (right - left > 1e-8) {
+    const middle = (left + right) * 0.5;
+    if (predicate(middle)) left = middle;
+    else right = middle;
+  }
+
+  return left;
+};
+
+// Klipper-style max_accel projection.
+// In Klipper this is used to suggest a maximum acceleration that keeps the
+// smoothing under a fixed threshold (TARGET_SMOOTHING).
+export const klipperSuggestedMaxAccel = (params: ShaperParams, scv = 5, targetSmoothing = 0.12) => {
+  const taps = computeMarlinShaperTaps(params);
+  if (!taps.a.length) return 0;
+
+  const maxAccel = bisectMaxTrue(
+    (testAccel) => klipperSmoothing(taps.a, taps.t, testAccel, scv) <= targetSmoothing
+  );
+
+  return Number.isFinite(maxAccel) ? maxAccel : 0;
+};
+
 export const klipperScoreFromMagnitudeSpectrum = (magnitudes: number[], params: ShaperParams) => {
   if (!magnitudes.length) return Number.POSITIVE_INFINITY;
 
