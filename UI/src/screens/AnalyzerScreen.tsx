@@ -87,7 +87,7 @@ export default function AnalyzerScreen() {
               Hz
             </div>
             <div className="text-muted-foreground mt-1 text-xs">
-              max-hold:{' '}
+              max:{' '}
               <span className="tabular-nums">
                 <AtomValue atom={formattedHistoricPeakFrequencyAtom} />
               </span>{' '}

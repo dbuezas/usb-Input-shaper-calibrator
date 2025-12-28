@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { atom, useAtom, useAtomValue } from 'jotai';
 import { SpectrumPlot } from '@/visualisations/SpectrumPlot';
 import {
@@ -19,6 +19,14 @@ import {
 import { spectrogramMaxHoldAtom, welchPsdMaxHoldAtom } from '@/Spectrogram';
 
 type OptimisationResult = { params: ShaperParams; score: number };
+
+type OptimisationProgress = {
+  percent: number;
+  iterationsDone: number;
+  iterationsTotal: number;
+  current?: OptimisationResult;
+  best?: OptimisationResult;
+};
 
 const binToHz = (bin: number, bins: number) => bin * (FIXED_SAMPLE_RATE / (2 * (bins - 1)));
 
@@ -51,63 +59,22 @@ const estimatePeakHz = (magnitudes: number[]) => {
   return binToHz(peakIdx, magnitudes.length);
 };
 
-const optimiseShaper = (magnitudes: number[]): OptimisationResult | null => {
-  if (!magnitudes.length) return null;
-
-  const peakHz = estimatePeakHz(magnitudes);
-  const types: InputShaperType[] = ['zv', 'zvd', 'zvdd', 'zvddd', 'mzv', 'ei', '2hei', '3hei'];
-
-  const fMin = Math.max(10, peakHz - 30);
-  const fMax = Math.min(200, peakHz + 30);
-
-  const zetas = [0.03, 0.05, 0.07, 0.1, 0.14, 0.18, 0.22, 0.28, 0.34];
-  const vtols = [0.02, 0.05, 0.08, 0.1, 0.14, 0.2, 0.28, 0.38];
-
-  let best: OptimisationResult | null = null;
-
-  for (const type of types) {
-    for (let f = fMin; f <= fMax; f += 0.5) {
-      for (const zeta of zetas) {
-        const vtolCandidates = type === 'ei' || type === '2hei' || type === '3hei' ? vtols : [0.1];
-        for (const vtol of vtolCandidates) {
-          const params: ShaperParams = { type, fHz: f, zeta, vtol };
-
-          // Stability guard: if the chosen f0 makes |H| huge near the measured peak,
-          // skip (prevents weird local minima).
-          const hPeak = shaperMagnitudeAtHz(params, peakHz);
-          if (!Number.isFinite(hPeak) || hPeak > 2.5) continue;
-
-          const shaped = applyShaperToMagnitudeSpectrum(params, magnitudes);
-          const score = weightedEnergyScore(magnitudes, shaped, peakHz);
-          if (!Number.isFinite(score)) continue;
-
-          // Prefer shorter shapers slightly when scores are close.
-          const lengthPenalty =
-            type === 'zv'
-              ? 0.0
-              : type === 'zvd'
-                ? 0.002
-                : type === 'mzv'
-                  ? 0.003
-                  : type === 'zvdd'
-                    ? 0.006
-                    : type === 'ei'
-                      ? 0.006
-                      : type === '2hei'
-                        ? 0.01
-                        : type === 'zvddd'
-                          ? 0.013
-                          : 0.013;
-          const total = score + lengthPenalty;
-
-          if (!best || total < best.score) best = { params, score: total };
-        }
-      }
-    }
-  }
-
-  return best;
-};
+const lengthPenaltyForType = (type: InputShaperType) =>
+  type === 'zv'
+    ? 0.0
+    : type === 'zvd'
+      ? 0.002
+      : type === 'mzv'
+        ? 0.003
+        : type === 'zvdd'
+          ? 0.006
+          : type === 'ei'
+            ? 0.006
+            : type === '2hei'
+              ? 0.01
+              : type === 'zvddd'
+                ? 0.013
+                : 0.013;
 
 const shaperTypeAtom = atom<InputShaperType>('zvd');
 const shaperF0Atom = atom(55);
@@ -146,16 +113,93 @@ export default function ShaperScreen() {
   const maxHoldWelch = useAtomValue(welchPsdMaxHoldAtom);
 
   const [isOptimising, setIsOptimising] = useState(false);
+  const [optimiseProgress, setOptimiseProgress] = useState<OptimisationProgress | null>(null);
+  const cancelRef = useRef(false);
+
+  useEffect(() => {
+    cancelRef.current = false;
+    return () => {
+      cancelRef.current = true;
+    };
+  }, []);
 
   const runAutoOptimise = async () => {
     if (!maxHoldSpectrum.length) return;
     setIsOptimising(true);
 
+    const magnitudes = maxHoldSpectrum;
+    const peakHz = estimatePeakHz(magnitudes);
+    const types: InputShaperType[] = ['zv', 'zvd', 'zvdd', 'zvddd', 'mzv', 'ei', '2hei', '3hei'];
+
+    const fMin = Math.max(10, peakHz - 30);
+    const fMax = Math.min(200, peakHz + 30);
+
+    const zetas = [0.03, 0.05, 0.07, 0.1, 0.14, 0.18, 0.22, 0.28, 0.34];
+    const vtols = [0.02, 0.05, 0.08, 0.1, 0.14, 0.2, 0.28, 0.38];
+
+    let iterationsTotal = 0;
+    for (const t of types) {
+      const vtolCount = t === 'ei' || t === '2hei' || t === '3hei' ? vtols.length : 1;
+      const fCount = Math.floor((fMax - fMin) / 0.5) + 1;
+      iterationsTotal += fCount * zetas.length * vtolCount;
+    }
+    let iterationsDone = 0;
+    let best: OptimisationResult | null = null;
+
     // Yield once so the UI can update the button state before the CPU-heavy search.
     await new Promise((r) => setTimeout(r, 0));
 
     try {
-      const best = optimiseShaper(maxHoldSpectrum);
+      let lastUiUpdate = performance.now();
+
+      for (const candidateType of types) {
+        for (let f = fMin; f <= fMax; f += 0.5) {
+          for (const zeta of zetas) {
+            const vtolCandidates =
+              candidateType === 'ei' || candidateType === '2hei' || candidateType === '3hei'
+                ? vtols
+                : [0.1];
+            for (const vtol of vtolCandidates) {
+              if (cancelRef.current) return;
+              iterationsDone++;
+              const params: ShaperParams = { type: candidateType, fHz: f, zeta, vtol };
+
+              const hPeak = shaperMagnitudeAtHz(params, peakHz);
+              if (!Number.isFinite(hPeak) || hPeak > 2.5) continue;
+
+              const shaped = applyShaperToMagnitudeSpectrum(params, magnitudes);
+              const score = weightedEnergyScore(magnitudes, shaped, peakHz);
+              if (!Number.isFinite(score)) continue;
+
+              const total = score + lengthPenaltyForType(candidateType);
+              const current: OptimisationResult = { params, score: total };
+              if (!best || total < best.score) best = current;
+
+              const now = performance.now();
+              if (now - lastUiUpdate > 75) {
+                lastUiUpdate = now;
+
+                // Live-update the sliders and plots with the currently-tried candidate.
+                setType(params.type);
+                setF0(params.fHz);
+                setZeta(params.zeta);
+                setVtol(params.vtol);
+
+                setOptimiseProgress({
+                  percent: (100 * iterationsDone) / Math.max(1, iterationsTotal),
+                  iterationsDone,
+                  iterationsTotal,
+                  current,
+                  best: best ?? undefined,
+                });
+
+                await new Promise((r) => setTimeout(r, 0));
+              }
+            }
+          }
+        }
+      }
+
       if (!best) return;
       setType(best.params.type);
       setF0(best.params.fHz);
@@ -163,6 +207,7 @@ export default function ShaperScreen() {
       setVtol(best.params.vtol);
     } finally {
       setIsOptimising(false);
+      setOptimiseProgress(null);
     }
   };
 
@@ -213,6 +258,32 @@ export default function ShaperScreen() {
           >
             {isOptimising ? 'Optimising…' : 'Auto optimise'}
           </Button>
+          {optimiseProgress && (
+            <div className="mt-3 rounded-md border border-dashed p-3">
+              <div className="text-muted-foreground text-xs">
+                {optimiseProgress.percent.toFixed(0)}% ({optimiseProgress.iterationsDone}/
+                {optimiseProgress.iterationsTotal})
+              </div>
+              <div className="bg-muted mt-2 h-2 w-full rounded">
+                <div
+                  className="bg-primary h-2 rounded"
+                  style={{ width: `${Math.max(0, Math.min(100, optimiseProgress.percent))}%` }}
+                />
+              </div>
+              <div className="text-muted-foreground mt-2 text-xs">
+                Current score:{' '}
+                <span className="font-medium">
+                  {optimiseProgress.current ? optimiseProgress.current.score.toFixed(4) : '—'}
+                </span>
+              </div>
+              <div className="text-muted-foreground mt-1 text-xs">
+                Best score:{' '}
+                <span className="font-medium">
+                  {optimiseProgress.best ? optimiseProgress.best.score.toFixed(4) : '—'}
+                </span>
+              </div>
+            </div>
+          )}
           {!maxHoldSpectrum.length && (
             <div className="text-muted-foreground mt-2 text-xs">
               Collect max-hold data in Analyzer first.
