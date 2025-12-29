@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 export default function InstallFirmwareScreen() {
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-2 w-full space-y-6">
       <div>
         <h2 className="text-xl font-semibold">Install firmware</h2>
         <div className="text-muted-foreground mt-1 text-sm">
