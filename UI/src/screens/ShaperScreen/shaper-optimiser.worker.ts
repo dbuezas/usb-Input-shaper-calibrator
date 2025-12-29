@@ -1,9 +1,10 @@
 import {
+  computeMarlinShaperTaps,
   type InputShaperType,
   type ShaperParams,
-  klipperScoreFromMagnitudeSpectrum,
   shaperMagnitudeAtHz,
 } from '@/screens/ShaperScreen/input-shaper';
+import { FIXED_SAMPLE_RATE } from '@/constants';
 
 type OptimisationResult = { params: ShaperParams; score: number };
 type BestByType = Partial<Record<InputShaperType, OptimisationResult>>;
@@ -11,12 +12,6 @@ type BestByType = Partial<Record<InputShaperType, OptimisationResult>>;
 type WorkerStartMessage = {
   type: 'start';
   magnitudes: number[];
-  fMin: number;
-  fMax: number;
-  fStep: number;
-  types: InputShaperType[];
-  zetas: number[];
-  vtols: number[];
   peakHz: number;
   uiUpdateEveryMs: number;
 };
@@ -40,6 +35,334 @@ type WorkerErrorMessage = { type: 'error'; message: string };
 
 type WorkerOutMessage = WorkerProgressMessage | WorkerDoneMessage | WorkerErrorMessage;
 
+const binToHz = (bin: number, bins: number) => bin * (FIXED_SAMPLE_RATE / (2 * (bins - 1)));
+
+// Klipper-like constants (see `klippy/extras/shaper_calibrate.py` and `shaper_defs.py`).
+const TEST_DAMPING_RATIOS = [0.075, 0.1, 0.15];
+const SHAPER_VIBRATION_REDUCTION = 20;
+
+// Optimiser search space (kept local to the worker).
+const SEARCH_TYPES: InputShaperType[] = ['zv', 'zvd', 'zvdd', 'zvddd', 'mzv', 'ei', '2hei', '3hei'];
+const SEARCH_F_STEP_HZ = 0.2;
+const SEARCH_ZETAS = [0.03, 0.05, 0.07, 0.1, 0.14, 0.18, 0.22, 0.28, 0.34];
+const SEARCH_VTOLS = [0.02, 0.05, 0.08, 0.1, 0.14, 0.2, 0.28, 0.38];
+const SEARCH_F_WINDOW_HZ = 60;
+const SEARCH_F_MIN_ABS_HZ = 10;
+const SEARCH_F_MAX_ABS_HZ = 150;
+
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+const isEiFamily = (t: InputShaperType) => t === 'ei' || t === '2hei' || t === '3hei';
+
+const estimateShaperVals = (
+  a: number[],
+  t: number[],
+  testDampingRatio: number,
+  freqsHz: number[]
+) => {
+  const invD = 1 / a.reduce((s, v) => s + v, 0);
+  const lastT = t.length ? (t[t.length - 1] ?? 0) : 0;
+  const out = new Array(freqsHz.length);
+  for (let i = 0; i < freqsHz.length; i++) {
+    const omega = 2 * Math.PI * (freqsHz[i] ?? 0);
+    const damping = testDampingRatio * omega;
+    const omegaD = omega * Math.sqrt(Math.max(0, 1 - testDampingRatio * testDampingRatio));
+    let sSum = 0;
+    let cSum = 0;
+    for (let j = 0; j < a.length; j++) {
+      const tj = t[j] ?? 0;
+      const w = (a[j] ?? 0) * Math.exp(-damping * (lastT - tj));
+      sSum += w * Math.sin(omegaD * tj);
+      cSum += w * Math.cos(omegaD * tj);
+    }
+    out[i] = Math.sqrt(sSum * sSum + cSum * cSum) * invD;
+  }
+  return out;
+};
+
+const estimateRemainingVibrations = (
+  freqsHz: number[],
+  psd: number[],
+  a: number[],
+  t: number[]
+) => {
+  let worstRemaining = 0;
+  const psdMax = Math.max(...psd);
+  const vibrThreshold = psdMax / SHAPER_VIBRATION_REDUCTION;
+
+  for (const dr of TEST_DAMPING_RATIOS) {
+    const vals = estimateShaperVals(a, t, dr, freqsHz);
+
+    let remainingSum = 0;
+    let allSum = 0;
+    for (let i = 0; i < psd.length; i++) {
+      const base = Math.max((psd[i] ?? 0) - vibrThreshold, 0);
+      allSum += base;
+      remainingSum += Math.max((vals[i] ?? 0) * (psd[i] ?? 0) - vibrThreshold, 0);
+    }
+    const ratio = allSum > 0 ? remainingSum / allSum : Number.POSITIVE_INFINITY;
+    worstRemaining = Math.max(worstRemaining, ratio);
+  }
+
+  return worstRemaining;
+};
+
+const klipperSmoothing = (a: number[], t: number[], accel = 5000, scv = 5) => {
+  const invD = 1 / a.reduce((s, v) => s + v, 0);
+  const halfAccel = accel * 0.5;
+  const n = t.length;
+  let ts = 0;
+  for (let i = 0; i < n; i++) ts += (a[i] ?? 0) * (t[i] ?? 0);
+  ts *= invD;
+
+  let offset90 = 0;
+  let offset180 = 0;
+  for (let i = 0; i < n; i++) {
+    const dt = (t[i] ?? 0) - ts;
+    if ((t[i] ?? 0) >= ts) {
+      offset90 += (a[i] ?? 0) * (scv + halfAccel * dt) * dt;
+    }
+    offset180 += (a[i] ?? 0) * halfAccel * dt * dt;
+  }
+  offset90 *= invD * Math.sqrt(2);
+  offset180 *= invD;
+  return Math.max(offset90, offset180);
+};
+
+const klipperScoreFromSpectrum = (magnitudes: number[], params: ShaperParams) => {
+  if (!magnitudes.length) return Number.POSITIVE_INFINITY;
+
+  const freqsHz: number[] = [];
+  const psd: number[] = [];
+  for (let i = 0; i < magnitudes.length; i++) {
+    const f = binToHz(i, magnitudes.length);
+    if (f > 200) break;
+    freqsHz.push(f);
+    const m = magnitudes[i] ?? 0;
+    psd.push(m * m);
+  }
+
+  const taps = computeMarlinShaperTaps(params);
+  const vibrs = estimateRemainingVibrations(freqsHz, psd, taps.a, taps.t);
+  if (!Number.isFinite(vibrs)) return Number.POSITIVE_INFINITY;
+  const smoothing = klipperSmoothing(taps.a, taps.t, 5000, 5);
+  if (!Number.isFinite(smoothing)) return Number.POSITIVE_INFINITY;
+  return smoothing * (Math.pow(vibrs, 1.5) + vibrs * 0.2 + 0.01);
+};
+
+const scoreCandidate = (magnitudes: number[], params: ShaperParams, peakHz: number) => {
+  const hPeak = shaperMagnitudeAtHz(params, peakHz);
+  if (!Number.isFinite(hPeak) || hPeak > 2.5) return Number.POSITIVE_INFINITY;
+  const total = klipperScoreFromSpectrum(magnitudes, params);
+  return Number.isFinite(total) ? total : Number.POSITIVE_INFINITY;
+};
+
+const numericGradient = (
+  magnitudes: number[],
+  base: ShaperParams,
+  peakHz: number,
+  df: number,
+  dz: number,
+  dv: number
+) => {
+  const s0 = scoreCandidate(magnitudes, base, peakHz);
+  if (!Number.isFinite(s0)) return { s0, df: 0, dz: 0, dv: 0 };
+
+  const fPlus = scoreCandidate(magnitudes, { ...base, fHz: base.fHz + df }, peakHz);
+  const fMinus = scoreCandidate(magnitudes, { ...base, fHz: base.fHz - df }, peakHz);
+  const zPlus = scoreCandidate(magnitudes, { ...base, zeta: base.zeta + dz }, peakHz);
+  const zMinus = scoreCandidate(magnitudes, { ...base, zeta: base.zeta - dz }, peakHz);
+
+  const gF = (fPlus - fMinus) / (2 * df);
+  const gZ = (zPlus - zMinus) / (2 * dz);
+
+  let gV = 0;
+  if (isEiFamily(base.type)) {
+    const vPlus = scoreCandidate(magnitudes, { ...base, vtol: base.vtol + dv }, peakHz);
+    const vMinus = scoreCandidate(magnitudes, { ...base, vtol: base.vtol - dv }, peakHz);
+    gV = (vPlus - vMinus) / (2 * dv);
+  }
+
+  return { s0, df: gF, dz: gZ, dv: gV };
+};
+
+type FineState = {
+  type: InputShaperType;
+  params: ShaperParams;
+  score: number;
+  done: boolean;
+};
+
+type CoarseState = {
+  type: InputShaperType;
+  fHzCandidates: number[];
+  zetaCandidates: number[];
+  vtolCandidates: number[];
+  fIndex: number;
+  zIndex: number;
+  vIndex: number;
+  bestScore: number;
+};
+
+const coarseNext = (
+  state: CoarseState
+): { params: ShaperParams; next: CoarseState } | undefined => {
+  if (state.fIndex >= state.fHzCandidates.length) return undefined;
+  const fHz = state.fHzCandidates[state.fIndex] ?? 0;
+  const zeta = state.zetaCandidates[state.zIndex] ?? 0;
+  const vtol = state.vtolCandidates[state.vIndex] ?? 0;
+  const params: ShaperParams = { type: state.type, fHz, zeta, vtol };
+
+  // Advance (vtol -> zeta -> fHz)
+  let { fIndex, zIndex, vIndex } = state;
+  vIndex++;
+  if (vIndex >= state.vtolCandidates.length) {
+    vIndex = 0;
+    zIndex++;
+    if (zIndex >= state.zetaCandidates.length) {
+      zIndex = 0;
+      fIndex++;
+    }
+  }
+
+  return {
+    params,
+    next: { ...state, fIndex, zIndex, vIndex },
+  };
+};
+
+const frequencyCandidatesFarToNear = (
+  fMin: number,
+  fMax: number,
+  fStep: number,
+  peakHz: number
+) => {
+  const asc: number[] = [];
+  for (let f = fMin; f <= fMax; f += fStep) asc.push(f);
+  if (!asc.length) return asc;
+
+  // Start at extremes and walk inward, always choosing the side farther from peakHz.
+  let lo = 0;
+  let hi = asc.length - 1;
+  let takeLoOnTie = true;
+  const out: number[] = [];
+  while (lo <= hi) {
+    const fLo = asc[lo] ?? 0;
+    const fHi = asc[hi] ?? 0;
+    const dLo = Math.abs(fLo - peakHz);
+    const dHi = Math.abs(fHi - peakHz);
+
+    if (dLo > dHi) {
+      out.push(fLo);
+      lo++;
+      continue;
+    }
+    if (dHi > dLo) {
+      out.push(fHi);
+      hi--;
+      continue;
+    }
+
+    // Tie: alternate between low and high.
+    if (takeLoOnTie) {
+      out.push(fLo);
+      lo++;
+    } else {
+      out.push(fHi);
+      hi--;
+    }
+    takeLoOnTie = !takeLoOnTie;
+  }
+
+  return out;
+};
+
+class MaxHeap<T> {
+  private data: T[] = [];
+  private readonly scoreFn: (v: T) => number;
+  constructor(scoreFn: (v: T) => number) {
+    this.scoreFn = scoreFn;
+  }
+  get size() {
+    return this.data.length;
+  }
+  push(v: T) {
+    this.data.push(v);
+    this.siftUp(this.data.length - 1);
+  }
+  pop(): T | undefined {
+    if (!this.data.length) return undefined;
+    const top = this.data[0];
+    const last = this.data.pop();
+    if (this.data.length && last) {
+      this.data[0] = last;
+      this.siftDown(0);
+    }
+    return top;
+  }
+  private siftUp(i: number) {
+    while (i > 0) {
+      const p = Math.floor((i - 1) / 2);
+      if (this.scoreFn(this.data[i]!) <= this.scoreFn(this.data[p]!)) break;
+      [this.data[i], this.data[p]] = [this.data[p]!, this.data[i]!];
+      i = p;
+    }
+  }
+  private siftDown(i: number) {
+    for (;;) {
+      const l = 2 * i + 1;
+      const r = l + 1;
+      let best = i;
+      if (l < this.data.length && this.scoreFn(this.data[l]!) > this.scoreFn(this.data[best]!)) {
+        best = l;
+      }
+      if (r < this.data.length && this.scoreFn(this.data[r]!) > this.scoreFn(this.data[best]!)) {
+        best = r;
+      }
+      if (best === i) break;
+      [this.data[i], this.data[best]] = [this.data[best]!, this.data[i]!];
+      i = best;
+    }
+  }
+}
+
+const fineStep = (
+  magnitudes: number[],
+  state: FineState,
+  peakHz: number,
+  bounds: { fMin: number; fMax: number; zMin: number; zMax: number; vMin: number; vMax: number }
+) => {
+  if (state.done) return state;
+
+  // With a larger fine-pass budget, use smaller finite-difference steps.
+  const df = 0.01;
+  const dz = 0.0005;
+  const dv = 0.001;
+
+  const g = numericGradient(magnitudes, state.params, peakHz, df, dz, dv);
+  const norm = Math.hypot(g.df, g.dz, g.dv);
+  if (!Number.isFinite(norm) || norm < 1e-9) return { ...state, done: true };
+
+  // Smaller initial step size; backtracking will reduce further if needed.
+  let alpha = 0.25;
+  for (let bt = 0; bt < 12; bt++) {
+    const next: ShaperParams = {
+      ...state.params,
+      fHz: clamp(state.params.fHz - alpha * g.df, bounds.fMin, bounds.fMax),
+      zeta: clamp(state.params.zeta - alpha * g.dz, bounds.zMin, bounds.zMax),
+      vtol: isEiFamily(state.params.type)
+        ? clamp(state.params.vtol - alpha * g.dv, bounds.vMin, bounds.vMax)
+        : state.params.vtol,
+    };
+    const nextScore = scoreCandidate(magnitudes, next, peakHz);
+    if (Number.isFinite(nextScore) && nextScore + 1e-12 < state.score) {
+      return { ...state, params: next, score: nextScore };
+    }
+    alpha *= 0.5;
+  }
+
+  return { ...state, done: true };
+};
+
 let cancelled = false;
 
 self.onmessage = (evt: MessageEvent<WorkerMessage>) => {
@@ -53,64 +376,168 @@ self.onmessage = (evt: MessageEvent<WorkerMessage>) => {
   cancelled = false;
 
   try {
-    const { magnitudes, fMin, fMax, fStep, types, zetas, vtols, peakHz, uiUpdateEveryMs } = msg;
+    const { magnitudes, peakHz, uiUpdateEveryMs } = msg;
 
-    let iterationsTotal = 0;
+    const types = SEARCH_TYPES;
+    const fStep = SEARCH_F_STEP_HZ;
+    const zetas = SEARCH_ZETAS;
+    const vtols = SEARCH_VTOLS;
+
+    const fMin = Math.max(SEARCH_F_MIN_ABS_HZ, peakHz - SEARCH_F_WINDOW_HZ);
+    const fMax = Math.min(SEARCH_F_MAX_ABS_HZ, peakHz + SEARCH_F_WINDOW_HZ);
+
+    // Coarse iteration count
+    let coarseTotal = 0;
     for (const t of types) {
-      const vtolCount = t === 'ei' || t === '2hei' || t === '3hei' ? vtols.length : 1;
+      const vtolCount = isEiFamily(t) ? vtols.length : 1;
       const fCount = Math.floor((fMax - fMin) / fStep) + 1;
-      iterationsTotal += fCount * zetas.length * vtolCount;
+      coarseTotal += fCount * zetas.length * vtolCount;
     }
 
+    const fineStepsPerType = 600;
+    const iterationsTotal = coarseTotal + fineStepsPerType * types.length;
     let iterationsDone = 0;
+
     let best: OptimisationResult | undefined;
     const bestByType: BestByType = {};
     let lastUiUpdate = performance.now();
 
+    // Phase 1: coarse grid search (interleaved worst->best across types)
+    const fHzCandidates = frequencyCandidatesFarToNear(fMin, fMax, fStep, peakHz);
+
+    const coarseHeap = new MaxHeap<CoarseState>((s) => s.bestScore);
     for (const candidateType of types) {
-      for (let f = fMin; f <= fMax; f += fStep) {
-        for (const zeta of zetas) {
-          const vtolCandidates =
-            candidateType === 'ei' || candidateType === '2hei' || candidateType === '3hei'
-              ? vtols
-              : [0.1];
-          for (const vtol of vtolCandidates) {
-            if (cancelled) {
-              const out: WorkerDoneMessage = { type: 'done', best };
-              self.postMessage(out satisfies WorkerOutMessage);
-              return;
-            }
+      const vtolCandidates = isEiFamily(candidateType) ? vtols : [0.1];
+      if (!fHzCandidates.length || !zetas.length || !vtolCandidates.length) continue;
+      coarseHeap.push({
+        type: candidateType,
+        fHzCandidates,
+        zetaCandidates: zetas,
+        vtolCandidates,
+        fIndex: 0,
+        zIndex: 0,
+        vIndex: 0,
+        bestScore: Number.POSITIVE_INFINITY,
+      });
+    }
 
-            iterationsDone++;
-            const params: ShaperParams = { type: candidateType, fHz: f, zeta, vtol };
+    for (let i = 0; i < coarseTotal; i++) {
+      if (cancelled) {
+        const out: WorkerDoneMessage = { type: 'done', best, bestByType };
+        self.postMessage(out satisfies WorkerOutMessage);
+        return;
+      }
 
-            const hPeak = shaperMagnitudeAtHz(params, peakHz);
-            if (!Number.isFinite(hPeak) || hPeak > 2.5) continue;
+      const state = coarseHeap.pop();
+      if (!state) {
+        // No candidates left to evaluate; still advance progress.
+        iterationsDone++;
+        continue;
+      }
 
-            const total = klipperScoreFromMagnitudeSpectrum(magnitudes, params);
-            if (!Number.isFinite(total)) continue;
+      const next = coarseNext(state);
+      if (!next) {
+        iterationsDone++;
+        continue;
+      }
 
-            const current: OptimisationResult = { params, score: total };
-            if (!best || total < best.score) best = current;
-            const typeBest = bestByType[candidateType];
-            if (!typeBest || total < typeBest.score) bestByType[candidateType] = current;
+      iterationsDone++;
+      const params = next.params;
+      const score = scoreCandidate(magnitudes, params, peakHz);
+      const current: OptimisationResult = { params, score };
 
-            const now = performance.now();
-            if (now - lastUiUpdate > uiUpdateEveryMs) {
-              lastUiUpdate = now;
-              const out: WorkerProgressMessage = {
-                type: 'progress',
-                percent: (100 * iterationsDone) / Math.max(1, iterationsTotal),
-                iterationsDone,
-                iterationsTotal,
-                current,
-                best,
-                bestByType,
-              };
-              self.postMessage(out satisfies WorkerOutMessage);
-            }
-          }
-        }
+      if (Number.isFinite(score)) {
+        const prevByType = bestByType[state.type];
+        if (!prevByType || score < prevByType.score) bestByType[state.type] = current;
+        if (!best || score < best.score) best = current;
+        next.next.bestScore = Math.min(next.next.bestScore, score);
+      }
+
+      // Reinsert if there is more work for this type.
+      if (next.next.fIndex < next.next.fHzCandidates.length) {
+        coarseHeap.push(next.next);
+      }
+
+      const now = performance.now();
+      if (now - lastUiUpdate > uiUpdateEveryMs) {
+        lastUiUpdate = now;
+        const out: WorkerProgressMessage = {
+          type: 'progress',
+          percent: (100 * iterationsDone) / Math.max(1, iterationsTotal),
+          iterationsDone,
+          iterationsTotal,
+          current,
+          best,
+          bestByType,
+        };
+        self.postMessage(out satisfies WorkerOutMessage);
+      }
+    }
+
+    // Phase 2: fine local optimisation (gradient descent) from per-type coarse best
+    const zMin = Math.min(...zetas);
+    const zMax = Math.max(...zetas);
+    const vMin = vtols.length ? Math.min(...vtols) : 0.02;
+    const vMax = vtols.length ? Math.max(...vtols) : 0.4;
+
+    const heap = new MaxHeap<FineState>((s) => s.score);
+    const remainingByType = new Map<InputShaperType, number>();
+    for (const candidateType of types) {
+      remainingByType.set(candidateType, fineStepsPerType);
+      const start = bestByType[candidateType];
+      if (!start) continue;
+      heap.push({ type: candidateType, params: start.params, score: start.score, done: false });
+    }
+
+    // Interleave refinement across types: always refine the currently-worst candidate next.
+    const bounds = { fMin, fMax, zMin, zMax, vMin, vMax };
+    const fineBudget = fineStepsPerType * types.length;
+    for (let i = 0; i < fineBudget; i++) {
+      if (cancelled) {
+        const out: WorkerDoneMessage = { type: 'done', best, bestByType };
+        self.postMessage(out satisfies WorkerOutMessage);
+        return;
+      }
+
+      const state = heap.pop();
+      if (!state) {
+        // No candidates left to refine; still advance progress.
+        iterationsDone++;
+        continue;
+      }
+
+      const left = remainingByType.get(state.type) ?? 0;
+      if (left <= 0) {
+        iterationsDone++;
+        continue;
+      }
+      remainingByType.set(state.type, left - 1);
+
+      const nextState = fineStep(magnitudes, state, peakHz, bounds);
+      iterationsDone++;
+
+      const current: OptimisationResult = { params: nextState.params, score: nextState.score };
+      const prevByType = bestByType[nextState.type];
+      if (!prevByType || current.score < prevByType.score) bestByType[nextState.type] = current;
+      if (!best || current.score < best.score) best = current;
+
+      if (!nextState.done && (remainingByType.get(nextState.type) ?? 0) > 0) {
+        heap.push(nextState);
+      }
+
+      const now = performance.now();
+      if (now - lastUiUpdate > uiUpdateEveryMs) {
+        lastUiUpdate = now;
+        const out: WorkerProgressMessage = {
+          type: 'progress',
+          percent: (100 * iterationsDone) / Math.max(1, iterationsTotal),
+          iterationsDone,
+          iterationsTotal,
+          current,
+          best,
+          bestByType,
+        };
+        self.postMessage(out satisfies WorkerOutMessage);
       }
     }
 

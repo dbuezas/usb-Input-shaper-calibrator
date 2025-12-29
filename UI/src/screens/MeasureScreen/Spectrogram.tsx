@@ -19,7 +19,7 @@ import type { DataSource } from '@/screens/AnalyzerScreen/data-source';
 import { SpectrumPlot } from '@/visualisations/SpectrumPlot';
 import { Waterfall } from '@/visualisations/Waterfall';
 import { Button } from '@/components/ui/button';
-import { ConfiguredTooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { ExplainTooltip } from '@/components/ExplainTooltip';
 import { historicPeakAtom, peakAtom, spectrogramMaxHoldAtom, welchPsdMaxHoldAtom } from './atoms';
 
 const spectrogramAtom = atom<number[]>([]);
@@ -42,31 +42,33 @@ export function SpectrogramControls({ dataSource }: { dataSource?: DataSource })
   const setWelchPsdScaleMax = useSetAtom(welchPsdScaleMaxAtom);
   const setHistoricPeak = useSetAtom(historicPeakAtom);
 
-  const explain = (title: string, accurate: string, intuition: string) => (
-    <div className="max-w-[360px] leading-snug">
-      <h3 className="text-sm font-semibold">{title}</h3>
-      <div className="mt-2">{accurate}</div>
-      <div className="text-muted-foreground mt-2">{intuition}</div>
-    </div>
-  );
-
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <ConfiguredTooltip>
-          <TooltipTrigger asChild>
-            <div className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
-              Window
-            </div>
-          </TooltipTrigger>
-          <TooltipContent side="right" sideOffset={8}>
-            {explain(
-              'Window function',
-              'The FFT isn’t run on the whole stream at once — it’s run on short time chunks (“windows”). This chooses how we weight samples inside each chunk before taking the FFT.',
-              'Tapered windows (Hann/Hamming/Blackman) fade the chunk edges toward zero. That reduces fake “extra bumps” around a real peak, at the cost of making the peak a bit wider. Rectangular keeps edges sharp (no taper): sharpest peaks, but it can create more false ripples if the vibration isn’t perfectly aligned to the chunk.'
-            )}
-          </TooltipContent>
-        </ConfiguredTooltip>
+        <ExplainTooltip
+          title="Window function"
+          accurate={
+            <>
+              The FFT isn’t run on the whole stream at once — it’s run on short time chunks
+              (“windows”). This chooses how we weight samples inside each chunk before taking the
+              FFT.
+            </>
+          }
+          intuition={
+            <>
+              Tapered windows (<i>Hann/Hamming/Blackman</i>) fade the chunk edges toward zero. That
+              reduces fake “extra bumps” around a real peak, at the cost of making the peak a bit
+              wider. <b>Rectangular</b> keeps edges sharp (no taper): sharpest peaks, but it can
+              create more false ripples if the vibration isn’t perfectly aligned to the chunk.
+            </>
+          }
+          side="right"
+          sideOffset={8}
+        >
+          <div className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
+            Window
+          </div>
+        </ExplainTooltip>
         <div className="border-border mt-2 inline-flex flex-wrap gap-1 rounded-md border p-1">
           {(
             [
@@ -76,36 +78,49 @@ export function SpectrogramControls({ dataSource }: { dataSource?: DataSource })
               { value: 'rectangular', label: 'Rectangular' },
             ] as const
           ).map((opt) => (
-            <ConfiguredTooltip key={opt.value}>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={windowFunction === opt.value ? 'secondary' : 'ghost'}
-                  className="h-8"
-                  aria-pressed={windowFunction === opt.value}
-                  onClick={() => {
-                    setWindowFunction(opt.value);
-                    dataSource?.setWindowFunction(opt.value);
-                  }}
-                >
-                  {opt.label}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="top" sideOffset={6}>
-                {explain(
-                  opt.label,
-                  `Uses the ${opt.label} window before the FFT.`,
-                  opt.value === 'hann'
-                    ? 'Great default: fewer false ripples, peaks stay readable, still fairly sharp.'
-                    : opt.value === 'hamming'
-                      ? 'Like Hann, but keeps the very center of a peak a touch stronger. Often similar in practice.'
-                      : opt.value === 'blackman'
-                        ? 'Most aggressive taper: suppresses false ripples the most, but peaks look wider and small details can blur together.'
-                        : 'No taper: shows the most “raw” chunk, giving the sharpest bins, but it can add extra ripples around peaks (easy to misread as multiple resonances).'
-                )}
-              </TooltipContent>
-            </ConfiguredTooltip>
+            <ExplainTooltip
+              key={opt.value}
+              title={opt.label}
+              accurate={
+                <>
+                  Uses the <b>{opt.label}</b> window before the FFT.
+                </>
+              }
+              intuition={
+                opt.value === 'hann' ? (
+                  <>Great default: fewer false ripples, peaks stay readable, still fairly sharp.</>
+                ) : opt.value === 'hamming' ? (
+                  <>
+                    Like Hann, but keeps the very center of a peak a touch stronger. Often similar
+                    in practice.
+                  </>
+                ) : opt.value === 'blackman' ? (
+                  <>
+                    Most aggressive taper: suppresses false ripples the most, but peaks look wider
+                    and small details can blur together.
+                  </>
+                ) : (
+                  <>
+                    No taper: shows the most “raw” chunk, giving the sharpest bins, but it can add
+                    extra ripples around peaks (easy to misread as multiple resonances).
+                  </>
+                )
+              }
+            >
+              <Button
+                type="button"
+                size="sm"
+                variant={windowFunction === opt.value ? 'secondary' : 'ghost'}
+                className="h-8"
+                aria-pressed={windowFunction === opt.value}
+                onClick={() => {
+                  setWindowFunction(opt.value);
+                  dataSource?.setWindowFunction(opt.value);
+                }}
+              >
+                {opt.label}
+              </Button>
+            </ExplainTooltip>
           ))}
         </div>
       </div>
@@ -119,17 +134,48 @@ export function SpectrogramControls({ dataSource }: { dataSource?: DataSource })
               { value: 'welch', label: 'Welch PSD' },
             ] as const
           ).map((opt) => (
-            <Button
+            <ExplainTooltip
               key={opt.value}
-              type="button"
-              size="sm"
-              variant={view === opt.value ? 'secondary' : 'ghost'}
-              className="h-8"
-              aria-pressed={view === opt.value}
-              onClick={() => setView(opt.value)}
+              title={opt.value === 'spectrum' ? 'Spectrum (magnitude)' : 'Welch PSD'}
+              accurate={
+                opt.value === 'spectrum' ? (
+                  <>
+                    Shows the strength of each frequency in the most recent time window (one FFT
+                    frame). Peaks correspond to resonances or periodic vibration.
+                  </>
+                ) : (
+                  <>
+                    Shows a <b>power spectral density</b> estimate averaged over multiple
+                    overlapping windows (<i>Welch method</i>). It’s more stable and closer to
+                    “energy per frequency”.
+                  </>
+                )
+              }
+              intuition={
+                opt.value === 'spectrum' ? (
+                  <>
+                    It’s a “what frequencies are present right now?” view. It updates quickly, but a
+                    single window can be noisy.
+                  </>
+                ) : (
+                  <>
+                    Think of it as “a calmer, averaged spectrum”. Peaks are easier to trust, but
+                    changes show up more slowly.
+                  </>
+                )
+              }
             >
-              {opt.label}
-            </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={view === opt.value ? 'secondary' : 'ghost'}
+                className="h-8"
+                aria-pressed={view === opt.value}
+                onClick={() => setView(opt.value)}
+              >
+                {opt.label}
+              </Button>
+            </ExplainTooltip>
           ))}
         </div>
       </div>
