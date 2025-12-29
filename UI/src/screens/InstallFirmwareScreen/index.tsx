@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
-import firmwareUf2Url from '../../../assets/firmware.uf2?url';
+import firmwareUf2Url from '@/assets/firmware.uf2?url';
 
 export default function InstallFirmwareScreen() {
   return (
