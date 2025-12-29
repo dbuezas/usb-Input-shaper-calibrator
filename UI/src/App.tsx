@@ -1,28 +1,28 @@
 import { useState } from 'react';
-import AnalyzerScreen from '@/screens/AnalyzerScreen';
+import MeasureScreen from '@/screens/MeasureScreen';
 import ShaperScreen from '@/screens/ShaperScreen';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-type Screen = 'analyzer' | 'shaper';
+type Screen = 'measure' | 'shaper';
 
-const screenFromTabValue = (v: string): Screen => (v === 'shaper' ? 'shaper' : 'analyzer');
+const screenFromTabValue = (v: string): Screen => (v === 'shaper' ? 'shaper' : 'measure');
 
 function App() {
-  const [screen, setScreen] = useState<Screen>('analyzer');
+  const [screen, setScreen] = useState<Screen>('measure');
 
   return (
     <div className="mx-auto max-w-6xl p-6 font-sans">
       <header className="mb-6 flex items-center justify-between gap-4">
-        <h1 className="text-xl font-bold">ADXL Resonance Analyzer</h1>
+        <h1 className="text-xl font-bold">ADXL Resonance Measure</h1>
         <Tabs value={screen} onValueChange={(v) => setScreen(screenFromTabValue(v))}>
           <TabsList>
-            <TabsTrigger value="analyzer">Analyzer</TabsTrigger>
+            <TabsTrigger value="measure">Measure</TabsTrigger>
             <TabsTrigger value="shaper">Shaper</TabsTrigger>
           </TabsList>
         </Tabs>
       </header>
 
-      {screen === 'shaper' ? <ShaperScreen /> : <AnalyzerScreen />}
+      {screen === 'shaper' ? <ShaperScreen /> : <MeasureScreen />}
     </div>
   );
 }

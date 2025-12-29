@@ -3,8 +3,8 @@ import type {
   SpectrumSliceMessage,
   WelchPsdSliceMessage,
   WindowFunctionType,
-} from '@/screens/AnalyzerScreen/messages';
-import { spectrogramChannel } from '@/screens/AnalyzerScreen/messages';
+} from '@/screens/MeasureScreen/messages';
+import { spectrogramChannel } from '@/screens/MeasureScreen/messages';
 import { atom, useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
   ACTUAL_RESOLUTION,
@@ -15,7 +15,7 @@ import {
   SPECTROGRAM_WATERFALL_HEIGHT,
 } from '@/constants';
 import { Slider } from '@/components/ui/slider';
-import type { DataSource } from '@/screens/AnalyzerScreen/data-source';
+import type { DataSource } from '@/screens/MeasureScreen/data-source';
 import { SpectrumPlot } from '@/visualisations/SpectrumPlot';
 import { Waterfall } from '@/visualisations/Waterfall';
 import { Button } from '@/components/ui/button';

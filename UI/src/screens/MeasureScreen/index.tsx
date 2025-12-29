@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import { atom, useAtomValue, useSetAtom, type Atom } from 'jotai';
 import { atomFamily } from 'jotai/utils';
 import Spectrogram, { SpectrogramControls } from './Spectrogram';
-import type { DataSource } from '@/screens/AnalyzerScreen/data-source';
-import { SerialDataSource } from '@/screens/AnalyzerScreen/data-source';
-import { SimulationPort } from '@/screens/AnalyzerScreen/simulation-port';
+import type { DataSource } from '@/screens/MeasureScreen/data-source';
+import { SerialDataSource } from '@/screens/MeasureScreen/data-source';
+import { SimulationPort } from '@/screens/MeasureScreen/simulation-port';
 import { Button } from '@/components/ui/button';
 import { ExplainTooltip } from '@/components/ExplainTooltip';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -28,7 +28,7 @@ const AtomValue = ({ atom }: { atom: Atom<string> }) => {
   return <>{value}</>;
 };
 
-export default function AnalyzerScreen() {
+export default function MeasureScreen() {
   const [isConnected, setIsConnected] = useState(false);
   const setAdxlData = useSetAtom(adxlDataAtom);
   const setFrequency = useSetAtom(frequencyAtom);

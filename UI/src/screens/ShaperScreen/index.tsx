@@ -20,7 +20,7 @@ import {
   type ShaperParams,
 } from './input-shaper';
 import ShaperOptimiserWorker from './shaper-optimiser.worker?worker';
-import { spectrogramMaxHoldAtom, welchPsdMaxHoldAtom } from '../AnalyzerScreen/atoms';
+import { spectrogramMaxHoldAtom, welchPsdMaxHoldAtom } from '../MeasureScreen/atoms';
 
 type OptimisationResult = { params: ShaperParams; score: number };
 type BestByType = Partial<Record<InputShaperType, OptimisationResult>>;
@@ -310,7 +310,7 @@ export default function ShaperScreen() {
     accurate: (
       <>
         Brute-force searches shaper type + frequency + damping (+ tolerance for EI/HEI) to minimize
-        the Klipper-like score, using your Analyzer <b>max-hold</b> spectrum as input.
+        the Klipper-like score, using your Measure <b>max-hold</b> spectrum as input.
       </>
     ),
     intuition: (
@@ -412,7 +412,7 @@ export default function ShaperScreen() {
       <aside className="border-border bg-card w-full rounded-xl border p-5 shadow-sm md:sticky md:top-6 md:h-[calc(100vh-7.5rem)] md:w-80 md:overflow-auto">
         <div className="text-left">
           <h3 className="text-lg font-semibold">Input Shaper Simulator</h3>
-          <div className="text-muted-foreground text-sm">Works from Analyzer max-hold data.</div>
+          <div className="text-muted-foreground text-sm">Works from Measure max-hold data.</div>
         </div>
 
         <div className="mt-5">
@@ -589,7 +589,7 @@ export default function ShaperScreen() {
           )}
           {!maxHoldSpectrum.length && (
             <div className="text-muted-foreground mt-2 text-xs">
-              Collect max-hold data in Analyzer first.
+              Collect max-hold data in Measure first.
             </div>
           )}
         </div>
