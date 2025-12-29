@@ -13,10 +13,12 @@ import { cn } from '@/lib/utils';
 import {
   applyShaperToMagnitudeSpectrum,
   computeMarlinShaperTaps,
+  flatnessScoreFromMagnitudeSpectrum,
   klipperScoreFromMagnitudeSpectrum,
   klipperSuggestedMaxAccel,
   type InputShaperType,
   type ShaperParams,
+  type ShaperScoreMode,
 } from './input-shaper';
 import ShaperOptimiserWorker from './shaper-optimiser.worker?worker';
 import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
@@ -62,6 +64,7 @@ const shaperTypeAtom = atom<InputShaperType>('zvd');
 const shaperF0Atom = atom(55);
 const shaperZetaAtom = atom(0.1);
 const shaperVtolAtom = atom(0.1);
+const shaperScoreModeAtom = atom<ShaperScoreMode>('klipper');
 
 const shaperParamsAtom = atom<ShaperParams>((get) => ({
   type: get(shaperTypeAtom),
@@ -79,7 +82,12 @@ const shapedSpectrumAtom = atom((get) => {
 const currentScoreAtom = atom((get) => {
   const base = get(spectrogramMaxHoldAtom);
   if (!base?.length) return undefined;
-  const score = klipperScoreFromMagnitudeSpectrum(base, get(shaperParamsAtom));
+  const scoreMode = get(shaperScoreModeAtom);
+  const params = get(shaperParamsAtom);
+  const score =
+    scoreMode === 'flatness'
+      ? flatnessScoreFromMagnitudeSpectrum(base, params)
+      : klipperScoreFromMagnitudeSpectrum(base, params);
   return Number.isFinite(score) ? score : undefined;
 });
 
@@ -108,6 +116,7 @@ export default function ShaperScreen() {
   const [f0, setF0] = useAtom(shaperF0Atom);
   const [zeta, setZeta] = useAtom(shaperZetaAtom);
   const [vtol, setVtol] = useAtom(shaperVtolAtom);
+  const [scoreMode, setScoreMode] = useAtom(shaperScoreModeAtom);
 
   const maxHoldSpectrum = useAtomValue(spectrogramMaxHoldAtom);
   const currentScore = useAtomValue(currentScoreAtom);
@@ -201,6 +210,7 @@ export default function ShaperScreen() {
           magnitudes,
           peakHz,
           uiUpdateEveryMs: 75,
+          scoreMode,
         });
 
         const cancelPoll = window.setInterval(() => {
@@ -248,6 +258,39 @@ export default function ShaperScreen() {
       </div>
     </>
   );
+
+  const flatnessScoreTooltip = (
+    <>
+      Measures how “flat” the <b>shaped</b> spectrum is (lower is better).
+      <div className="text-muted-foreground mt-2">
+        Computed as normalized squared error from the mean over 0–200 Hz.
+      </div>
+    </>
+  );
+
+  const scoreModeTooltip = {
+    title: 'Score mode',
+    accurate: (
+      <>
+        Choose what <b>Auto optimise</b> tries to minimize.
+        <ul className="mt-2 list-disc space-y-1 pl-5">
+          <li>
+            <b>Klipper</b>: tradeoff between remaining vibration and smoothing (good general
+            default).
+          </li>
+          <li>
+            <b>Flatness</b>: minimize variation from a horizontal line in the shaped spectrum.
+          </li>
+        </ul>
+      </>
+    ),
+    intuition: (
+      <>
+        Use <b>Flatness</b> when you want the shaper to “even out” the spectrum; use <b>Klipper</b>{' '}
+        when you want a more standard ringing-vs-smoothing compromise.
+      </>
+    ),
+  };
 
   const maxAccelAccurate = (
     <>
@@ -460,6 +503,44 @@ export default function ShaperScreen() {
         </div>
 
         <div className="mt-5">
+          <div className="mb-2">
+            <ExplainTooltip
+              title={scoreModeTooltip.title}
+              accurate={scoreModeTooltip.accurate}
+              intuition={scoreModeTooltip.intuition}
+              side="right"
+              sideOffset={8}
+            >
+              <div className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
+                Score mode
+              </div>
+            </ExplainTooltip>
+          </div>
+          <div className="border-border grid w-full grid-cols-2 gap-1 rounded-md border p-1">
+            <Button
+              type="button"
+              size="sm"
+              variant={scoreMode === 'klipper' ? 'secondary' : 'ghost'}
+              className="h-8 w-full"
+              aria-pressed={scoreMode === 'klipper'}
+              onClick={() => setScoreMode('klipper')}
+            >
+              Klipper
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={scoreMode === 'flatness' ? 'secondary' : 'ghost'}
+              className="h-8 w-full"
+              aria-pressed={scoreMode === 'flatness'}
+              onClick={() => setScoreMode('flatness')}
+            >
+              Flatness
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-5">
           <ExplainTooltip
             title={autoOptimise.title}
             accurate={autoOptimise.accurate}
@@ -479,7 +560,7 @@ export default function ShaperScreen() {
               Current score:{' '}
               <ExplainTooltip
                 title="Score"
-                accurate={scoreTooltip}
+                accurate={scoreMode === 'flatness' ? flatnessScoreTooltip : scoreTooltip}
                 intuition={<>Used by the optimiser and for quick comparisons.</>}
               >
                 <span className="font-medium underline decoration-dotted underline-offset-2">
@@ -557,8 +638,10 @@ export default function ShaperScreen() {
                 Current score:{' '}
                 <ExplainTooltip
                   title="Score"
-                  accurate={scoreTooltip}
-                  intuition={<>Shows the optimiser’s current candidate.</>}
+                  accurate={scoreMode === 'flatness' ? flatnessScoreTooltip : scoreTooltip}
+                  intuition={
+                    <>Shows the optimiser’s current candidate for the selected score mode.</>
+                  }
                 >
                   <span className="font-medium underline decoration-dotted underline-offset-2">
                     {optimiseProgress.current ? optimiseProgress.current.score.toFixed(9) : '—'}
@@ -569,8 +652,8 @@ export default function ShaperScreen() {
                 Best score:{' '}
                 <ExplainTooltip
                   title="Score"
-                  accurate={scoreTooltip}
-                  intuition={<>Best score found so far.</>}
+                  accurate={scoreMode === 'flatness' ? flatnessScoreTooltip : scoreTooltip}
+                  intuition={<>Best score found so far for the selected score mode.</>}
                 >
                   <span className="font-medium underline decoration-dotted underline-offset-2">
                     {optimiseProgress.best ? optimiseProgress.best.score.toFixed(9) : '—'}

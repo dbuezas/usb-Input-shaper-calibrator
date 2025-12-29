@@ -9,6 +9,8 @@ export type ShaperParams = {
   vtol: number;
 };
 
+export type ShaperScoreMode = 'klipper' | 'flatness';
+
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 
 const safeSqrt = (v: number) => Math.sqrt(Math.max(0, v));
@@ -123,6 +125,33 @@ export const applyShaperToMagnitudeSpectrum = (params: ShaperParams, magnitudes:
     out[i] = magnitudes[i] * h;
   }
   return out;
+};
+
+export const flatnessScoreFromMagnitudeSpectrum = (magnitudes: number[], params: ShaperParams) => {
+  if (!magnitudes.length) return Number.POSITIVE_INFINITY;
+
+  const shaped = applyShaperToMagnitudeSpectrum(params, magnitudes);
+
+  let sum = 0;
+  let count = 0;
+  for (let i = 0; i < shaped.length; i++) {
+    const f = binToHz(i, shaped.length);
+    if (f > 200) break;
+    sum += shaped[i] ?? 0;
+    count++;
+  }
+  if (!count) return Number.POSITIVE_INFINITY;
+  const mean = sum / count;
+
+  let sse = 0;
+  for (let i = 0; i < count; i++) {
+    const d = (shaped[i] ?? 0) - mean;
+    sse += d * d;
+  }
+
+  // Normalize by mean² so the score is roughly scale-invariant.
+  const denom = mean * mean * count;
+  return denom > 0 ? sse / denom : Number.POSITIVE_INFINITY;
 };
 
 export const applyShaperToWelchPsd = (params: ShaperParams, psd: number[]) => {

@@ -2,7 +2,8 @@ import {
   computeMarlinShaperTaps,
   type InputShaperType,
   type ShaperParams,
-  shaperMagnitudeAtHz,
+  type ShaperScoreMode,
+  klipperScoreFromMagnitudeSpectrum,
 } from '@/screens/ShaperScreen/input-shaper';
 import { FIXED_SAMPLE_RATE } from '@/constants';
 
@@ -14,6 +15,7 @@ type WorkerStartMessage = {
   magnitudes: number[];
   peakHz: number;
   uiUpdateEveryMs: number;
+  scoreMode?: ShaperScoreMode;
 };
 
 type WorkerCancelMessage = { type: 'cancel' };
@@ -35,12 +37,6 @@ type WorkerErrorMessage = { type: 'error'; message: string };
 
 type WorkerOutMessage = WorkerProgressMessage | WorkerDoneMessage | WorkerErrorMessage;
 
-const binToHz = (bin: number, bins: number) => bin * (FIXED_SAMPLE_RATE / (2 * (bins - 1)));
-
-// Klipper-like constants (see `klippy/extras/shaper_calibrate.py` and `shaper_defs.py`).
-const TEST_DAMPING_RATIOS = [0.075, 0.1, 0.15];
-const SHAPER_VIBRATION_REDUCTION = 20;
-
 // Optimiser search space (kept local to the worker).
 const SEARCH_TYPES: InputShaperType[] = ['zv', 'zvd', 'zvdd', 'zvddd', 'mzv', 'ei', '2hei', '3hei'];
 const SEARCH_F_STEP_HZ = 0.2;
@@ -53,106 +49,65 @@ const SEARCH_F_MAX_ABS_HZ = 150;
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const isEiFamily = (t: InputShaperType) => t === 'ei' || t === '2hei' || t === '3hei';
 
-const estimateShaperVals = (
-  a: number[],
-  t: number[],
-  testDampingRatio: number,
-  freqsHz: number[]
-) => {
-  const invD = 1 / a.reduce((s, v) => s + v, 0);
-  const lastT = t.length ? (t[t.length - 1] ?? 0) : 0;
-  const out = new Array(freqsHz.length);
-  for (let i = 0; i < freqsHz.length; i++) {
-    const omega = 2 * Math.PI * (freqsHz[i] ?? 0);
-    const damping = testDampingRatio * omega;
-    const omegaD = omega * Math.sqrt(Math.max(0, 1 - testDampingRatio * testDampingRatio));
-    let sSum = 0;
-    let cSum = 0;
-    for (let j = 0; j < a.length; j++) {
-      const tj = t[j] ?? 0;
-      const w = (a[j] ?? 0) * Math.exp(-damping * (lastT - tj));
-      sSum += w * Math.sin(omegaD * tj);
-      cSum += w * Math.cos(omegaD * tj);
-    }
-    out[i] = Math.sqrt(sSum * sSum + cSum * cSum) * invD;
+const shaperMagnitudeAtHzFromTaps = (a: number[], t: number[], freqHz: number) => {
+  const w = 2 * Math.PI * freqHz;
+  let re = 0;
+  let im = 0;
+  for (let i = 0; i < a.length; i++) {
+    const phase = -w * (t[i] ?? 0);
+    re += (a[i] ?? 0) * Math.cos(phase);
+    im += (a[i] ?? 0) * Math.sin(phase);
   }
-  return out;
+  return Math.sqrt(re * re + im * im);
 };
 
-const estimateRemainingVibrations = (
-  freqsHz: number[],
-  psd: number[],
-  a: number[],
-  t: number[]
-) => {
-  let worstRemaining = 0;
-  const psdMax = Math.max(...psd);
-  const vibrThreshold = psdMax / SHAPER_VIBRATION_REDUCTION;
-
-  for (const dr of TEST_DAMPING_RATIOS) {
-    const vals = estimateShaperVals(a, t, dr, freqsHz);
-
-    let remainingSum = 0;
-    let allSum = 0;
-    for (let i = 0; i < psd.length; i++) {
-      const base = Math.max((psd[i] ?? 0) - vibrThreshold, 0);
-      allSum += base;
-      remainingSum += Math.max((vals[i] ?? 0) * (psd[i] ?? 0) - vibrThreshold, 0);
-    }
-    const ratio = allSum > 0 ? remainingSum / allSum : Number.POSITIVE_INFINITY;
-    worstRemaining = Math.max(worstRemaining, ratio);
-  }
-
-  return worstRemaining;
-};
-
-const klipperSmoothing = (a: number[], t: number[], accel = 5000, scv = 5) => {
-  const invD = 1 / a.reduce((s, v) => s + v, 0);
-  const halfAccel = accel * 0.5;
-  const n = t.length;
-  let ts = 0;
-  for (let i = 0; i < n; i++) ts += (a[i] ?? 0) * (t[i] ?? 0);
-  ts *= invD;
-
-  let offset90 = 0;
-  let offset180 = 0;
-  for (let i = 0; i < n; i++) {
-    const dt = (t[i] ?? 0) - ts;
-    if ((t[i] ?? 0) >= ts) {
-      offset90 += (a[i] ?? 0) * (scv + halfAccel * dt) * dt;
-    }
-    offset180 += (a[i] ?? 0) * halfAccel * dt * dt;
-  }
-  offset90 *= invD * Math.sqrt(2);
-  offset180 *= invD;
-  return Math.max(offset90, offset180);
-};
-
-const klipperScoreFromSpectrum = (magnitudes: number[], params: ShaperParams) => {
+const flatnessScoreFromMagnitudeSpectrumFast = (magnitudes: number[], params: ShaperParams) => {
   if (!magnitudes.length) return Number.POSITIVE_INFINITY;
 
-  const freqsHz: number[] = [];
-  const psd: number[] = [];
-  for (let i = 0; i < magnitudes.length; i++) {
-    const f = binToHz(i, magnitudes.length);
-    if (f > 200) break;
-    freqsHz.push(f);
-    const m = magnitudes[i] ?? 0;
-    psd.push(m * m);
-  }
+  // Match the UI scoring range: 0–200 Hz.
+  const freqStepHz = FIXED_SAMPLE_RATE / (2 * (magnitudes.length - 1));
+  const maxBins = Math.min(magnitudes.length, Math.floor(200 / freqStepHz) + 1);
+  if (maxBins <= 0) return Number.POSITIVE_INFINITY;
 
   const taps = computeMarlinShaperTaps(params);
-  const vibrs = estimateRemainingVibrations(freqsHz, psd, taps.a, taps.t);
-  if (!Number.isFinite(vibrs)) return Number.POSITIVE_INFINITY;
-  const smoothing = klipperSmoothing(taps.a, taps.t, 5000, 5);
-  if (!Number.isFinite(smoothing)) return Number.POSITIVE_INFINITY;
-  return smoothing * (Math.pow(vibrs, 1.5) + vibrs * 0.2 + 0.01);
+  const a = taps.a;
+  const t = taps.t;
+  if (!a.length || !t.length) return Number.POSITIVE_INFINITY;
+
+  // Two-pass: mean then SSE, but no allocations and taps computed once.
+  let sum = 0;
+  for (let i = 0; i < maxBins; i++) {
+    const h = shaperMagnitudeAtHzFromTaps(a, t, i * freqStepHz);
+    sum += (magnitudes[i] ?? 0) * h;
+  }
+  const mean = sum / maxBins;
+  if (!Number.isFinite(mean) || mean <= 0) return Number.POSITIVE_INFINITY;
+
+  let sse = 0;
+  for (let i = 0; i < maxBins; i++) {
+    const h = shaperMagnitudeAtHzFromTaps(a, t, i * freqStepHz);
+    const d = (magnitudes[i] ?? 0) * h - mean;
+    sse += d * d;
+  }
+
+  const denom = mean * mean * maxBins;
+  return denom > 0 ? sse / denom : Number.POSITIVE_INFINITY;
 };
 
-const scoreCandidate = (magnitudes: number[], params: ShaperParams, peakHz: number) => {
-  const hPeak = shaperMagnitudeAtHz(params, peakHz);
+const scoreCandidate = (
+  magnitudes: number[],
+  params: ShaperParams,
+  peakHz: number,
+  scoreMode: ShaperScoreMode
+) => {
+  const { a, t } = computeMarlinShaperTaps(params);
+  const hPeak = shaperMagnitudeAtHzFromTaps(a, t, peakHz);
   if (!Number.isFinite(hPeak) || hPeak > 2.5) return Number.POSITIVE_INFINITY;
-  const total = klipperScoreFromSpectrum(magnitudes, params);
+
+  const total =
+    scoreMode === 'flatness'
+      ? flatnessScoreFromMagnitudeSpectrumFast(magnitudes, params)
+      : klipperScoreFromMagnitudeSpectrum(magnitudes, params);
   return Number.isFinite(total) ? total : Number.POSITIVE_INFINITY;
 };
 
@@ -160,25 +115,26 @@ const numericGradient = (
   magnitudes: number[],
   base: ShaperParams,
   peakHz: number,
+  scoreMode: ShaperScoreMode,
   df: number,
   dz: number,
   dv: number
 ) => {
-  const s0 = scoreCandidate(magnitudes, base, peakHz);
+  const s0 = scoreCandidate(magnitudes, base, peakHz, scoreMode);
   if (!Number.isFinite(s0)) return { s0, df: 0, dz: 0, dv: 0 };
 
-  const fPlus = scoreCandidate(magnitudes, { ...base, fHz: base.fHz + df }, peakHz);
-  const fMinus = scoreCandidate(magnitudes, { ...base, fHz: base.fHz - df }, peakHz);
-  const zPlus = scoreCandidate(magnitudes, { ...base, zeta: base.zeta + dz }, peakHz);
-  const zMinus = scoreCandidate(magnitudes, { ...base, zeta: base.zeta - dz }, peakHz);
+  const fPlus = scoreCandidate(magnitudes, { ...base, fHz: base.fHz + df }, peakHz, scoreMode);
+  const fMinus = scoreCandidate(magnitudes, { ...base, fHz: base.fHz - df }, peakHz, scoreMode);
+  const zPlus = scoreCandidate(magnitudes, { ...base, zeta: base.zeta + dz }, peakHz, scoreMode);
+  const zMinus = scoreCandidate(magnitudes, { ...base, zeta: base.zeta - dz }, peakHz, scoreMode);
 
   const gF = (fPlus - fMinus) / (2 * df);
   const gZ = (zPlus - zMinus) / (2 * dz);
 
   let gV = 0;
   if (isEiFamily(base.type)) {
-    const vPlus = scoreCandidate(magnitudes, { ...base, vtol: base.vtol + dv }, peakHz);
-    const vMinus = scoreCandidate(magnitudes, { ...base, vtol: base.vtol - dv }, peakHz);
+    const vPlus = scoreCandidate(magnitudes, { ...base, vtol: base.vtol + dv }, peakHz, scoreMode);
+    const vMinus = scoreCandidate(magnitudes, { ...base, vtol: base.vtol - dv }, peakHz, scoreMode);
     gV = (vPlus - vMinus) / (2 * dv);
   }
 
@@ -329,6 +285,7 @@ const fineStep = (
   magnitudes: number[],
   state: FineState,
   peakHz: number,
+  scoreMode: ShaperScoreMode,
   bounds: { fMin: number; fMax: number; zMin: number; zMax: number; vMin: number; vMax: number }
 ) => {
   if (state.done) return state;
@@ -338,7 +295,7 @@ const fineStep = (
   const dz = 0.0005;
   const dv = 0.001;
 
-  const g = numericGradient(magnitudes, state.params, peakHz, df, dz, dv);
+  const g = numericGradient(magnitudes, state.params, peakHz, scoreMode, df, dz, dv);
   const norm = Math.hypot(g.df, g.dz, g.dv);
   if (!Number.isFinite(norm) || norm < 1e-9) return { ...state, done: true };
 
@@ -353,7 +310,7 @@ const fineStep = (
         ? clamp(state.params.vtol - alpha * g.dv, bounds.vMin, bounds.vMax)
         : state.params.vtol,
     };
-    const nextScore = scoreCandidate(magnitudes, next, peakHz);
+    const nextScore = scoreCandidate(magnitudes, next, peakHz, scoreMode);
     if (Number.isFinite(nextScore) && nextScore + 1e-12 < state.score) {
       return { ...state, params: next, score: nextScore };
     }
@@ -377,6 +334,7 @@ self.onmessage = (evt: MessageEvent<WorkerMessage>) => {
 
   try {
     const { magnitudes, peakHz, uiUpdateEveryMs } = msg;
+    const scoreMode = msg.scoreMode ?? 'klipper';
 
     const types = SEARCH_TYPES;
     const fStep = SEARCH_F_STEP_HZ;
@@ -443,7 +401,7 @@ self.onmessage = (evt: MessageEvent<WorkerMessage>) => {
 
       iterationsDone++;
       const params = next.params;
-      const score = scoreCandidate(magnitudes, params, peakHz);
+      const score = scoreCandidate(magnitudes, params, peakHz, scoreMode);
       const current: OptimisationResult = { params, score };
 
       if (Number.isFinite(score)) {
@@ -513,7 +471,7 @@ self.onmessage = (evt: MessageEvent<WorkerMessage>) => {
       }
       remainingByType.set(state.type, left - 1);
 
-      const nextState = fineStep(magnitudes, state, peakHz, bounds);
+      const nextState = fineStep(magnitudes, state, peakHz, scoreMode, bounds);
       iterationsDone++;
 
       const current: OptimisationResult = { params: nextState.params, score: nextState.score };
