@@ -5,6 +5,9 @@ import path from 'path';
 
 // https://vite.dev/config/
 export default defineConfig({
+  // For GitHub Pages we need a repo-relative base path like `/my-repo/`.
+  // The workflow sets BASE_PATH accordingly.
+  base: process.env.BASE_PATH ?? '/',
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
