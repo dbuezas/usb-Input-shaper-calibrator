@@ -1,11 +1,29 @@
 import {
   computeMarlinShaperTaps,
   type InputShaperType,
+  type CorneringSettings,
   type ShaperParams,
   type ShaperScoreMode,
   klipperScoreFromMagnitudeSpectrum,
 } from '@/screens/ShaperScreen/input-shaper';
 import { FIXED_SAMPLE_RATE } from '@/constants';
+
+type WorkerCorneringSettings =
+  | { model: 'scv'; scv: number }
+  | { model: 'jerk'; jerk: number }
+  | { model: 'junction_deviation'; junctionDeviation: number };
+
+const toCorneringSettings = (v?: WorkerCorneringSettings): CorneringSettings => {
+  if (!v) return { model: 'scv', scv: 5 };
+  switch (v.model) {
+    case 'scv':
+      return { model: 'scv', scv: v.scv };
+    case 'jerk':
+      return { model: 'jerk', jerk: v.jerk };
+    case 'junction_deviation':
+      return { model: 'junction_deviation', junctionDeviation: v.junctionDeviation };
+  }
+};
 
 type OptimisationResult = { params: ShaperParams; score: number };
 type BestByType = Partial<Record<InputShaperType, OptimisationResult>>;
@@ -16,6 +34,7 @@ type WorkerStartMessage = {
   peakHz: number;
   uiUpdateEveryMs: number;
   scoreMode: ShaperScoreMode;
+  cornering?: WorkerCorneringSettings;
   candidateTypes?: InputShaperType[];
 };
 
@@ -25,6 +44,7 @@ type WorkerRefineMessage = {
   peakHz: number;
   uiUpdateEveryMs: number;
   scoreMode: ShaperScoreMode;
+  cornering?: WorkerCorneringSettings;
   startParams: ShaperParams;
   steps?: number;
 };
@@ -107,7 +127,8 @@ const scoreCandidate = (
   magnitudes: number[],
   params: ShaperParams,
   peakHz: number,
-  scoreMode: ShaperScoreMode
+  scoreMode: ShaperScoreMode,
+  cornering: CorneringSettings
 ) => {
   const { a, t } = computeMarlinShaperTaps(params);
   const hPeak = shaperMagnitudeAtHzFromTaps(a, t, peakHz);
@@ -116,7 +137,7 @@ const scoreCandidate = (
   const total =
     scoreMode === 'flatness'
       ? flatnessScoreFromMagnitudeSpectrumFast(magnitudes, params)
-      : klipperScoreFromMagnitudeSpectrum(magnitudes, params);
+      : klipperScoreFromMagnitudeSpectrum(magnitudes, params, cornering);
   return Number.isFinite(total) ? total : Number.POSITIVE_INFINITY;
 };
 
@@ -125,25 +146,62 @@ const numericGradient = (
   base: ShaperParams,
   peakHz: number,
   scoreMode: ShaperScoreMode,
+  cornering: CorneringSettings,
   df: number,
   dz: number,
   dv: number
 ) => {
-  const s0 = scoreCandidate(magnitudes, base, peakHz, scoreMode);
+  const s0 = scoreCandidate(magnitudes, base, peakHz, scoreMode, cornering);
   if (!Number.isFinite(s0)) return { s0, df: 0, dz: 0, dv: 0 };
 
-  const fPlus = scoreCandidate(magnitudes, { ...base, fHz: base.fHz + df }, peakHz, scoreMode);
-  const fMinus = scoreCandidate(magnitudes, { ...base, fHz: base.fHz - df }, peakHz, scoreMode);
-  const zPlus = scoreCandidate(magnitudes, { ...base, zeta: base.zeta + dz }, peakHz, scoreMode);
-  const zMinus = scoreCandidate(magnitudes, { ...base, zeta: base.zeta - dz }, peakHz, scoreMode);
+  const fPlus = scoreCandidate(
+    magnitudes,
+    { ...base, fHz: base.fHz + df },
+    peakHz,
+    scoreMode,
+    cornering
+  );
+  const fMinus = scoreCandidate(
+    magnitudes,
+    { ...base, fHz: base.fHz - df },
+    peakHz,
+    scoreMode,
+    cornering
+  );
+  const zPlus = scoreCandidate(
+    magnitudes,
+    { ...base, zeta: base.zeta + dz },
+    peakHz,
+    scoreMode,
+    cornering
+  );
+  const zMinus = scoreCandidate(
+    magnitudes,
+    { ...base, zeta: base.zeta - dz },
+    peakHz,
+    scoreMode,
+    cornering
+  );
 
   const gF = (fPlus - fMinus) / (2 * df);
   const gZ = (zPlus - zMinus) / (2 * dz);
 
   let gV = 0;
   if (isEiFamily(base.type)) {
-    const vPlus = scoreCandidate(magnitudes, { ...base, vtol: base.vtol + dv }, peakHz, scoreMode);
-    const vMinus = scoreCandidate(magnitudes, { ...base, vtol: base.vtol - dv }, peakHz, scoreMode);
+    const vPlus = scoreCandidate(
+      magnitudes,
+      { ...base, vtol: base.vtol + dv },
+      peakHz,
+      scoreMode,
+      cornering
+    );
+    const vMinus = scoreCandidate(
+      magnitudes,
+      { ...base, vtol: base.vtol - dv },
+      peakHz,
+      scoreMode,
+      cornering
+    );
     gV = (vPlus - vMinus) / (2 * dv);
   }
 
@@ -295,6 +353,7 @@ const fineStep = (
   state: FineState,
   peakHz: number,
   scoreMode: ShaperScoreMode,
+  cornering: CorneringSettings,
   bounds: { fMin: number; fMax: number; zMin: number; zMax: number; vMin: number; vMax: number }
 ) => {
   if (state.done) return state;
@@ -304,7 +363,7 @@ const fineStep = (
   const dz = 0.001;
   const dv = 0.001;
 
-  const g = numericGradient(magnitudes, state.params, peakHz, scoreMode, df, dz, dv);
+  const g = numericGradient(magnitudes, state.params, peakHz, scoreMode, cornering, df, dz, dv);
   const norm = Math.hypot(g.df, g.dz, g.dv);
   if (!Number.isFinite(norm) || norm < 1e-9) return { ...state, done: true };
 
@@ -335,7 +394,7 @@ const fineStep = (
       return { ...state, done: true };
     }
 
-    const nextScore = scoreCandidate(magnitudes, next, peakHz, scoreMode);
+    const nextScore = scoreCandidate(magnitudes, next, peakHz, scoreMode, cornering);
     if (Number.isFinite(nextScore) && nextScore + 1e-12 < state.score) {
       return { ...state, params: next, score: nextScore };
     }
@@ -349,6 +408,7 @@ const refine = (msg: WorkerRefineMessage) => {
   const { magnitudes, peakHz, uiUpdateEveryMs } = msg;
   const safetyCapSteps = msg.steps ?? 20_000;
   const start = msg.startParams;
+  const cornering = toCorneringSettings(msg.cornering);
 
   const zMin = Math.min(...SEARCH_ZETAS);
   const zMax = Math.max(...SEARCH_ZETAS);
@@ -366,7 +426,7 @@ const refine = (msg: WorkerRefineMessage) => {
       zeta: start.zeta,
       vtol: start.vtol,
     },
-    score: scoreCandidate(magnitudes, start, peakHz, msg.scoreMode),
+    score: scoreCandidate(magnitudes, start, peakHz, msg.scoreMode, cornering),
     done: false,
   };
 
@@ -377,7 +437,7 @@ const refine = (msg: WorkerRefineMessage) => {
 
   let iterationsDone = 0;
   for (let i = 0; i < safetyCapSteps; i++) {
-    state = fineStep(magnitudes, state, peakHz, msg.scoreMode, bounds);
+    state = fineStep(magnitudes, state, peakHz, msg.scoreMode, cornering, bounds);
     if (!best || state.score < best.score) best = { params: state.params, score: state.score };
 
     iterationsDone = i + 1;
@@ -420,6 +480,7 @@ const refine = (msg: WorkerRefineMessage) => {
 
 const bruteForce = (msg: WorkerStartMessage) => {
   const { magnitudes, peakHz, uiUpdateEveryMs, scoreMode } = msg;
+  const cornering = toCorneringSettings(msg.cornering);
   const types = (msg.candidateTypes?.length ? msg.candidateTypes : SEARCH_TYPES).filter(
     (t): t is InputShaperType => SEARCH_TYPES.includes(t)
   );
@@ -481,7 +542,7 @@ const bruteForce = (msg: WorkerStartMessage) => {
 
     iterationsDone++;
     const params = next.params;
-    const score = scoreCandidate(magnitudes, params, peakHz, scoreMode);
+    const score = scoreCandidate(magnitudes, params, peakHz, scoreMode, cornering);
     const current: OptimisationResult = { params, score };
 
     if (Number.isFinite(score)) {
@@ -543,7 +604,7 @@ const bruteForce = (msg: WorkerStartMessage) => {
     }
     remainingByType.set(state.type, left - 1);
 
-    const nextState = fineStep(magnitudes, state, peakHz, scoreMode, bounds);
+    const nextState = fineStep(magnitudes, state, peakHz, scoreMode, cornering, bounds);
     iterationsDone++;
 
     const current: OptimisationResult = { params: nextState.params, score: nextState.score };

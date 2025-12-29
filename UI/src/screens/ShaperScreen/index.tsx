@@ -16,7 +16,9 @@ import {
   computeMarlinShaperTaps,
   flatnessScoreFromMagnitudeSpectrum,
   klipperScoreFromMagnitudeSpectrum,
-  klipperSuggestedMaxAccel,
+  suggestedMaxAccel,
+  type CorneringModel,
+  type CorneringSettings,
   type InputShaperType,
   type ShaperParams,
   type ShaperScoreMode,
@@ -41,6 +43,11 @@ type OptimiserWorkerDone = { type: 'done'; best?: OptimisationResult; bestByType
 type OptimiserWorkerError = { type: 'error'; message: string };
 
 type OptimiserWorkerOut = OptimiserWorkerProgress | OptimiserWorkerDone | OptimiserWorkerError;
+
+type OptimiserWorkerCornering =
+  | { model: 'scv'; scv: number }
+  | { model: 'jerk'; jerk: number }
+  | { model: 'junction_deviation'; junctionDeviation: number };
 
 type OptimisationProgress = {
   percent: number;
@@ -85,6 +92,23 @@ const shaperZetaAtom = atom(0.1);
 const shaperVtolAtom = atom(0.1);
 const shaperScoreModeAtom = atom<ShaperScoreMode>('klipper');
 
+const corneringModelAtom = atom<CorneringModel>('scv');
+const corneringScvAtom = atom(5);
+const corneringJerkAtom = atom(10);
+const corneringJdAtom = atom(0.02);
+
+const corneringSettingsAtom = atom<CorneringSettings>((get) => {
+  const model = get(corneringModelAtom);
+  switch (model) {
+    case 'scv':
+      return { model: 'scv', scv: get(corneringScvAtom) };
+    case 'jerk':
+      return { model: 'jerk', jerk: get(corneringJerkAtom) };
+    case 'junction_deviation':
+      return { model: 'junction_deviation', junctionDeviation: get(corneringJdAtom) };
+  }
+});
+
 const shaperParamsAtom = atom<ShaperParams>((get) => ({
   type: get(shaperTypeAtom),
   fHz: get(shaperF0Atom),
@@ -103,17 +127,18 @@ const currentScoreAtom = atom((get) => {
   if (!base.length) return undefined;
   const scoreMode = get(shaperScoreModeAtom);
   const params = get(shaperParamsAtom);
+  const cornering = get(corneringSettingsAtom);
   const score =
     scoreMode === 'flatness'
       ? flatnessScoreFromMagnitudeSpectrum(base, params)
-      : klipperScoreFromMagnitudeSpectrum(base, params);
+      : klipperScoreFromMagnitudeSpectrum(base, params, cornering);
   return Number.isFinite(score) ? score : undefined;
 });
 
 const currentMaxAccelAtom = atom((get) => {
   const base = get(spectrogramMaxHoldAtom);
   if (!base.length) return undefined;
-  const maxAccel = klipperSuggestedMaxAccel(get(shaperParamsAtom), 5, 0.12);
+  const maxAccel = suggestedMaxAccel(get(shaperParamsAtom), get(corneringSettingsAtom), 0.12);
   return Number.isFinite(maxAccel) ? maxAccel : undefined;
 });
 
@@ -136,6 +161,10 @@ export default function ShaperScreen() {
   const [zeta, setZeta] = useAtom(shaperZetaAtom);
   const [vtol, setVtol] = useAtom(shaperVtolAtom);
   const [scoreMode, setScoreMode] = useAtom(shaperScoreModeAtom);
+  const [corneringModel, setCorneringModel] = useAtom(corneringModelAtom);
+  const [corneringScv, setCorneringScv] = useAtom(corneringScvAtom);
+  const [corneringJerk, setCorneringJerk] = useAtom(corneringJerkAtom);
+  const [corneringJd, setCorneringJd] = useAtom(corneringJdAtom);
 
   const maxHoldSpectrum = useAtomValue(spectrogramMaxHoldAtom);
   const currentScore = useAtomValue(currentScoreAtom);
@@ -296,6 +325,7 @@ export default function ShaperScreen() {
             peakHz,
             uiUpdateEveryMs: 75,
             scoreMode,
+            cornering: corneringToWorker(),
             candidateTypes,
           });
         }
@@ -385,6 +415,7 @@ export default function ShaperScreen() {
           peakHz,
           uiUpdateEveryMs: 75,
           scoreMode,
+          cornering: corneringToWorker(),
           startParams: { type, fHz: f0, zeta, vtol },
         });
 
@@ -427,12 +458,24 @@ export default function ShaperScreen() {
         <b>smoothing</b>
         <div className="mt-1">
           time-spread from the shaper taps using Klipper’s cornering model (
-          <span className="font-mono">accel=5000</span>, <span className="font-mono">scv=5</span>).
-          Bigger smoothing rounds corners more.
+          <span className="font-mono">accel=5000</span>,{' '}
+          <span className="font-mono">cornering</span>
+          from the UI). Bigger smoothing rounds corners more.
         </div>
       </div>
     </>
   );
+
+  const corneringToWorker = (): OptimiserWorkerCornering => {
+    switch (corneringModel) {
+      case 'scv':
+        return { model: 'scv', scv: corneringScv };
+      case 'jerk':
+        return { model: 'jerk', jerk: corneringJerk };
+      case 'junction_deviation':
+        return { model: 'junction_deviation', junctionDeviation: corneringJd };
+    }
+  };
 
   const flatnessScoreTooltip = (
     <>
@@ -470,18 +513,38 @@ export default function ShaperScreen() {
   const maxAccelAccurate = (
     <>
       A projection of the highest acceleration where Klipper’s smoothing model stays under a fixed
-      threshold: <code className="font-mono">smoothing(taps, accel, scv=5) ≤ 0.12</code>. It’s found
-      via bisection search.
+      threshold: <code className="font-mono">smoothing(taps, accel, cornering) ≤ 0.12</code>. It’s
+      found via bisection search.
       <div className="mt-2">
-        <h4 className="text-sm font-semibold">SCV</h4>
+        <h4 className="text-sm font-semibold">Cornering model</h4>
         <div className="mt-1">
-          <code className="font-mono">scv</code> (square corner velocity) is the speed the planner
-          tries to maintain through sharp corners. Higher <code className="font-mono">scv</code>{' '}
-          means less slowing down at corners → the model predicts more smoothing.
+          The smoothing model depends on your firmware’s cornering behavior.
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            <li>
+              <b>SCV (Klipper)</b>: planner maintains a target speed through sharp corners.
+            </li>
+            <li>
+              <b>Jerk (Marlin)</b>: classic jerk limit (approx. corner speed ≈ jerk).
+            </li>
+            <li>
+              <b>Junction deviation (Marlin)</b>: corner speed derived from accel + JD.
+            </li>
+          </ul>
         </div>
       </div>
     </>
   );
+
+  const corneringModelInfo = {
+    title: 'Cornering model',
+    accurate: (
+      <>
+        Controls how the smoothing term models corner rounding for the Klipper-style score and the
+        suggested max acceleration.
+      </>
+    ),
+    intuition: <>Pick the option that matches your firmware and what you configured in it.</>,
+  };
 
   const shaperFamily = {
     title: 'Shaper type',
@@ -659,57 +722,108 @@ export default function ShaperScreen() {
         </div>
 
         <div className="mt-5">
-          <ExplainTooltip
-            title={shaperFamily.title}
-            accurate={shaperFamily.accurate}
-            intuition={shaperFamily.intuition}
-          >
-            <div className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
-              Shaper
-            </div>
-          </ExplainTooltip>
-          <div className="border-border mt-2 grid w-full grid-cols-4 gap-1 rounded-md border p-1">
-            {(
-              [
-                { value: 'zv', label: 'ZV' },
-                { value: 'zvd', label: 'ZVD' },
-                { value: 'zvdd', label: 'ZVDD' },
-                { value: 'zvddd', label: 'ZVDDD' },
-                { value: 'mzv', label: 'MZV' },
-                { value: 'ei', label: 'EI' },
-                { value: '2hei', label: '2HEI' },
-                { value: '3hei', label: '3HEI' },
-              ] as const
-            ).map((opt) => (
-              <ExplainTooltip
-                key={opt.value}
-                title={shaperTypeButton.title}
-                accurate={shaperTypeButton.accurate}
-                intuition={shaperTypeButton.intuition}
-              >
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={type === opt.value ? 'secondary' : 'ghost'}
-                  className="h-8 w-full"
-                  aria-pressed={type === opt.value}
-                  onClick={() => {
-                    setType(opt.value);
-                    const best = bestByType[opt.value];
-                    if (best) {
-                      setF0(best.params.fHz);
-                      setZeta(best.params.zeta);
-                      setVtol(best.params.vtol);
-                    }
-                  }}
-                >
-                  {opt.label}
-                </Button>
-              </ExplainTooltip>
-            ))}
+          <div className="mb-2">
+            <ExplainTooltip
+              title={corneringModelInfo.title}
+              accurate={corneringModelInfo.accurate}
+              intuition={corneringModelInfo.intuition}
+              side="right"
+              sideOffset={8}
+            >
+              <div className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
+                Cornering model
+              </div>
+            </ExplainTooltip>
+          </div>
+
+          <div className="border-border grid w-full grid-cols-3 gap-1 rounded-md border p-1">
+            <Button
+              type="button"
+              size="sm"
+              variant={corneringModel === 'scv' ? 'secondary' : 'ghost'}
+              className="h-8 w-full"
+              aria-pressed={corneringModel === 'scv'}
+              onClick={() => setCorneringModel('scv')}
+            >
+              SCV
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={corneringModel === 'jerk' ? 'secondary' : 'ghost'}
+              className="h-8 w-full"
+              aria-pressed={corneringModel === 'jerk'}
+              onClick={() => setCorneringModel('jerk')}
+            >
+              Jerk
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={corneringModel === 'junction_deviation' ? 'secondary' : 'ghost'}
+              className="h-8 w-full"
+              aria-pressed={corneringModel === 'junction_deviation'}
+              onClick={() => setCorneringModel('junction_deviation')}
+            >
+              Junction dev
+            </Button>
+          </div>
+
+          <div className="mt-4 grid gap-4">
+            {corneringModel === 'scv' && (
+              <div>
+                <label className="text-muted-foreground text-sm">
+                  SCV: {corneringScv.toFixed(1)} mm/s
+                </label>
+                <div className="mt-3">
+                  <Slider
+                    min={0.5}
+                    max={60}
+                    step={0.5}
+                    value={[corneringScv]}
+                    onValueChange={(v) => setCorneringScv(v[0] ?? 5)}
+                    className="w-full"
+                  />
+                </div>
+              </div>
+            )}
+
+            {corneringModel === 'jerk' && (
+              <div>
+                <label className="text-muted-foreground text-sm">
+                  Jerk: {corneringJerk.toFixed(1)} mm/s
+                </label>
+                <div className="mt-3">
+                  <Slider
+                    min={0.5}
+                    max={60}
+                    step={0.5}
+                    value={[corneringJerk]}
+                    onValueChange={(v) => setCorneringJerk(v[0] ?? 10)}
+                    className="w-full"
+                  />
+                </div>
+              </div>
+            )}
+            {corneringModel === 'junction_deviation' && (
+              <div>
+                <label className="text-muted-foreground text-sm">
+                  Junction deviation: {corneringJd.toFixed(3)} mm
+                </label>
+                <div className="mt-3">
+                  <Slider
+                    min={0.001}
+                    max={0.2}
+                    step={0.001}
+                    value={[corneringJd]}
+                    onValueChange={(v) => setCorneringJd(v[0] ?? 0.02)}
+                    className="w-full"
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
-
         <div className="mt-5">
           <div className="mb-2">
             <ExplainTooltip
@@ -759,22 +873,76 @@ export default function ShaperScreen() {
             </ExplainTooltip>
           </div>
         </div>
-
         <div className="mt-5">
           <ExplainTooltip
-            title={autoOptimise.title}
-            accurate={autoOptimise.accurate}
-            intuition={autoOptimise.intuition}
+            title={shaperFamily.title}
+            accurate={shaperFamily.accurate}
+            intuition={shaperFamily.intuition}
           >
-            <Button
-              type="button"
-              className="w-full"
-              onClick={() => void runAutoOptimise()}
-              disabled={!maxHoldSpectrum.length || isOptimising}
-            >
-              {isOptimising ? 'Optimising…' : 'Auto optimise'}
-            </Button>
+            <div className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
+              Shaper
+            </div>
           </ExplainTooltip>
+
+          <div className="mt-2">
+            <ExplainTooltip
+              title={autoOptimise.title}
+              accurate={autoOptimise.accurate}
+              intuition={autoOptimise.intuition}
+            >
+              <Button
+                type="button"
+                className="w-full"
+                onClick={() => void runAutoOptimise()}
+                disabled={!maxHoldSpectrum.length || isOptimising}
+              >
+                {isOptimising ? 'Optimising…' : 'Auto optimise'}
+              </Button>
+            </ExplainTooltip>
+          </div>
+          <div className="border-border mt-2 grid w-full grid-cols-4 gap-1 rounded-md border p-1">
+            {(
+              [
+                { value: 'zv', label: 'ZV' },
+                { value: 'zvd', label: 'ZVD' },
+                { value: 'zvdd', label: 'ZVDD' },
+                { value: 'zvddd', label: 'ZVDDD' },
+                { value: 'mzv', label: 'MZV' },
+                { value: 'ei', label: 'EI' },
+                { value: '2hei', label: '2HEI' },
+                { value: '3hei', label: '3HEI' },
+              ] as const
+            ).map((opt) => (
+              <ExplainTooltip
+                key={opt.value}
+                title={shaperTypeButton.title}
+                accurate={shaperTypeButton.accurate}
+                intuition={shaperTypeButton.intuition}
+              >
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={type === opt.value ? 'secondary' : 'ghost'}
+                  className="h-8 w-full"
+                  aria-pressed={type === opt.value}
+                  onClick={() => {
+                    setType(opt.value);
+                    const best = bestByType[opt.value];
+                    if (best) {
+                      setF0(best.params.fHz);
+                      setZeta(best.params.zeta);
+                      setVtol(best.params.vtol);
+                    }
+                  }}
+                >
+                  {opt.label}
+                </Button>
+              </ExplainTooltip>
+            ))}
+          </div>
+        </div>
+
+        <div>
           <ExplainTooltip
             title={refineCurrent.title}
             accurate={refineCurrent.accurate}

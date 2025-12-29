@@ -11,6 +11,13 @@ export type ShaperParams = {
 
 export type ShaperScoreMode = 'klipper' | 'flatness';
 
+export type CorneringModel = 'scv' | 'jerk' | 'junction_deviation';
+
+export type CorneringSettings =
+  | { model: 'scv'; scv: number }
+  | { model: 'jerk'; jerk: number }
+  | { model: 'junction_deviation'; junctionDeviation: number };
+
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 
 const safeSqrt = (v: number) => Math.sqrt(Math.max(0, v));
@@ -229,9 +236,35 @@ const estimateRemainingVibrations = (
   return worstRemaining;
 };
 
-const klipperSmoothing = (a: number[], t: number[], accel = 5000, scv = 5) => {
+const clampPositive = (v: number, fallback: number) => (Number.isFinite(v) && v > 0 ? v : fallback);
+
+const scvEquivalentAtAccel = (settings: CorneringSettings, accel: number) => {
+  switch (settings.model) {
+    case 'scv':
+      return clampPositive(settings.scv, 5);
+    case 'jerk':
+      // Approximation: classic jerk is a velocity delta allowance at corners.
+      return clampPositive(settings.jerk, 10);
+    case 'junction_deviation': {
+      // Marlin-style junction deviation: approximate the 90° cornering speed.
+      // For θ=90°, sin(θ/2)=sin(45°)=√2/2, giving factor sin/(1-sin) = 1+√2.
+      // v ≈ sqrt(a * jd * (1+√2))
+      const jd = clampPositive(settings.junctionDeviation, 0.02);
+      const a = Math.max(0, accel);
+      return Math.sqrt(a * jd * (1 + Math.SQRT2));
+    }
+  }
+};
+
+const klipperSmoothing = (
+  a: number[],
+  t: number[],
+  accel = 5000,
+  cornering: CorneringSettings = { model: 'scv', scv: 5 }
+) => {
   const invD = 1 / a.reduce((s, v) => s + v, 0);
   const halfAccel = accel * 0.5;
+  const scv = scvEquivalentAtAccel(cornering, accel);
 
   let ts = 0;
   for (let i = 0; i < t.length; i++) ts += (a[i] ?? 0) * (t[i] ?? 0);
@@ -281,13 +314,33 @@ export const klipperSuggestedMaxAccel = (params: ShaperParams, scv = 5, targetSm
   if (!taps.a.length) return 0;
 
   const maxAccel = bisectMaxTrue(
-    (testAccel) => klipperSmoothing(taps.a, taps.t, testAccel, scv) <= targetSmoothing
+    (testAccel) =>
+      klipperSmoothing(taps.a, taps.t, testAccel, { model: 'scv', scv }) <= targetSmoothing
   );
 
   return Number.isFinite(maxAccel) ? maxAccel : 0;
 };
 
-export const klipperScoreFromMagnitudeSpectrum = (magnitudes: number[], params: ShaperParams) => {
+export const suggestedMaxAccel = (
+  params: ShaperParams,
+  cornering: CorneringSettings,
+  targetSmoothing = 0.12
+) => {
+  const taps = computeMarlinShaperTaps(params);
+  if (!taps.a.length) return 0;
+
+  const maxAccel = bisectMaxTrue(
+    (testAccel) => klipperSmoothing(taps.a, taps.t, testAccel, cornering) <= targetSmoothing
+  );
+  return Number.isFinite(maxAccel) ? maxAccel : 0;
+};
+
+export const klipperScoreFromMagnitudeSpectrum = (
+  magnitudes: number[],
+  params: ShaperParams,
+  cornering: CorneringSettings = { model: 'scv', scv: 5 },
+  smoothingAccel = 5000
+) => {
   if (!magnitudes.length) return Number.POSITIVE_INFINITY;
 
   const freqsHz: number[] = [];
@@ -304,7 +357,7 @@ export const klipperScoreFromMagnitudeSpectrum = (magnitudes: number[], params: 
   const vibrs = estimateRemainingVibrations(freqsHz, psd, taps.a, taps.t);
   if (!Number.isFinite(vibrs)) return Number.POSITIVE_INFINITY;
 
-  const smoothing = klipperSmoothing(taps.a, taps.t, 5000, 5);
+  const smoothing = klipperSmoothing(taps.a, taps.t, smoothingAccel, cornering);
   if (!Number.isFinite(smoothing)) return Number.POSITIVE_INFINITY;
 
   return smoothing * (Math.pow(vibrs, 1.5) + vibrs * 0.2 + 0.01);
