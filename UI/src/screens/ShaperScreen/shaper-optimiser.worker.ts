@@ -16,11 +16,22 @@ type WorkerStartMessage = {
   peakHz: number;
   uiUpdateEveryMs: number;
   scoreMode?: ShaperScoreMode;
+  candidateTypes?: InputShaperType[];
+};
+
+type WorkerRefineMessage = {
+  type: 'refine';
+  magnitudes: number[];
+  peakHz: number;
+  uiUpdateEveryMs: number;
+  scoreMode?: ShaperScoreMode;
+  startParams: ShaperParams;
+  steps?: number;
 };
 
 type WorkerCancelMessage = { type: 'cancel' };
 
-type WorkerMessage = WorkerStartMessage | WorkerCancelMessage;
+type WorkerMessage = WorkerStartMessage | WorkerRefineMessage | WorkerCancelMessage;
 
 type WorkerProgressMessage = {
   type: 'progress';
@@ -291,8 +302,8 @@ const fineStep = (
   if (state.done) return state;
 
   // With a larger fine-pass budget, use smaller finite-difference steps.
-  const df = 0.01;
-  const dz = 0.0005;
+  const df = 0.05;
+  const dz = 0.001;
   const dv = 0.001;
 
   const g = numericGradient(magnitudes, state.params, peakHz, scoreMode, df, dz, dv);
@@ -302,14 +313,30 @@ const fineStep = (
   // Smaller initial step size; backtracking will reduce further if needed.
   let alpha = 0.25;
   for (let bt = 0; bt < 12; bt++) {
+    // Enforce a minimum move resolution: don't take steps below the finite-difference deltas.
+    // If we can't find an improving step at this resolution, we consider it converged.
+    const stepF = Math.sign(g.df) * Math.max(df, Math.abs(alpha * g.df));
+    const stepZ = Math.sign(g.dz) * Math.max(dz, Math.abs(alpha * g.dz));
+    const stepV = Math.sign(g.dv) * Math.max(dv, Math.abs(alpha * g.dv));
+
     const next: ShaperParams = {
       ...state.params,
-      fHz: clamp(state.params.fHz - alpha * g.df, bounds.fMin, bounds.fMax),
-      zeta: clamp(state.params.zeta - alpha * g.dz, bounds.zMin, bounds.zMax),
+      fHz: clamp(state.params.fHz - stepF, bounds.fMin, bounds.fMax),
+      zeta: clamp(state.params.zeta - stepZ, bounds.zMin, bounds.zMax),
       vtol: isEiFamily(state.params.type)
-        ? clamp(state.params.vtol - alpha * g.dv, bounds.vMin, bounds.vMax)
+        ? clamp(state.params.vtol - stepV, bounds.vMin, bounds.vMax)
         : state.params.vtol,
     };
+
+    // If clamping/quantization results in no change, treat as done at this resolution.
+    if (
+      next.fHz === state.params.fHz &&
+      next.zeta === state.params.zeta &&
+      next.vtol === state.params.vtol
+    ) {
+      return { ...state, done: true };
+    }
+
     const nextScore = scoreCandidate(magnitudes, next, peakHz, scoreMode);
     if (Number.isFinite(nextScore) && nextScore + 1e-12 < state.score) {
       return { ...state, params: next, score: nextScore };
@@ -328,7 +355,7 @@ self.onmessage = (evt: MessageEvent<WorkerMessage>) => {
     cancelled = true;
     return;
   }
-  if (msg.type !== 'start') return;
+  if (msg.type !== 'start' && msg.type !== 'refine') return;
 
   cancelled = false;
 
@@ -336,7 +363,86 @@ self.onmessage = (evt: MessageEvent<WorkerMessage>) => {
     const { magnitudes, peakHz, uiUpdateEveryMs } = msg;
     const scoreMode = msg.scoreMode ?? 'klipper';
 
-    const types = SEARCH_TYPES;
+    if (msg.type === 'refine') {
+      const safetyCapSteps = msg.steps ?? 20_000;
+      const start = msg.startParams;
+
+      const zMin = Math.min(...SEARCH_ZETAS);
+      const zMax = Math.max(...SEARCH_ZETAS);
+      const vMin = SEARCH_VTOLS.length ? Math.min(...SEARCH_VTOLS) : 0.02;
+      const vMax = SEARCH_VTOLS.length ? Math.max(...SEARCH_VTOLS) : 0.4;
+      const fMin = Math.max(SEARCH_F_MIN_ABS_HZ, peakHz - SEARCH_F_WINDOW_HZ);
+      const fMax = Math.min(SEARCH_F_MAX_ABS_HZ, peakHz + SEARCH_F_WINDOW_HZ);
+      const bounds = { fMin, fMax, zMin, zMax, vMin, vMax };
+
+      let state: FineState = {
+        type: start.type,
+        params: {
+          type: start.type,
+          fHz: start.fHz,
+          zeta: start.zeta,
+          vtol: start.vtol,
+        },
+        score: scoreCandidate(magnitudes, start, peakHz, scoreMode),
+        done: false,
+      };
+
+      let best: OptimisationResult | undefined;
+      if (Number.isFinite(state.score)) best = { params: state.params, score: state.score };
+
+      let lastUiUpdate = performance.now();
+
+      let iterationsDone = 0;
+      for (let i = 0; i < safetyCapSteps; i++) {
+        if (cancelled) break;
+        state = fineStep(magnitudes, state, peakHz, scoreMode, bounds);
+        if (!best || state.score < best.score) best = { params: state.params, score: state.score };
+
+        iterationsDone = i + 1;
+
+        const now = performance.now();
+        if (now - lastUiUpdate > uiUpdateEveryMs) {
+          lastUiUpdate = now;
+          const out: WorkerProgressMessage = {
+            type: 'progress',
+            percent: (100 * (i + 1)) / Math.max(1, safetyCapSteps),
+            iterationsDone: i + 1,
+            iterationsTotal: safetyCapSteps,
+            current: { params: state.params, score: state.score },
+            best,
+            bestByType: { [start.type]: best } satisfies BestByType,
+          };
+          self.postMessage(out satisfies WorkerOutMessage);
+        }
+        if (state.done) break;
+      }
+
+      // Ensure the UI gets a final progress update reflecting the actual number of iterations.
+      if (!cancelled) {
+        const out: WorkerProgressMessage = {
+          type: 'progress',
+          percent: safetyCapSteps ? (100 * iterationsDone) / safetyCapSteps : 0,
+          iterationsDone,
+          iterationsTotal: safetyCapSteps,
+          current: { params: state.params, score: state.score },
+          best,
+          bestByType: best ? ({ [start.type]: best } satisfies BestByType) : undefined,
+        };
+        self.postMessage(out satisfies WorkerOutMessage);
+      }
+
+      const out: WorkerDoneMessage = {
+        type: 'done',
+        best,
+        bestByType: best ? ({ [start.type]: best } satisfies BestByType) : undefined,
+      };
+      self.postMessage(out satisfies WorkerOutMessage);
+      return;
+    }
+
+    const types = (msg.candidateTypes?.length ? msg.candidateTypes : SEARCH_TYPES).filter(
+      (t): t is InputShaperType => SEARCH_TYPES.includes(t)
+    );
     const fStep = SEARCH_F_STEP_HZ;
     const zetas = SEARCH_ZETAS;
     const vtols = SEARCH_VTOLS;
@@ -352,7 +458,7 @@ self.onmessage = (evt: MessageEvent<WorkerMessage>) => {
       coarseTotal += fCount * zetas.length * vtolCount;
     }
 
-    const fineStepsPerType = 600;
+    const fineStepsPerType = 2000;
     const iterationsTotal = coarseTotal + fineStepsPerType * types.length;
     let iterationsDone = 0;
 
@@ -459,9 +565,7 @@ self.onmessage = (evt: MessageEvent<WorkerMessage>) => {
 
       const state = heap.pop();
       if (!state) {
-        // No candidates left to refine; still advance progress.
-        iterationsDone++;
-        continue;
+        break;
       }
 
       const left = remainingByType.get(state.type) ?? 0;

@@ -5,6 +5,7 @@ import {
   FIXED_SAMPLE_RATE,
   SPECTROGRAM_PLOT_WIDTH,
   SPECTROGRAM_WATERFALL_HEIGHT,
+  WEB_WORKER_THREADS,
 } from '@/constants';
 import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
@@ -58,6 +59,24 @@ const estimatePeakHz = (magnitudes: number[]) => {
     if ((magnitudes[i] ?? 0) > (magnitudes[peakIdx] ?? 0)) peakIdx = i;
   }
   return binToHz(peakIdx, magnitudes.length);
+};
+
+const ALL_SHAPER_TYPES: InputShaperType[] = [
+  'zv',
+  'zvd',
+  'zvdd',
+  'zvddd',
+  'mzv',
+  'ei',
+  '2hei',
+  '3hei',
+];
+
+const chunkRoundRobin = <T,>(items: T[], chunks: number): T[][] => {
+  const n = Math.max(1, Math.floor(chunks));
+  const out: T[][] = Array.from({ length: n }, () => []);
+  for (let i = 0; i < items.length; i++) out[i % n]!.push(items[i]!);
+  return out.filter((c) => c.length);
 };
 
 const shaperTypeAtom = atom<InputShaperType>('zvd');
@@ -128,7 +147,7 @@ export default function ShaperScreen() {
   const [bestByType, setBestByType] = useState<BestByType>({});
   const [optimisePreviewMode, setOptimisePreviewMode] = useState<'best' | 'current'>('best');
   const optimisePreviewModeRef = useRef<'best' | 'current'>('best');
-  const optimiserWorkerRef = useRef<Worker | null>(null);
+  const optimiserWorkersRef = useRef<Worker[]>([]);
   const cancelRef = useRef(false);
 
   useEffect(() => {
@@ -144,8 +163,8 @@ export default function ShaperScreen() {
 
   useEffect(() => {
     return () => {
-      optimiserWorkerRef.current?.terminate();
-      optimiserWorkerRef.current = null;
+      for (const w of optimiserWorkersRef.current) w.terminate();
+      optimiserWorkersRef.current = [];
     };
   }, []);
 
@@ -157,10 +176,167 @@ export default function ShaperScreen() {
     const magnitudes = maxHoldSpectrum;
     const peakHz = estimatePeakHz(magnitudes);
 
-    optimiserWorkerRef.current?.terminate();
-    optimiserWorkerRef.current = new ShaperOptimiserWorker();
+    for (const w of optimiserWorkersRef.current) w.terminate();
+    optimiserWorkersRef.current = [];
 
-    const worker = optimiserWorkerRef.current;
+    const workerCount = Math.max(1, Math.min(WEB_WORKER_THREADS, ALL_SHAPER_TYPES.length));
+    const typeChunks = chunkRoundRobin(ALL_SHAPER_TYPES, workerCount);
+    const workers = typeChunks.map(() => new ShaperOptimiserWorker());
+    optimiserWorkersRef.current = workers;
+
+    try {
+      const perWorkerProgress = new Map<Worker, OptimiserWorkerProgress>();
+      const perWorkerBestByType = new Map<Worker, BestByType>();
+
+      const computeAggregateProgress = (): OptimisationProgress | null => {
+        if (!perWorkerProgress.size) return null;
+        let iterationsDone = 0;
+        let iterationsTotal = 0;
+        let best: OptimisationResult | undefined;
+        let current: OptimisationResult | undefined;
+
+        for (const p of perWorkerProgress.values()) {
+          iterationsDone += p.iterationsDone;
+          iterationsTotal += p.iterationsTotal;
+          if (p.best && (!best || p.best.score < best.score)) best = p.best;
+        }
+
+        // "current" is inherently ambiguous across workers; take the most recent sender's current.
+        const last = Array.from(perWorkerProgress.values()).at(-1);
+        current = last?.current;
+
+        const percent = iterationsTotal ? (100 * iterationsDone) / iterationsTotal : 0;
+        return { percent, iterationsDone, iterationsTotal, current, best };
+      };
+
+      const mergeBestByType = (): BestByType => {
+        const merged: BestByType = {};
+        for (const map of perWorkerBestByType.values()) {
+          for (const [typeKey, result] of Object.entries(map) as [
+            InputShaperType,
+            OptimisationResult,
+          ][]) {
+            const prev = merged[typeKey];
+            if (!prev || result.score < prev.score) merged[typeKey] = result;
+          }
+        }
+        return merged;
+      };
+
+      const completion = new Promise<void>((resolve) => {
+        let doneCount = 0;
+        let settled = false;
+        const cleanups: Array<() => void> = [];
+
+        let finalBest: OptimisationResult | undefined;
+
+        const settle = () => {
+          if (settled) return;
+          settled = true;
+          for (const c of cleanups) c();
+
+          // Snap UI to the final best result after optimisation finishes.
+          if (finalBest && !cancelRef.current) {
+            setType(finalBest.params.type);
+            setF0(finalBest.params.fHz);
+            setZeta(finalBest.params.zeta);
+            setVtol(finalBest.params.vtol);
+          }
+          resolve();
+        };
+
+        for (let idx = 0; idx < workers.length; idx++) {
+          const worker = workers[idx]!;
+          const candidateTypes = typeChunks[idx]!;
+
+          const handleMessage = (evt: MessageEvent<OptimiserWorkerOut>) => {
+            const msg = evt.data;
+            if (msg.type === 'progress') {
+              perWorkerProgress.set(worker, msg);
+              if (msg.bestByType) perWorkerBestByType.set(worker, msg.bestByType);
+
+              const aggregate = computeAggregateProgress();
+              if (aggregate) setOptimiseProgress(aggregate);
+              setBestByType(mergeBestByType());
+
+              const previewParams =
+                optimisePreviewModeRef.current === 'current'
+                  ? msg.current?.params
+                  : aggregate?.best?.params;
+              if (previewParams) {
+                setType(previewParams.type);
+                setF0(previewParams.fHz);
+                setZeta(previewParams.zeta);
+                setVtol(previewParams.vtol);
+              }
+              return;
+            }
+
+            if (msg.type === 'error') {
+              // eslint-disable-next-line no-console
+              console.error('[shaper-optimiser.worker] error:', msg.message);
+              settle();
+              return;
+            }
+
+            if (msg.type === 'done') {
+              doneCount++;
+              if (msg.bestByType) perWorkerBestByType.set(worker, msg.bestByType);
+              setBestByType(mergeBestByType());
+              if (msg.best && (!finalBest || msg.best.score < finalBest.score)) {
+                finalBest = msg.best;
+              }
+              if (doneCount >= workers.length) settle();
+            }
+          };
+
+          worker.addEventListener('message', handleMessage);
+          cleanups.push(() => worker.removeEventListener('message', handleMessage));
+
+          worker.postMessage({
+            type: 'start',
+            magnitudes,
+            peakHz,
+            uiUpdateEveryMs: 75,
+            scoreMode,
+            candidateTypes,
+          });
+        }
+
+        const cancelPoll = window.setInterval(() => {
+          if (!cancelRef.current) return;
+          for (const w of workers) w.postMessage({ type: 'cancel' });
+          window.clearInterval(cancelPoll);
+        }, 100);
+        cleanups.push(() => window.clearInterval(cancelPoll));
+      });
+
+      await new Promise((r) => setTimeout(r, 0));
+      await completion;
+    } finally {
+      if (cancelRef.current) {
+        for (const w of workers) w.postMessage({ type: 'cancel' });
+      }
+      for (const w of workers) w.terminate();
+      if (optimiserWorkersRef.current === workers) optimiserWorkersRef.current = [];
+      setIsOptimising(false);
+      setOptimiseProgress(null);
+    }
+  };
+
+  const runRefineCurrent = async () => {
+    if (!maxHoldSpectrum.length) return;
+    setIsOptimising(true);
+    cancelRef.current = false;
+
+    const magnitudes = maxHoldSpectrum;
+    const peakHz = estimatePeakHz(magnitudes);
+
+    for (const w of optimiserWorkersRef.current) w.terminate();
+    optimiserWorkersRef.current = [];
+
+    const worker = new ShaperOptimiserWorker();
+    optimiserWorkersRef.current = [worker];
 
     try {
       let cleanup: (() => void) | undefined;
@@ -206,11 +382,12 @@ export default function ShaperScreen() {
 
         worker.addEventListener('message', handleMessage);
         worker.postMessage({
-          type: 'start',
+          type: 'refine',
           magnitudes,
           peakHz,
           uiUpdateEveryMs: 75,
           scoreMode,
+          startParams: { type, fHz: f0, zeta, vtol },
         });
 
         const cancelPoll = window.setInterval(() => {
@@ -230,7 +407,7 @@ export default function ShaperScreen() {
     } finally {
       cancelRef.current && worker.postMessage({ type: 'cancel' });
       worker.terminate();
-      if (optimiserWorkerRef.current === worker) optimiserWorkerRef.current = null;
+      if (optimiserWorkersRef.current[0] === worker) optimiserWorkersRef.current = [];
       setIsOptimising(false);
       setOptimiseProgress(null);
     }
@@ -555,6 +732,15 @@ export default function ShaperScreen() {
               {isOptimising ? 'Optimising…' : 'Auto optimise'}
             </Button>
           </ExplainTooltip>
+          <Button
+            type="button"
+            variant="secondary"
+            className="mt-2 w-full"
+            onClick={() => void runRefineCurrent()}
+            disabled={!maxHoldSpectrum.length || isOptimising}
+          >
+            {isOptimising ? 'Refining…' : 'Refine current'}
+          </Button>
           {!isOptimising && (
             <div className="text-muted-foreground mt-2 text-xs">
               Current score:{' '}
