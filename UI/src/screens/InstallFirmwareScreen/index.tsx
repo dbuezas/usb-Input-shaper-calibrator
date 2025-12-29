@@ -1,5 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
+import firmwareUf2Url from '../../../assets/firmware.uf2?url';
+
 export default function InstallFirmwareScreen() {
   return (
     <div className="mx-2 w-full space-y-6">
@@ -20,8 +22,14 @@ export default function InstallFirmwareScreen() {
             This app expects a firmware build that streams accelerometer data over USB serial.
           </div>
           <div className="rounded-md border border-dashed p-3">
-            <div className="text-muted-foreground text-xs">Firmware download (placeholder)</div>
-            <div className="mt-1 font-mono text-sm">TODO: put your UF2 file/link here</div>
+            <div className="text-muted-foreground text-xs">Firmware download</div>
+            <a
+              className="mt-1 inline-flex font-mono text-sm underline"
+              href={firmwareUf2Url}
+              download="firmware.uf2"
+            >
+              firmware.uf2
+            </a>
           </div>
         </CardContent>
       </Card>
