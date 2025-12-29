@@ -1,4 +1,4 @@
-import { serialChannel } from './messages';
+import { serialChannel, type RawDataMessage } from './messages';
 import SerialWorker from './serial-worker?worker';
 import { SERIAL_BAUD_RATE, BATCH_SIZE } from '../../constants';
 const serialWorker = new SerialWorker();
@@ -34,7 +34,7 @@ export class SerialDataSource implements DataSource {
     this.onStatus = onStatus;
 
     // Set up worker message listener
-    serialChannel.addEventListener('message', (e: MessageEvent) => {
+    serialChannel.addEventListener('message', (e: MessageEvent<RawDataMessage>) => {
       const { data, frequency: workerFrequency } = e.data;
       this.onData(data);
       this.onFrequency(workerFrequency);
@@ -76,7 +76,7 @@ export class SerialDataSource implements DataSource {
         }
       };
 
-      startReading();
+      void startReading();
       return true;
     } catch (error) {
       console.error('Connection error:', error);

@@ -61,7 +61,7 @@ function fft(re: number[], im: number[]): void {
 }
 
 function hannWindow(size: number): number[] {
-  const window: number[] = new Array(size);
+  const window = new Array<number>(size);
 
   for (let i = 0; i < size; i++) window[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (size - 1)));
   return window;
@@ -83,14 +83,14 @@ class SpectralProcessor {
   magnitudes: number[];
 
   constructor() {
-    this.buffer = new Array(WINDOW_SIZE).fill(0);
+    this.buffer = new Array<number>(WINDOW_SIZE).fill(0);
     this.bufferIndex = 0;
     this.windows = hannWindow(WINDOW_SIZE);
     this.windowSum = windowSum(this.windows);
-    this.re = new Array(WINDOW_SIZE);
-    this.im = new Array(WINDOW_SIZE);
+    this.re = new Array<number>(WINDOW_SIZE);
+    this.im = new Array<number>(WINDOW_SIZE);
     const halfBins = WINDOW_SIZE / 2 + 1;
-    this.magnitudes = new Array(halfBins);
+    this.magnitudes = new Array<number>(halfBins);
   }
 
   addSample(value: number): void {
@@ -241,7 +241,7 @@ class DataProcessor {
     serialChannel.postMessage({
       data: new Int16Array([0, 0, 0]),
       frequency: 0,
-    });
+    } satisfies RawDataMessage);
   }
 }
 
@@ -252,9 +252,11 @@ self.onmessage = function (e: MessageEvent<WorkerMessage>) {
 
   if (type === 'rawData') {
     dataProcessor.processRawData(data!);
-  } else if (type === 'reset') {
+  }
+  if (type === 'reset') {
     dataProcessor.reset();
-  } else if (type === 'setSelectedAxis') {
+  }
+  if (type === 'setSelectedAxis') {
     console.log('selectaxis');
     dataProcessor.selectedAxis = e.data.axis!;
     dataProcessor.resetSpectralProcessor();

@@ -69,6 +69,7 @@ export class SimulationPort {
     });
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async open(_options: { baudRate: number }): Promise<void> {
     if (this.isOpen) return;
     this.isOpen = true;

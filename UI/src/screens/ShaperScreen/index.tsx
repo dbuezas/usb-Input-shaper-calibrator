@@ -75,7 +75,7 @@ const ALL_SHAPER_TYPES: InputShaperType[] = [
 const chunkRoundRobin = <T,>(items: T[], chunks: number): T[][] => {
   const n = Math.max(1, Math.floor(chunks));
   const out: T[][] = Array.from({ length: n }, () => []);
-  for (let i = 0; i < items.length; i++) out[i % n]!.push(items[i]!);
+  for (let i = 0; i < items.length; i++) out[i % n].push(items[i]);
   return out.filter((c) => c.length);
 };
 
@@ -94,13 +94,13 @@ const shaperParamsAtom = atom<ShaperParams>((get) => ({
 
 const shapedSpectrumAtom = atom((get) => {
   const base = get(spectrogramMaxHoldAtom);
-  if (!base?.length) return [];
+  if (!base.length) return [];
   return applyShaperToMagnitudeSpectrum(get(shaperParamsAtom), base);
 });
 
 const currentScoreAtom = atom((get) => {
   const base = get(spectrogramMaxHoldAtom);
-  if (!base?.length) return undefined;
+  if (!base.length) return undefined;
   const scoreMode = get(shaperScoreModeAtom);
   const params = get(shaperParamsAtom);
   const score =
@@ -112,7 +112,7 @@ const currentScoreAtom = atom((get) => {
 
 const currentMaxAccelAtom = atom((get) => {
   const base = get(spectrogramMaxHoldAtom);
-  if (!base?.length) return undefined;
+  if (!base.length) return undefined;
   const maxAccel = klipperSuggestedMaxAccel(get(shaperParamsAtom), 5, 0.12);
   return Number.isFinite(maxAccel) ? maxAccel : undefined;
 });
@@ -193,17 +193,14 @@ export default function ShaperScreen() {
         let iterationsDone = 0;
         let iterationsTotal = 0;
         let best: OptimisationResult | undefined;
-        let current: OptimisationResult | undefined;
-
+        // "current" is inherently ambiguous across workers; take the most recent sender's current.
+        const last = Array.from(perWorkerProgress.values()).at(-1);
+        const current = last?.current;
         for (const p of perWorkerProgress.values()) {
           iterationsDone += p.iterationsDone;
           iterationsTotal += p.iterationsTotal;
           if (p.best && (!best || p.best.score < best.score)) best = p.best;
         }
-
-        // "current" is inherently ambiguous across workers; take the most recent sender's current.
-        const last = Array.from(perWorkerProgress.values()).at(-1);
-        current = last?.current;
 
         const percent = iterationsTotal ? (100 * iterationsDone) / iterationsTotal : 0;
         return { percent, iterationsDone, iterationsTotal, current, best };
@@ -246,47 +243,47 @@ export default function ShaperScreen() {
         };
 
         for (let idx = 0; idx < workers.length; idx++) {
-          const worker = workers[idx]!;
-          const candidateTypes = typeChunks[idx]!;
+          const worker = workers[idx];
+          const candidateTypes = typeChunks[idx];
 
           const handleMessage = (evt: MessageEvent<OptimiserWorkerOut>) => {
             const msg = evt.data;
-            if (msg.type === 'progress') {
-              perWorkerProgress.set(worker, msg);
-              if (msg.bestByType) perWorkerBestByType.set(worker, msg.bestByType);
+            switch (msg.type) {
+              case 'progress': {
+                perWorkerProgress.set(worker, msg);
+                if (msg.bestByType) perWorkerBestByType.set(worker, msg.bestByType);
 
-              const aggregate = computeAggregateProgress();
-              if (aggregate) setOptimiseProgress(aggregate);
-              setBestByType(mergeBestByType());
+                const aggregate = computeAggregateProgress();
+                if (aggregate) setOptimiseProgress(aggregate);
+                setBestByType(mergeBestByType());
 
-              const previewParams =
-                optimisePreviewModeRef.current === 'current'
-                  ? msg.current?.params
-                  : aggregate?.best?.params;
-              if (previewParams) {
-                setType(previewParams.type);
-                setF0(previewParams.fHz);
-                setZeta(previewParams.zeta);
-                setVtol(previewParams.vtol);
+                const previewParams =
+                  optimisePreviewModeRef.current === 'current'
+                    ? msg.current?.params
+                    : aggregate?.best?.params;
+                if (previewParams) {
+                  setType(previewParams.type);
+                  setF0(previewParams.fHz);
+                  setZeta(previewParams.zeta);
+                  setVtol(previewParams.vtol);
+                }
+                return;
               }
-              return;
-            }
-
-            if (msg.type === 'error') {
-              // eslint-disable-next-line no-console
-              console.error('[shaper-optimiser.worker] error:', msg.message);
-              settle();
-              return;
-            }
-
-            if (msg.type === 'done') {
-              doneCount++;
-              if (msg.bestByType) perWorkerBestByType.set(worker, msg.bestByType);
-              setBestByType(mergeBestByType());
-              if (msg.best && (!finalBest || msg.best.score < finalBest.score)) {
-                finalBest = msg.best;
+              case 'error': {
+                console.error('[shaper-optimiser.worker] error:', msg.message);
+                settle();
+                return;
               }
-              if (doneCount >= workers.length) settle();
+
+              case 'done': {
+                doneCount++;
+                if (msg.bestByType) perWorkerBestByType.set(worker, msg.bestByType);
+                setBestByType(mergeBestByType());
+                if (msg.best && (!finalBest || msg.best.score < finalBest.score)) {
+                  finalBest = msg.best;
+                }
+                if (doneCount >= workers.length) settle();
+              }
             }
           };
 
@@ -314,9 +311,7 @@ export default function ShaperScreen() {
       await new Promise((r) => setTimeout(r, 0));
       await completion;
     } finally {
-      if (cancelRef.current) {
-        for (const w of workers) w.postMessage({ type: 'cancel' });
-      }
+      for (const w of workers) w.postMessage({ type: 'cancel' });
       for (const w of workers) w.terminate();
       if (optimiserWorkersRef.current === workers) optimiserWorkersRef.current = [];
       setIsOptimising(false);
@@ -344,39 +339,42 @@ export default function ShaperScreen() {
       const completion = new Promise<void>((resolve) => {
         const handleMessage = (evt: MessageEvent<OptimiserWorkerOut>) => {
           const msg = evt.data;
-          if (msg.type === 'progress') {
-            setOptimiseProgress(msg);
-            if (msg.bestByType) setBestByType(msg.bestByType);
+          switch (msg.type) {
+            case 'progress': {
+              setOptimiseProgress(msg);
+              if (msg.bestByType) setBestByType(msg.bestByType);
 
-            const previewParams =
-              optimisePreviewModeRef.current === 'current' ? msg.current?.params : msg.best?.params;
-            if (previewParams) {
-              setType(previewParams.type);
-              setF0(previewParams.fHz);
-              setZeta(previewParams.zeta);
-              setVtol(previewParams.vtol);
+              const previewParams =
+                optimisePreviewModeRef.current === 'current'
+                  ? msg.current?.params
+                  : msg.best?.params;
+              if (previewParams) {
+                setType(previewParams.type);
+                setF0(previewParams.fHz);
+                setZeta(previewParams.zeta);
+                setVtol(previewParams.vtol);
+              }
+              return;
             }
-            return;
-          }
 
-          if (msg.type === 'error') {
-            // eslint-disable-next-line no-console
-            console.error('[shaper-optimiser.worker] error:', msg.message);
-            cleanup?.();
-            resolve();
-            return;
-          }
-
-          if (msg.type === 'done') {
-            if (msg.best) {
-              setType(msg.best.params.type);
-              setF0(msg.best.params.fHz);
-              setZeta(msg.best.params.zeta);
-              setVtol(msg.best.params.vtol);
+            case 'error': {
+              console.error('[shaper-optimiser.worker] error:', msg.message);
+              cleanup?.();
+              resolve();
+              return;
             }
-            if (msg.bestByType) setBestByType(msg.bestByType);
-            cleanup?.();
-            resolve();
+
+            case 'done': {
+              if (msg.best) {
+                setType(msg.best.params.type);
+                setF0(msg.best.params.fHz);
+                setZeta(msg.best.params.zeta);
+                setVtol(msg.best.params.vtol);
+              }
+              if (msg.bestByType) setBestByType({ ...bestByType, ...msg.bestByType });
+              cleanup?.();
+              resolve();
+            }
           }
         };
 
@@ -405,7 +403,7 @@ export default function ShaperScreen() {
       await new Promise((r) => setTimeout(r, 0));
       await completion;
     } finally {
-      cancelRef.current && worker.postMessage({ type: 'cancel' });
+      worker.postMessage({ type: 'cancel' });
       worker.terminate();
       if (optimiserWorkersRef.current[0] === worker) optimiserWorkersRef.current = [];
       setIsOptimising(false);

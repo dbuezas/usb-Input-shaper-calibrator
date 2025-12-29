@@ -118,7 +118,7 @@ export const shaperMagnitudeAtHz = (params: ShaperParams, freqHz: number) => {
 };
 
 export const applyShaperToMagnitudeSpectrum = (params: ShaperParams, magnitudes: number[]) => {
-  const out = new Array(magnitudes.length);
+  const out = new Array<number>(magnitudes.length);
   for (let i = 0; i < magnitudes.length; i++) {
     const f = i * (FIXED_SAMPLE_RATE / (2 * (magnitudes.length - 1)));
     const h = shaperMagnitudeAtHz(params, f);
@@ -156,7 +156,7 @@ export const flatnessScoreFromMagnitudeSpectrum = (magnitudes: number[], params:
 
 export const applyShaperToWelchPsd = (params: ShaperParams, psd: number[]) => {
   // PSD is power, so apply |H|^2.
-  const out = new Array(psd.length);
+  const out = new Array<number>(psd.length);
   for (let i = 0; i < psd.length; i++) {
     const f = i * (FIXED_SAMPLE_RATE / (2 * (psd.length - 1)));
     const h = shaperMagnitudeAtHz(params, f);
@@ -181,7 +181,7 @@ const estimateShaperVals = (
 ) => {
   const invD = 1 / a.reduce((s, v) => s + v, 0);
   const lastT = t.length ? (t[t.length - 1] ?? 0) : 0;
-  const out = new Array(freqsHz.length);
+  const out = new Array<number>(freqsHz.length);
 
   for (let i = 0; i < freqsHz.length; i++) {
     const omega = 2 * Math.PI * (freqsHz[i] ?? 0);

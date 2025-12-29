@@ -1,45 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
-
-export type PlotHover = {
-  visible: boolean;
-  x: number;
-  y: number;
-  title?: string;
-  lines: string[];
-};
-
-export const useRafThrottledHover = () => {
-  const rafRef = useRef<number | null>(null);
-  const pendingRef = useRef<PlotHover | null>(null);
-  const [hover, setHover] = useState<PlotHover>({ visible: false, x: 0, y: 0, lines: [] });
-
-  const flush = () => {
-    rafRef.current = null;
-    const next = pendingRef.current;
-    pendingRef.current = null;
-    if (next) setHover(next);
-  };
-
-  const set = (next: PlotHover) => {
-    pendingRef.current = next;
-    if (rafRef.current != null) return;
-    rafRef.current = requestAnimationFrame(flush);
-  };
-
-  const hide = () => {
-    pendingRef.current = { visible: false, x: 0, y: 0, lines: [] };
-    if (rafRef.current != null) return;
-    rafRef.current = requestAnimationFrame(flush);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-    };
-  }, []);
-
-  return { hover, setHover: set, hideHover: hide };
-};
+import type { PlotHover } from './plot-hover';
 
 export const Tooltip = ({ hover }: { hover: PlotHover }) => {
   if (!hover.visible) return null;

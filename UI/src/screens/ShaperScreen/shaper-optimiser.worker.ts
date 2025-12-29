@@ -15,7 +15,7 @@ type WorkerStartMessage = {
   magnitudes: number[];
   peakHz: number;
   uiUpdateEveryMs: number;
-  scoreMode?: ShaperScoreMode;
+  scoreMode: ShaperScoreMode;
   candidateTypes?: InputShaperType[];
 };
 
@@ -24,14 +24,12 @@ type WorkerRefineMessage = {
   magnitudes: number[];
   peakHz: number;
   uiUpdateEveryMs: number;
-  scoreMode?: ShaperScoreMode;
+  scoreMode: ShaperScoreMode;
   startParams: ShaperParams;
   steps?: number;
 };
 
-type WorkerCancelMessage = { type: 'cancel' };
-
-type WorkerMessage = WorkerStartMessage | WorkerRefineMessage | WorkerCancelMessage;
+type WorkerMessage = WorkerStartMessage | WorkerRefineMessage;
 
 type WorkerProgressMessage = {
   type: 'progress';
@@ -269,8 +267,8 @@ class MaxHeap<T> {
   private siftUp(i: number) {
     while (i > 0) {
       const p = Math.floor((i - 1) / 2);
-      if (this.scoreFn(this.data[i]!) <= this.scoreFn(this.data[p]!)) break;
-      [this.data[i], this.data[p]] = [this.data[p]!, this.data[i]!];
+      if (this.scoreFn(this.data[i]) <= this.scoreFn(this.data[p])) break;
+      [this.data[i], this.data[p]] = [this.data[p], this.data[i]];
       i = p;
     }
   }
@@ -279,14 +277,14 @@ class MaxHeap<T> {
       const l = 2 * i + 1;
       const r = l + 1;
       let best = i;
-      if (l < this.data.length && this.scoreFn(this.data[l]!) > this.scoreFn(this.data[best]!)) {
+      if (l < this.data.length && this.scoreFn(this.data[l]) > this.scoreFn(this.data[best])) {
         best = l;
       }
-      if (r < this.data.length && this.scoreFn(this.data[r]!) > this.scoreFn(this.data[best]!)) {
+      if (r < this.data.length && this.scoreFn(this.data[r]) > this.scoreFn(this.data[best])) {
         best = r;
       }
       if (best === i) break;
-      [this.data[i], this.data[best]] = [this.data[best]!, this.data[i]!];
+      [this.data[i], this.data[best]] = [this.data[best], this.data[i]];
       i = best;
     }
   }
@@ -347,269 +345,245 @@ const fineStep = (
   return { ...state, done: true };
 };
 
-let cancelled = false;
+const refine = (msg: WorkerRefineMessage) => {
+  const { magnitudes, peakHz, uiUpdateEveryMs } = msg;
+  const safetyCapSteps = msg.steps ?? 20_000;
+  const start = msg.startParams;
+
+  const zMin = Math.min(...SEARCH_ZETAS);
+  const zMax = Math.max(...SEARCH_ZETAS);
+  const vMin = SEARCH_VTOLS.length ? Math.min(...SEARCH_VTOLS) : 0.02;
+  const vMax = SEARCH_VTOLS.length ? Math.max(...SEARCH_VTOLS) : 0.4;
+  const fMin = Math.max(SEARCH_F_MIN_ABS_HZ, peakHz - SEARCH_F_WINDOW_HZ);
+  const fMax = Math.min(SEARCH_F_MAX_ABS_HZ, peakHz + SEARCH_F_WINDOW_HZ);
+  const bounds = { fMin, fMax, zMin, zMax, vMin, vMax };
+
+  let state: FineState = {
+    type: start.type,
+    params: {
+      type: start.type,
+      fHz: start.fHz,
+      zeta: start.zeta,
+      vtol: start.vtol,
+    },
+    score: scoreCandidate(magnitudes, start, peakHz, msg.scoreMode),
+    done: false,
+  };
+
+  let best: OptimisationResult | undefined;
+  if (Number.isFinite(state.score)) best = { params: state.params, score: state.score };
+
+  let lastUiUpdate = performance.now();
+
+  let iterationsDone = 0;
+  for (let i = 0; i < safetyCapSteps; i++) {
+    state = fineStep(magnitudes, state, peakHz, msg.scoreMode, bounds);
+    if (!best || state.score < best.score) best = { params: state.params, score: state.score };
+
+    iterationsDone = i + 1;
+
+    const now = performance.now();
+    if (now - lastUiUpdate > uiUpdateEveryMs) {
+      lastUiUpdate = now;
+      const out: WorkerProgressMessage = {
+        type: 'progress',
+        percent: (100 * (i + 1)) / Math.max(1, safetyCapSteps),
+        iterationsDone: i + 1,
+        iterationsTotal: safetyCapSteps,
+        current: { params: state.params, score: state.score },
+        best,
+        bestByType: { [start.type]: best } satisfies BestByType,
+      };
+      self.postMessage(out satisfies WorkerOutMessage);
+    }
+    if (state.done) break;
+  }
+
+  // Ensure the UI gets a final progress update reflecting the actual number of iterations.
+  self.postMessage({
+    type: 'progress',
+    percent: safetyCapSteps ? (100 * iterationsDone) / safetyCapSteps : 0,
+    iterationsDone,
+    iterationsTotal: safetyCapSteps,
+    current: { params: state.params, score: state.score },
+    best,
+    bestByType: best ? ({ [start.type]: best } satisfies BestByType) : undefined,
+  } satisfies WorkerOutMessage);
+
+  self.postMessage({
+    type: 'done',
+    best,
+    bestByType: best ? ({ [start.type]: best } satisfies BestByType) : undefined,
+  } satisfies WorkerOutMessage);
+  return;
+};
+
+const bruteForce = (msg: WorkerStartMessage) => {
+  const { magnitudes, peakHz, uiUpdateEveryMs, scoreMode } = msg;
+  const types = (msg.candidateTypes?.length ? msg.candidateTypes : SEARCH_TYPES).filter(
+    (t): t is InputShaperType => SEARCH_TYPES.includes(t)
+  );
+  const fStep = SEARCH_F_STEP_HZ;
+  const zetas = SEARCH_ZETAS;
+  const vtols = SEARCH_VTOLS;
+
+  const fMin = Math.max(SEARCH_F_MIN_ABS_HZ, peakHz - SEARCH_F_WINDOW_HZ);
+  const fMax = Math.min(SEARCH_F_MAX_ABS_HZ, peakHz + SEARCH_F_WINDOW_HZ);
+
+  // Coarse iteration count
+  let coarseTotal = 0;
+  for (const t of types) {
+    const vtolCount = isEiFamily(t) ? vtols.length : 1;
+    const fCount = Math.floor((fMax - fMin) / fStep) + 1;
+    coarseTotal += fCount * zetas.length * vtolCount;
+  }
+
+  const fineStepsPerType = 2000;
+  const iterationsTotal = coarseTotal + fineStepsPerType * types.length;
+  let iterationsDone = 0;
+
+  let best: OptimisationResult | undefined;
+  const bestByType: BestByType = {};
+  let lastUiUpdate = performance.now();
+
+  // Phase 1: coarse grid search (interleaved worst->best across types)
+  const fHzCandidates = frequencyCandidatesFarToNear(fMin, fMax, fStep, peakHz);
+
+  const coarseHeap = new MaxHeap<CoarseState>((s) => s.bestScore);
+  for (const candidateType of types) {
+    const vtolCandidates = isEiFamily(candidateType) ? vtols : [0.1];
+    if (!fHzCandidates.length || !zetas.length || !vtolCandidates.length) continue;
+    coarseHeap.push({
+      type: candidateType,
+      fHzCandidates,
+      zetaCandidates: zetas,
+      vtolCandidates,
+      fIndex: 0,
+      zIndex: 0,
+      vIndex: 0,
+      bestScore: Number.POSITIVE_INFINITY,
+    });
+  }
+
+  for (let i = 0; i < coarseTotal; i++) {
+    const state = coarseHeap.pop();
+    if (!state) {
+      // No candidates left to evaluate; still advance progress.
+      iterationsDone++;
+      continue;
+    }
+
+    const next = coarseNext(state);
+    if (!next) {
+      iterationsDone++;
+      continue;
+    }
+
+    iterationsDone++;
+    const params = next.params;
+    const score = scoreCandidate(magnitudes, params, peakHz, scoreMode);
+    const current: OptimisationResult = { params, score };
+
+    if (Number.isFinite(score)) {
+      const prevByType = bestByType[state.type];
+      if (!prevByType || score < prevByType.score) bestByType[state.type] = current;
+      if (!best || score < best.score) best = current;
+      next.next.bestScore = Math.min(next.next.bestScore, score);
+    }
+
+    // Reinsert if there is more work for this type.
+    if (next.next.fIndex < next.next.fHzCandidates.length) {
+      coarseHeap.push(next.next);
+    }
+
+    const now = performance.now();
+    if (now - lastUiUpdate > uiUpdateEveryMs) {
+      lastUiUpdate = now;
+      const out: WorkerProgressMessage = {
+        type: 'progress',
+        percent: (100 * iterationsDone) / Math.max(1, iterationsTotal),
+        iterationsDone,
+        iterationsTotal,
+        current,
+        best,
+        bestByType,
+      };
+      self.postMessage(out satisfies WorkerOutMessage);
+    }
+  }
+
+  // Phase 2: fine local optimisation (gradient descent) from per-type coarse best
+  const zMin = Math.min(...zetas);
+  const zMax = Math.max(...zetas);
+  const vMin = vtols.length ? Math.min(...vtols) : 0.02;
+  const vMax = vtols.length ? Math.max(...vtols) : 0.4;
+
+  const heap = new MaxHeap<FineState>((s) => s.score);
+  const remainingByType = new Map<InputShaperType, number>();
+  for (const candidateType of types) {
+    remainingByType.set(candidateType, fineStepsPerType);
+    const start = bestByType[candidateType];
+    if (!start) continue;
+    heap.push({ type: candidateType, params: start.params, score: start.score, done: false });
+  }
+
+  // Interleave refinement across types: always refine the currently-worst candidate next.
+  const bounds = { fMin, fMax, zMin, zMax, vMin, vMax };
+  const fineBudget = fineStepsPerType * types.length;
+  for (let i = 0; i < fineBudget; i++) {
+    const state = heap.pop();
+    if (!state) {
+      break;
+    }
+
+    const left = remainingByType.get(state.type) ?? 0;
+    if (left <= 0) {
+      iterationsDone++;
+      continue;
+    }
+    remainingByType.set(state.type, left - 1);
+
+    const nextState = fineStep(magnitudes, state, peakHz, scoreMode, bounds);
+    iterationsDone++;
+
+    const current: OptimisationResult = { params: nextState.params, score: nextState.score };
+    const prevByType = bestByType[nextState.type];
+    if (!prevByType || current.score < prevByType.score) bestByType[nextState.type] = current;
+    if (!best || current.score < best.score) best = current;
+
+    if (!nextState.done && (remainingByType.get(nextState.type) ?? 0) > 0) {
+      heap.push(nextState);
+    }
+
+    const now = performance.now();
+    if (now - lastUiUpdate > uiUpdateEveryMs) {
+      lastUiUpdate = now;
+      const out: WorkerProgressMessage = {
+        type: 'progress',
+        percent: (100 * iterationsDone) / Math.max(1, iterationsTotal),
+        iterationsDone,
+        iterationsTotal,
+        current,
+        best,
+        bestByType,
+      };
+      self.postMessage(out satisfies WorkerOutMessage);
+    }
+  }
+
+  const out: WorkerDoneMessage = { type: 'done', best, bestByType };
+  self.postMessage(out satisfies WorkerOutMessage);
+};
 
 self.onmessage = (evt: MessageEvent<WorkerMessage>) => {
   const msg = evt.data;
-  if (msg.type === 'cancel') {
-    cancelled = true;
-    return;
-  }
-  if (msg.type !== 'start' && msg.type !== 'refine') return;
 
-  cancelled = false;
-
-  try {
-    const { magnitudes, peakHz, uiUpdateEveryMs } = msg;
-    const scoreMode = msg.scoreMode ?? 'klipper';
-
-    if (msg.type === 'refine') {
-      const safetyCapSteps = msg.steps ?? 20_000;
-      const start = msg.startParams;
-
-      const zMin = Math.min(...SEARCH_ZETAS);
-      const zMax = Math.max(...SEARCH_ZETAS);
-      const vMin = SEARCH_VTOLS.length ? Math.min(...SEARCH_VTOLS) : 0.02;
-      const vMax = SEARCH_VTOLS.length ? Math.max(...SEARCH_VTOLS) : 0.4;
-      const fMin = Math.max(SEARCH_F_MIN_ABS_HZ, peakHz - SEARCH_F_WINDOW_HZ);
-      const fMax = Math.min(SEARCH_F_MAX_ABS_HZ, peakHz + SEARCH_F_WINDOW_HZ);
-      const bounds = { fMin, fMax, zMin, zMax, vMin, vMax };
-
-      let state: FineState = {
-        type: start.type,
-        params: {
-          type: start.type,
-          fHz: start.fHz,
-          zeta: start.zeta,
-          vtol: start.vtol,
-        },
-        score: scoreCandidate(magnitudes, start, peakHz, scoreMode),
-        done: false,
-      };
-
-      let best: OptimisationResult | undefined;
-      if (Number.isFinite(state.score)) best = { params: state.params, score: state.score };
-
-      let lastUiUpdate = performance.now();
-
-      let iterationsDone = 0;
-      for (let i = 0; i < safetyCapSteps; i++) {
-        if (cancelled) break;
-        state = fineStep(magnitudes, state, peakHz, scoreMode, bounds);
-        if (!best || state.score < best.score) best = { params: state.params, score: state.score };
-
-        iterationsDone = i + 1;
-
-        const now = performance.now();
-        if (now - lastUiUpdate > uiUpdateEveryMs) {
-          lastUiUpdate = now;
-          const out: WorkerProgressMessage = {
-            type: 'progress',
-            percent: (100 * (i + 1)) / Math.max(1, safetyCapSteps),
-            iterationsDone: i + 1,
-            iterationsTotal: safetyCapSteps,
-            current: { params: state.params, score: state.score },
-            best,
-            bestByType: { [start.type]: best } satisfies BestByType,
-          };
-          self.postMessage(out satisfies WorkerOutMessage);
-        }
-        if (state.done) break;
-      }
-
-      // Ensure the UI gets a final progress update reflecting the actual number of iterations.
-      if (!cancelled) {
-        const out: WorkerProgressMessage = {
-          type: 'progress',
-          percent: safetyCapSteps ? (100 * iterationsDone) / safetyCapSteps : 0,
-          iterationsDone,
-          iterationsTotal: safetyCapSteps,
-          current: { params: state.params, score: state.score },
-          best,
-          bestByType: best ? ({ [start.type]: best } satisfies BestByType) : undefined,
-        };
-        self.postMessage(out satisfies WorkerOutMessage);
-      }
-
-      const out: WorkerDoneMessage = {
-        type: 'done',
-        best,
-        bestByType: best ? ({ [start.type]: best } satisfies BestByType) : undefined,
-      };
-      self.postMessage(out satisfies WorkerOutMessage);
-      return;
+  switch (msg.type) {
+    case 'refine': {
+      return refine(msg);
     }
-
-    const types = (msg.candidateTypes?.length ? msg.candidateTypes : SEARCH_TYPES).filter(
-      (t): t is InputShaperType => SEARCH_TYPES.includes(t)
-    );
-    const fStep = SEARCH_F_STEP_HZ;
-    const zetas = SEARCH_ZETAS;
-    const vtols = SEARCH_VTOLS;
-
-    const fMin = Math.max(SEARCH_F_MIN_ABS_HZ, peakHz - SEARCH_F_WINDOW_HZ);
-    const fMax = Math.min(SEARCH_F_MAX_ABS_HZ, peakHz + SEARCH_F_WINDOW_HZ);
-
-    // Coarse iteration count
-    let coarseTotal = 0;
-    for (const t of types) {
-      const vtolCount = isEiFamily(t) ? vtols.length : 1;
-      const fCount = Math.floor((fMax - fMin) / fStep) + 1;
-      coarseTotal += fCount * zetas.length * vtolCount;
+    case 'start': {
+      return bruteForce(msg);
     }
-
-    const fineStepsPerType = 2000;
-    const iterationsTotal = coarseTotal + fineStepsPerType * types.length;
-    let iterationsDone = 0;
-
-    let best: OptimisationResult | undefined;
-    const bestByType: BestByType = {};
-    let lastUiUpdate = performance.now();
-
-    // Phase 1: coarse grid search (interleaved worst->best across types)
-    const fHzCandidates = frequencyCandidatesFarToNear(fMin, fMax, fStep, peakHz);
-
-    const coarseHeap = new MaxHeap<CoarseState>((s) => s.bestScore);
-    for (const candidateType of types) {
-      const vtolCandidates = isEiFamily(candidateType) ? vtols : [0.1];
-      if (!fHzCandidates.length || !zetas.length || !vtolCandidates.length) continue;
-      coarseHeap.push({
-        type: candidateType,
-        fHzCandidates,
-        zetaCandidates: zetas,
-        vtolCandidates,
-        fIndex: 0,
-        zIndex: 0,
-        vIndex: 0,
-        bestScore: Number.POSITIVE_INFINITY,
-      });
-    }
-
-    for (let i = 0; i < coarseTotal; i++) {
-      if (cancelled) {
-        const out: WorkerDoneMessage = { type: 'done', best, bestByType };
-        self.postMessage(out satisfies WorkerOutMessage);
-        return;
-      }
-
-      const state = coarseHeap.pop();
-      if (!state) {
-        // No candidates left to evaluate; still advance progress.
-        iterationsDone++;
-        continue;
-      }
-
-      const next = coarseNext(state);
-      if (!next) {
-        iterationsDone++;
-        continue;
-      }
-
-      iterationsDone++;
-      const params = next.params;
-      const score = scoreCandidate(magnitudes, params, peakHz, scoreMode);
-      const current: OptimisationResult = { params, score };
-
-      if (Number.isFinite(score)) {
-        const prevByType = bestByType[state.type];
-        if (!prevByType || score < prevByType.score) bestByType[state.type] = current;
-        if (!best || score < best.score) best = current;
-        next.next.bestScore = Math.min(next.next.bestScore, score);
-      }
-
-      // Reinsert if there is more work for this type.
-      if (next.next.fIndex < next.next.fHzCandidates.length) {
-        coarseHeap.push(next.next);
-      }
-
-      const now = performance.now();
-      if (now - lastUiUpdate > uiUpdateEveryMs) {
-        lastUiUpdate = now;
-        const out: WorkerProgressMessage = {
-          type: 'progress',
-          percent: (100 * iterationsDone) / Math.max(1, iterationsTotal),
-          iterationsDone,
-          iterationsTotal,
-          current,
-          best,
-          bestByType,
-        };
-        self.postMessage(out satisfies WorkerOutMessage);
-      }
-    }
-
-    // Phase 2: fine local optimisation (gradient descent) from per-type coarse best
-    const zMin = Math.min(...zetas);
-    const zMax = Math.max(...zetas);
-    const vMin = vtols.length ? Math.min(...vtols) : 0.02;
-    const vMax = vtols.length ? Math.max(...vtols) : 0.4;
-
-    const heap = new MaxHeap<FineState>((s) => s.score);
-    const remainingByType = new Map<InputShaperType, number>();
-    for (const candidateType of types) {
-      remainingByType.set(candidateType, fineStepsPerType);
-      const start = bestByType[candidateType];
-      if (!start) continue;
-      heap.push({ type: candidateType, params: start.params, score: start.score, done: false });
-    }
-
-    // Interleave refinement across types: always refine the currently-worst candidate next.
-    const bounds = { fMin, fMax, zMin, zMax, vMin, vMax };
-    const fineBudget = fineStepsPerType * types.length;
-    for (let i = 0; i < fineBudget; i++) {
-      if (cancelled) {
-        const out: WorkerDoneMessage = { type: 'done', best, bestByType };
-        self.postMessage(out satisfies WorkerOutMessage);
-        return;
-      }
-
-      const state = heap.pop();
-      if (!state) {
-        break;
-      }
-
-      const left = remainingByType.get(state.type) ?? 0;
-      if (left <= 0) {
-        iterationsDone++;
-        continue;
-      }
-      remainingByType.set(state.type, left - 1);
-
-      const nextState = fineStep(magnitudes, state, peakHz, scoreMode, bounds);
-      iterationsDone++;
-
-      const current: OptimisationResult = { params: nextState.params, score: nextState.score };
-      const prevByType = bestByType[nextState.type];
-      if (!prevByType || current.score < prevByType.score) bestByType[nextState.type] = current;
-      if (!best || current.score < best.score) best = current;
-
-      if (!nextState.done && (remainingByType.get(nextState.type) ?? 0) > 0) {
-        heap.push(nextState);
-      }
-
-      const now = performance.now();
-      if (now - lastUiUpdate > uiUpdateEveryMs) {
-        lastUiUpdate = now;
-        const out: WorkerProgressMessage = {
-          type: 'progress',
-          percent: (100 * iterationsDone) / Math.max(1, iterationsTotal),
-          iterationsDone,
-          iterationsTotal,
-          current,
-          best,
-          bestByType,
-        };
-        self.postMessage(out satisfies WorkerOutMessage);
-      }
-    }
-
-    const out: WorkerDoneMessage = { type: 'done', best, bestByType };
-    self.postMessage(out satisfies WorkerOutMessage);
-  } catch (e) {
-    const out: WorkerErrorMessage = {
-      type: 'error',
-      message: e instanceof Error ? e.message : String(e),
-    };
-    self.postMessage(out satisfies WorkerOutMessage);
   }
 };

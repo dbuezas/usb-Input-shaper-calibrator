@@ -4,7 +4,10 @@ import { useAtomValue } from 'jotai';
 import { scaleLinear } from 'd3-scale';
 import { ACTUAL_RESOLUTION, MAX_FREQ, MIN_FREQ, SPECTROGRAM_MAX_TIME_SLICES } from '@/constants';
 import { DEFAULT_AXIS_PADDING, getInnerSize, useD3Axes } from './axis';
-import { Tooltip, useRafThrottledHover } from './tooltip';
+import { Tooltip } from './tooltip';
+import { useRafThrottledHover } from './plot-hover';
+
+const tickFormat = (v: number) => `${Math.round(v)}`;
 
 export const Waterfall = ({
   width,
@@ -50,7 +53,7 @@ export const Waterfall = ({
     yDomain: [SPECTROGRAM_MAX_TIME_SLICES, 0],
     xTicks: 6,
     yTicks: 4,
-    xTickFormat: (v) => `${Math.round(v)}`,
+    xTickFormat: tickFormat,
     yTickFormat: (v) => `${Math.round(v)}`,
   });
 
@@ -130,7 +133,7 @@ const Waterfall_render = ({
   const spectrum = useAtomValue(dataAtom);
 
   useEffect(() => {
-    if (!spectrum?.length) return;
+    if (!spectrum.length) return;
 
     const canvas = canvasRef.current;
     if (!canvas) return;

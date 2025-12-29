@@ -85,16 +85,5 @@ export const useD3Axes = ({
 
     g.selectAll('path, line').attr('stroke', 'rgba(255,255,255,0.25)');
     g.selectAll('text').attr('fill', 'rgba(255,255,255,0.7)').style('font-size', '10px');
-  }, [
-    svgRef,
-    width,
-    height,
-    xDomain[0],
-    xDomain[1],
-    yDomain[0],
-    yDomain[1],
-    xTicks,
-    yTicks,
-    padding,
-  ]);
+  }, [svgRef, width, height, xTicks, yTicks, padding, xDomain, yDomain, xTickFormat, yTickFormat]);
 };

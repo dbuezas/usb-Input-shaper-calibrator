@@ -192,19 +192,15 @@ export default function MeasureScreen() {
   ).map((tile) => (
     <Card key={tile.key} className="w-full flex-1 text-center sm:min-w-0">
       <CardHeader className="pb-3">
-        {tile.tooltip ? (
-          <ExplainTooltip
-            title={tile.tooltip.title}
-            accurate={tile.tooltip.accurate}
-            intuition={tile.tooltip.intuition}
-          >
-            <CardTitle className="underline decoration-dotted underline-offset-2">
-              {tile.title}
-            </CardTitle>
-          </ExplainTooltip>
-        ) : (
-          <CardTitle>{tile.title}</CardTitle>
-        )}
+        <ExplainTooltip
+          title={tile.tooltip.title}
+          accurate={tile.tooltip.accurate}
+          intuition={tile.tooltip.intuition}
+        >
+          <CardTitle className="underline decoration-dotted underline-offset-2">
+            {tile.title}
+          </CardTitle>
+        </ExplainTooltip>
       </CardHeader>
       <CardContent>
         <div>{tile.value}</div>
@@ -265,7 +261,7 @@ export default function MeasureScreen() {
               side="right"
               sideOffset={8}
             >
-              <Button onClick={disconnect}>Disconnect</Button>
+              <Button onClick={() => void disconnect()}>Disconnect</Button>
             </ExplainTooltip>
           )}
         </div>

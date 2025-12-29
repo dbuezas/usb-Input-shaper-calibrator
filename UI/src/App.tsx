@@ -31,7 +31,7 @@ const steps: { title: string; screen: Screen }[] = [
 ];
 
 const screenFromStep = (step: number): Screen =>
-  steps[Math.max(0, Math.min(steps.length - 1, step - 1))]!.screen;
+  steps[Math.max(0, Math.min(steps.length - 1, step - 1))].screen;
 
 const stepFromScreen = (screen: Screen): number => {
   const idx = steps.findIndex((s) => s.screen === screen);

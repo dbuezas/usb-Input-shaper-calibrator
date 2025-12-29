@@ -4,8 +4,9 @@ import type { Atom } from 'jotai';
 import { useAtomValue } from 'jotai';
 import { scaleLinear } from 'd3-scale';
 import { DEFAULT_AXIS_PADDING, getInnerSize, useD3Axes } from './axis';
-import { Tooltip, useRafThrottledHover } from './tooltip';
+import { Tooltip } from './tooltip';
 import { MAX_FREQ, MIN_FREQ } from '@/constants';
+import { useRafThrottledHover } from './plot-hover';
 
 export type SpectrumPlotMode = 'points' | 'line';
 
@@ -32,13 +33,15 @@ const SpectrumPlot_render = ({
   scaleMax?: number;
   dynamicRangeDb?: number;
 }) => {
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   const datasets = traces.map(({ dataAtom }) => useAtomValue(dataAtom));
 
   useEffect(() => {
     if (!traces.length) return;
 
+    if (!datasets.length) return;
     const data = datasets[0];
-    if (!data?.length) return;
+    if (!data.length) return;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -57,7 +60,7 @@ const SpectrumPlot_render = ({
     let max = Number.NEGATIVE_INFINITY;
 
     for (const series of datasets) {
-      if (!series?.length) continue;
+      if (!series.length) continue;
       if (series.length !== data.length) continue;
 
       for (let i = iMin; i < iMax; i++) {
@@ -85,11 +88,8 @@ const SpectrumPlot_render = ({
 
     for (let t = 0; t < traces.length; t++) {
       const trace = traces[t];
-      if (!trace) continue;
 
       const series = datasets[t];
-      if (!series?.length) continue;
-      if (series.length !== data.length) continue;
 
       ctx.strokeStyle = trace.color;
       ctx.fillStyle = trace.color;
@@ -122,6 +122,7 @@ const SpectrumPlot_render = ({
 
   return null;
 };
+const tickFormat = (v: number) => `${Math.round(v)}`;
 
 export const SpectrumPlot = ({
   traces,
@@ -154,13 +155,13 @@ export const SpectrumPlot = ({
     [freqRange, innerWidth]
   );
 
-  const yDomain = (() => {
+  const yDomain = useMemo(() => {
     if (dynamicRangeDb && dynamicRangeDb > 0) {
       const max = scaleMax ?? 0;
       return [max - dynamicRangeDb, max] as [number, number];
     }
     return [0, scaleMax ?? 1] as [number, number];
-  })();
+  }, [dynamicRangeDb, scaleMax]);
 
   const yScale = useMemo(
     () => scaleLinear().domain(yDomain).range([innerHeight, 0]),
@@ -171,11 +172,11 @@ export const SpectrumPlot = ({
     svgRef,
     width,
     height,
-    xDomain: [freqRange[0], freqRange[1]],
+    xDomain: freqRange,
     yDomain,
     xTicks: 6,
     yTicks: 4,
-    xTickFormat: (v) => `${Math.round(v)}`,
+    xTickFormat: tickFormat,
   });
 
   return (

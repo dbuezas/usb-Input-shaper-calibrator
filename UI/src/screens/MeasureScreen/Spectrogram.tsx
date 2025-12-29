@@ -123,26 +123,24 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
   useEffect(() => {
     const handleMessage = (e: MessageEvent<SpectrumSliceMessage>) => {
       const msg = e.data;
-      if (msg.type === 'spectrumSlice') {
-        setSpectrogram(msg.spectrum);
-        setSpectrogramScaleMax((prev) => {
-          let next = prev ?? Number.NEGATIVE_INFINITY;
-          for (const v of msg.spectrum) next = Math.max(next, v);
-          return next === Number.NEGATIVE_INFINITY ? undefined : next;
-        });
-        setSpectrogramMaxHold((prev) => {
-          const next = updateMaxHold(prev, msg.spectrum);
-          setHistoricPeak(peakFromSeries(next));
-          return next;
-        });
-      }
+      setSpectrogram(msg.spectrum);
+      setSpectrogramScaleMax((prev) => {
+        let next = prev ?? Number.NEGATIVE_INFINITY;
+        for (const v of msg.spectrum) next = Math.max(next, v);
+        return next === Number.NEGATIVE_INFINITY ? undefined : next;
+      });
+      setSpectrogramMaxHold((prev) => {
+        const next = updateMaxHold(prev, msg.spectrum);
+        setHistoricPeak(peakFromSeries(next));
+        return next;
+      });
     };
 
     spectrogramChannel.addEventListener('message', handleMessage);
     return () => {
       spectrogramChannel.removeEventListener('message', handleMessage);
     };
-  }, []);
+  }, [setHistoricPeak, setSpectrogram, setSpectrogramMaxHold, setSpectrogramScaleMax]);
 
   return (
     <div className="text-center">
