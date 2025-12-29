@@ -522,13 +522,46 @@ export default function ShaperScreen() {
     accurate: (
       <>
         Brute-force searches shaper type + frequency + damping (+ tolerance for EI/HEI) to minimize
-        the Klipper-like score, using your Measure <b>max-hold</b> spectrum as input.
+        the score, using your Measure <b>max-hold</b> spectrum as input.
+      </>
+    ),
+    intuition: <>It also runs a gradient refinment at the end.</>,
+  };
+
+  const refineCurrent = {
+    title: 'Refine current',
+    accurate: (
+      <>
+        Runs a local gradient-based refinement starting from the current shaper settings, to try to
+        reduce the selected score mode.
+      </>
+    ),
+    intuition: <>Use this when you’re already close and want a last small improvement.</>,
+  };
+
+  const scoreModeKlipper = {
+    title: 'Klipper score mode',
+    accurate: (
+      <>
+        Minimizes a Klipper-like tradeoff between remaining vibration and smoothing (corner
+        rounding). Lower is better.
+      </>
+    ),
+    intuition: <>Good default for general “less ringing without too much blur”.</>,
+  };
+
+  const scoreModeFlatness = {
+    title: 'Flatness score mode',
+    accurate: (
+      <>
+        Minimizes how much the <b>shaped</b> spectrum varies from a flat line over 0–200 Hz. Lower
+        is better.
       </>
     ),
     intuition: (
       <>
-        It tries lots of reasonable candidates and picks the one that best balances “quiet” vs
-        “sharp”.
+        Use this when you want the least ringing at the cost of lower acceleration (or slightly more
+        corner rounding).
       </>
     ),
   };
@@ -694,26 +727,38 @@ export default function ShaperScreen() {
             </ExplainTooltip>
           </div>
           <div className="border-border grid w-full grid-cols-2 gap-1 rounded-md border p-1">
-            <Button
-              type="button"
-              size="sm"
-              variant={scoreMode === 'klipper' ? 'secondary' : 'ghost'}
-              className="h-8 w-full"
-              aria-pressed={scoreMode === 'klipper'}
-              onClick={() => setScoreMode('klipper')}
+            <ExplainTooltip
+              title={scoreModeKlipper.title}
+              accurate={scoreModeKlipper.accurate}
+              intuition={scoreModeKlipper.intuition}
             >
-              Klipper
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={scoreMode === 'flatness' ? 'secondary' : 'ghost'}
-              className="h-8 w-full"
-              aria-pressed={scoreMode === 'flatness'}
-              onClick={() => setScoreMode('flatness')}
+              <Button
+                type="button"
+                size="sm"
+                variant={scoreMode === 'klipper' ? 'secondary' : 'ghost'}
+                className="h-8 w-full"
+                aria-pressed={scoreMode === 'klipper'}
+                onClick={() => setScoreMode('klipper')}
+              >
+                Klipper
+              </Button>
+            </ExplainTooltip>
+            <ExplainTooltip
+              title={scoreModeFlatness.title}
+              accurate={scoreModeFlatness.accurate}
+              intuition={scoreModeFlatness.intuition}
             >
-              Flatness
-            </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={scoreMode === 'flatness' ? 'secondary' : 'ghost'}
+                className="h-8 w-full"
+                aria-pressed={scoreMode === 'flatness'}
+                onClick={() => setScoreMode('flatness')}
+              >
+                Flatness
+              </Button>
+            </ExplainTooltip>
           </div>
         </div>
 
@@ -732,15 +777,21 @@ export default function ShaperScreen() {
               {isOptimising ? 'Optimising…' : 'Auto optimise'}
             </Button>
           </ExplainTooltip>
-          <Button
-            type="button"
-            variant="secondary"
-            className="mt-2 w-full"
-            onClick={() => void runRefineCurrent()}
-            disabled={!maxHoldSpectrum.length || isOptimising}
+          <ExplainTooltip
+            title={refineCurrent.title}
+            accurate={refineCurrent.accurate}
+            intuition={refineCurrent.intuition}
           >
-            {isOptimising ? 'Refining…' : 'Refine current'}
-          </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              className="mt-2 w-full"
+              onClick={() => void runRefineCurrent()}
+              disabled={!maxHoldSpectrum.length || isOptimising}
+            >
+              {isOptimising ? 'Refining…' : 'Refine current'}
+            </Button>
+          </ExplainTooltip>
           {!isOptimising && (
             <div className="text-muted-foreground mt-2 text-xs">
               Current score:{' '}
