@@ -3,7 +3,6 @@ import {
   spectrogramChannel,
   type RawDataMessage,
   type SpectrumSliceMessage,
-  type WelchPsdSliceMessage,
 } from './messages';
 import { CircularBuffer } from './circular-buffer';
 import {
@@ -22,10 +21,9 @@ interface SensorData {
 }
 
 interface WorkerMessage {
-  type: 'rawData' | 'reset' | 'setSelectedAxis' | 'setWindowFunction';
+  type: 'rawData' | 'reset' | 'setSelectedAxis';
   data?: Uint8Array;
   axis?: 'x' | 'y' | 'z';
-  window?: 'hann' | 'hamming' | 'blackman' | 'rectangular';
 }
 
 function fft(re: number[], im: number[]): void {
@@ -69,51 +67,9 @@ function hannWindow(size: number): number[] {
   return window;
 }
 
-function hammingWindow(size: number): number[] {
-  const window: number[] = new Array(size);
-  for (let i = 0; i < size; i++) window[i] = 0.54 - 0.46 * Math.cos((2 * Math.PI * i) / (size - 1));
-  return window;
-}
-
-function blackmanWindow(size: number): number[] {
-  const window: number[] = new Array(size);
-  const a0 = 0.42;
-  const a1 = 0.5;
-  const a2 = 0.08;
-  for (let i = 0; i < size; i++) {
-    const phase = (2 * Math.PI * i) / (size - 1);
-    window[i] = a0 - a1 * Math.cos(phase) + a2 * Math.cos(2 * phase);
-  }
-  return window;
-}
-
-function rectangularWindow(size: number): number[] {
-  return new Array(size).fill(1);
-}
-
-function makeWindow(window: WorkerMessage['window'], size: number): number[] {
-  switch (window) {
-    case 'hamming':
-      return hammingWindow(size);
-    case 'blackman':
-      return blackmanWindow(size);
-    case 'rectangular':
-      return rectangularWindow(size);
-    case 'hann':
-    default:
-      return hannWindow(size);
-  }
-}
-
 function windowSum(w: number[]): number {
   let s = 0;
   for (let i = 0; i < w.length; i++) s += w[i];
-  return s;
-}
-
-function windowSumSquares(w: number[]): number {
-  let s = 0;
-  for (let i = 0; i < w.length; i++) s += w[i] * w[i];
   return s;
 }
 
@@ -122,34 +78,19 @@ class SpectralProcessor {
   bufferIndex: number;
   windows: number[];
   windowSum: number;
-  windowSumSquares: number;
   re: number[];
   im: number[];
   magnitudes: number[];
-  welchPsd: number[];
 
-  // Welch averaging over the last N (overlapped) periodograms
-  welchAvgCount: number;
-  welchAvgWriteIndex: number;
-  welchPeriodogramRing: Float64Array[];
-  welchPeriodogramSum: Float64Array;
-
-  constructor(window: WorkerMessage['window'] = 'hann') {
+  constructor() {
     this.buffer = new Array(WINDOW_SIZE).fill(0);
     this.bufferIndex = 0;
-    this.windows = makeWindow(window, WINDOW_SIZE);
+    this.windows = hannWindow(WINDOW_SIZE);
     this.windowSum = windowSum(this.windows);
-    this.windowSumSquares = windowSumSquares(this.windows);
     this.re = new Array(WINDOW_SIZE);
     this.im = new Array(WINDOW_SIZE);
     const halfBins = WINDOW_SIZE / 2 + 1;
     this.magnitudes = new Array(halfBins);
-    this.welchPsd = new Array(halfBins);
-
-    this.welchAvgCount = 8;
-    this.welchAvgWriteIndex = 0;
-    this.welchPeriodogramRing = [];
-    this.welchPeriodogramSum = new Float64Array(WINDOW_SIZE / 2 + 1);
   }
 
   addSample(value: number): void {
@@ -189,51 +130,10 @@ class SpectralProcessor {
       Math.sqrt(this.re[nyquist] * this.re[nyquist] + this.im[nyquist] * this.im[nyquist]) *
       (scale * 0.5);
 
-    // Welch PSD (one-sided) using the same FFT result
-    const U = this.windowSumSquares / WINDOW_SIZE;
-    const baseScale = 1 / (FIXED_SAMPLE_RATE * WINDOW_SIZE * U);
-    const periodogram = new Float64Array(halfBins);
-
-    // DC bin (not doubled)
-    periodogram[0] = (this.re[0] * this.re[0] + this.im[0] * this.im[0]) * baseScale;
-
-    // Non-DC, non-Nyquist bins are doubled in the one-sided PSD
-    for (let k = 1; k < halfBins - 1; k++) {
-      const power = this.re[k] * this.re[k] + this.im[k] * this.im[k];
-      periodogram[k] = power * baseScale * 2;
-    }
-
-    // Nyquist bin (not doubled)
-    periodogram[halfBins - 1] =
-      (this.re[halfBins - 1] * this.re[halfBins - 1] +
-        this.im[halfBins - 1] * this.im[halfBins - 1]) *
-      baseScale;
-
-    if (this.welchPeriodogramRing.length < this.welchAvgCount) {
-      this.welchPeriodogramRing.push(periodogram);
-      for (let k = 0; k < halfBins; k++) this.welchPeriodogramSum[k] += periodogram[k];
-    } else {
-      const old = this.welchPeriodogramRing[this.welchAvgWriteIndex];
-      for (let k = 0; k < halfBins; k++) this.welchPeriodogramSum[k] += periodogram[k] - old[k];
-      this.welchPeriodogramRing[this.welchAvgWriteIndex] = periodogram;
-      this.welchAvgWriteIndex = (this.welchAvgWriteIndex + 1) % this.welchAvgCount;
-    }
-
-    const denom = this.welchPeriodogramRing.length;
-    for (let k = 0; k < halfBins; k++) {
-      const avgPxx = this.welchPeriodogramSum[k] / denom;
-      this.welchPsd[k] = avgPxx;
-    }
-
     spectrogramChannel.postMessage({
       type: 'spectrumSlice',
       spectrum: this.magnitudes,
     } satisfies SpectrumSliceMessage);
-
-    spectrogramChannel.postMessage({
-      type: 'welchPsdSlice',
-      psd: this.welchPsd,
-    } satisfies WelchPsdSliceMessage);
   }
 }
 
@@ -245,7 +145,6 @@ class DataProcessor {
   lastData: SensorData;
   processor: SpectralProcessor | null;
   selectedAxis: 'x' | 'y' | 'z';
-  windowFunction: WorkerMessage['window'];
   lastSent: number;
 
   constructor() {
@@ -254,14 +153,13 @@ class DataProcessor {
     this.intervalStartTime = 0;
     this.frequency = 0;
     this.lastData = { x: 0, y: 0, z: 0 };
-    this.windowFunction = 'hann';
-    this.processor = new SpectralProcessor(this.windowFunction);
+    this.processor = new SpectralProcessor();
     this.selectedAxis = 'x';
     this.lastSent = 0;
   }
 
   resetSpectralProcessor(): void {
-    this.processor = new SpectralProcessor(this.windowFunction);
+    this.processor = new SpectralProcessor();
   }
 
   processRawData(rawData: Uint8Array): void {
@@ -359,9 +257,6 @@ self.onmessage = function (e: MessageEvent<WorkerMessage>) {
   } else if (type === 'setSelectedAxis') {
     console.log('selectaxis');
     dataProcessor.selectedAxis = e.data.axis!;
-    dataProcessor.resetSpectralProcessor();
-  } else if (type === 'setWindowFunction') {
-    dataProcessor.windowFunction = e.data.window ?? 'hann';
     dataProcessor.resetSpectralProcessor();
   }
 };

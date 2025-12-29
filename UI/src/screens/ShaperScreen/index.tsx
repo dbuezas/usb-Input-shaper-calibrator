@@ -12,7 +12,6 @@ import { ExplainTooltip } from '@/components/ExplainTooltip';
 import { cn } from '@/lib/utils';
 import {
   applyShaperToMagnitudeSpectrum,
-  applyShaperToWelchPsd,
   computeMarlinShaperTaps,
   klipperScoreFromMagnitudeSpectrum,
   klipperSuggestedMaxAccel,
@@ -20,7 +19,7 @@ import {
   type ShaperParams,
 } from './input-shaper';
 import ShaperOptimiserWorker from './shaper-optimiser.worker?worker';
-import { spectrogramMaxHoldAtom, welchPsdMaxHoldAtom } from '../MeasureScreen/atoms';
+import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
 
 type OptimisationResult = { params: ShaperParams; score: number };
 type BestByType = Partial<Record<InputShaperType, OptimisationResult>>;
@@ -77,12 +76,6 @@ const shapedSpectrumAtom = atom((get) => {
   return applyShaperToMagnitudeSpectrum(get(shaperParamsAtom), base);
 });
 
-const shapedWelchAtom = atom((get) => {
-  const base = get(welchPsdMaxHoldAtom);
-  if (!base?.length) return [];
-  return applyShaperToWelchPsd(get(shaperParamsAtom), base);
-});
-
 const currentScoreAtom = atom((get) => {
   const base = get(spectrogramMaxHoldAtom);
   if (!base?.length) return undefined;
@@ -117,7 +110,6 @@ export default function ShaperScreen() {
   const [vtol, setVtol] = useAtom(shaperVtolAtom);
 
   const maxHoldSpectrum = useAtomValue(spectrogramMaxHoldAtom);
-  const maxHoldWelch = useAtomValue(welchPsdMaxHoldAtom);
   const currentScore = useAtomValue(currentScoreAtom);
   const currentMaxAccel = useAtomValue(currentMaxAccelAtom);
   const delayCentroidSeconds = useAtomValue(delayCentroidSecondsAtom);
@@ -425,7 +417,7 @@ export default function ShaperScreen() {
               Shaper
             </div>
           </ExplainTooltip>
-          <div className="border-border mt-2 inline-flex flex-wrap gap-1 rounded-md border p-1">
+          <div className="border-border mt-2 grid w-full grid-cols-4 gap-1 rounded-md border p-1">
             {(
               [
                 { value: 'zv', label: 'ZV' },
@@ -448,7 +440,7 @@ export default function ShaperScreen() {
                   type="button"
                   size="sm"
                   variant={type === opt.value ? 'secondary' : 'ghost'}
-                  className="h-8"
+                  className="h-8 w-full"
                   aria-pressed={type === opt.value}
                   onClick={() => {
                     setType(opt.value);
@@ -602,7 +594,7 @@ export default function ShaperScreen() {
               intuition={f0Info.intuition}
             >
               <label className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
-                Resonance f0: {f0} Hz
+                Resonance f0: {f0.toFixed(1)} Hz
               </label>
             </ExplainTooltip>
             <div className="mt-3">
@@ -680,8 +672,7 @@ export default function ShaperScreen() {
         </div>
 
         <div className="text-muted-foreground mt-6 text-xs leading-relaxed">
-          Uses Marlin FT_MOTION coefficients. Shaped plots apply |H(f)| to magnitude and |H(f)|² to
-          Welch PSD.
+          Uses Marlin FT_MOTION coefficients. Shaped plots apply |H(f)| to magnitude.
         </div>
 
         <div className="border-border mt-4 rounded-lg border p-3">
@@ -742,28 +733,6 @@ export default function ShaperScreen() {
               width={width}
               freqRange={[0, 200]}
               scaleMax={maxHoldSpectrum.length ? Math.max(...maxHoldSpectrum) : undefined}
-            />
-          </div>
-
-          <div>
-            <h4 className="mb-2 font-semibold">Welch PSD Max-Hold → Shaped</h4>
-            <SpectrumPlot
-              traces={[
-                {
-                  dataAtom: welchPsdMaxHoldAtom,
-                  mode: 'line',
-                  color: 'rgba(255, 80, 80, 0.75)',
-                },
-                {
-                  dataAtom: shapedWelchAtom,
-                  mode: 'line',
-                  color: 'rgba(0, 255, 120, 0.9)',
-                },
-              ]}
-              height={height}
-              width={width}
-              freqRange={[0, 200]}
-              scaleMax={maxHoldWelch.length ? Math.max(...maxHoldWelch) : undefined}
             />
           </div>
         </div>

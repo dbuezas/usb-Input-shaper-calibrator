@@ -373,7 +373,7 @@ export default function MeasureScreen() {
             </div>
           </ExplainTooltip>
           <div className="mt-3">
-            <SpectrogramControls dataSource={dataSource} />
+            <SpectrogramControls />
           </div>
           {!isConnected && (
             <div className="text-muted-foreground mt-2 text-xs">
