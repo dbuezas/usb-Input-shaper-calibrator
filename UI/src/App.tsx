@@ -12,6 +12,7 @@ import {
   StepperTrigger,
 } from '@/components/ui/stepper';
 import { Check, LoaderCircleIcon } from 'lucide-react';
+import { REPO_URL } from '@/constants';
 
 type Screen = 'install' | 'measure' | 'shaper';
 
@@ -45,7 +46,17 @@ function App() {
   return (
     <div className="mx-auto max-w-7xl p-6 font-sans">
       <header className="mb-6 flex items-center justify-between gap-6">
-        <h1 className="min-w-0 text-xl font-bold">Marlin USB Resonance Tester</h1>
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold">Marlin USB Resonance Tester</h1>
+          <a
+            className="text-muted-foreground mt-1 inline-flex text-xs underline decoration-dotted underline-offset-2"
+            href={REPO_URL}
+            target="_blank"
+            rel="noreferrer"
+          >
+            GitHub repository
+          </a>
+        </div>
 
         <Stepper
           value={currentStep}

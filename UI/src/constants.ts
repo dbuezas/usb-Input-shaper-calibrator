@@ -1,5 +1,8 @@
 // Global constants for the application
 
+// Public links
+export const REPO_URL = 'https://github.com/dbuezas/usb-Input-shaper-calibrator';
+
 // === Serial + transport ===
 
 // Used by `src/data-source.ts` when opening the serial port.
