@@ -8,7 +8,16 @@ import { SimulationPort } from '@/screens/MeasureScreen/simulation-port';
 import { Button } from '@/components/ui/button';
 import { ExplainTooltip } from '@/components/ExplainTooltip';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { historicPeakFrequencyAtom, peakFrequencyAtom } from './atoms';
+import {
+  historicPeakAtom,
+  historicPeakFrequencyAtom,
+  peakAtom,
+  peakFrequencyAtom,
+  spectrogramMaxHoldAtom,
+} from './atoms';
+import { Slider } from '@/components/ui/slider';
+
+const DEFAULT_SIMULATION_SWEEP_S = 20;
 
 const adxlDataAtom = atom<Int16Array<ArrayBufferLike>>();
 const frequencyAtom = atom(0);
@@ -30,11 +39,17 @@ const AtomValue = ({ atom }: { atom: Atom<string> }) => {
 
 export default function MeasureScreen() {
   const [isConnected, setIsConnected] = useState(false);
+  const [connectedKind, setConnectedKind] = useState<'usb' | 'simulation' | null>(null);
   const setAdxlData = useSetAtom(adxlDataAtom);
   const setFrequency = useSetAtom(frequencyAtom);
+  const clearMaxHold = useSetAtom(spectrogramMaxHoldAtom);
+  const clearPeak = useSetAtom(peakAtom);
+  const clearHistoricPeak = useSetAtom(historicPeakAtom);
   const [status, setStatus] = useState('Disconnected');
   const [selectedAxis, setSelectedAxis] = useState<'x' | 'y' | 'z'>('x');
   const [dataSource, setDataSource] = useState<DataSource | undefined>(undefined);
+  const [simulationSweepSeconds, setSimulationSweepSeconds] = useState(DEFAULT_SIMULATION_SWEEP_S);
+  const [simulationPort, setSimulationPort] = useState<SimulationPort | null>(null);
 
   useEffect(() => {
     return () => void dataSource?.stop();
@@ -44,7 +59,11 @@ export default function MeasureScreen() {
     await dataSource?.stop();
 
     const port =
-      kind === 'simulation' ? new SimulationPort() : await navigator.serial.requestPort();
+      kind === 'simulation'
+        ? new SimulationPort({ sweepSeconds: simulationSweepSeconds })
+        : await navigator.serial.requestPort();
+    setSimulationPort(kind === 'simulation' ? (port as SimulationPort) : null);
+    setConnectedKind(kind);
     const newDataSource = new SerialDataSource(
       port,
       (data) => setAdxlData(data),
@@ -57,7 +76,11 @@ export default function MeasureScreen() {
 
     const success = await newDataSource.start();
     setIsConnected(success);
-    if (!success) setStatus('Disconnected');
+    if (!success) {
+      setStatus('Disconnected');
+      setConnectedKind(null);
+      setSimulationPort(null);
+    }
     return success;
   };
 
@@ -65,6 +88,8 @@ export default function MeasureScreen() {
     if (!dataSource) return;
     await dataSource.stop();
     setIsConnected(false);
+    setSimulationPort(null);
+    setConnectedKind(null);
   };
 
   type TopTile = {
@@ -266,6 +291,44 @@ export default function MeasureScreen() {
           )}
         </div>
 
+        {/* Only show simulation controls while the simulator is actively running. */}
+        {isConnected && connectedKind === 'simulation' && (
+          <div className="border-border mt-3 rounded-lg border p-3">
+            <ExplainTooltip
+              title="Simulation sweep"
+              accurate={
+                <>
+                  Controls how many seconds the simulated resonance sweep takes to go from{' '}
+                  <b>min</b> to <b>max</b> frequency before wrapping.
+                </>
+              }
+              intuition={
+                <>Lower values sweep faster (more “animated”), higher values sweep slower.</>
+              }
+              side="right"
+              sideOffset={8}
+            >
+              <label className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
+                Simulation sweep: {simulationSweepSeconds.toFixed(1)} s
+              </label>
+            </ExplainTooltip>
+            <div className="mt-3">
+              <Slider
+                min={0.5}
+                max={60}
+                step={0.5}
+                value={[simulationSweepSeconds]}
+                onValueChange={(v) => {
+                  const next = v[0] ?? DEFAULT_SIMULATION_SWEEP_S;
+                  setSimulationSweepSeconds(next);
+                  simulationPort?.setSweepSeconds(next);
+                }}
+                className="w-full"
+              />
+            </div>
+          </div>
+        )}
+
         <div className="bg-muted mt-5 rounded-lg p-3">
           <ExplainTooltip
             title="Status"
@@ -337,6 +400,11 @@ export default function MeasureScreen() {
                   onClick={() => {
                     setSelectedAxis(axis);
                     dataSource?.setSelectedAxis(axis);
+
+                    // Axis changes invalidate max-hold + peak stats.
+                    clearMaxHold(new Float32Array());
+                    clearPeak(undefined);
+                    clearHistoricPeak(undefined);
                   }}
                 >
                   {axis.toUpperCase()}

@@ -90,6 +90,3 @@ export const WEB_WORKER_THREADS = navigator.hardwareConcurrency;
 export const SIMULATION_MIN_FREQUENCY = 1;
 export const SIMULATION_MAX_FREQUENCY = 200;
 export const SIMULATION_AMPLITUDE = 1000;
-
-// Seconds for a full sweep from min -> max before wrapping.
-export const SIMULATION_SWEEP_S = 3;

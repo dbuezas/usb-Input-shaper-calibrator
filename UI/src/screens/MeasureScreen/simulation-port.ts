@@ -4,7 +4,6 @@ import {
   SIMULATION_AMPLITUDE,
   SIMULATION_MAX_FREQUENCY,
   SIMULATION_MIN_FREQUENCY,
-  SIMULATION_SWEEP_S,
 } from '../../constants';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -22,6 +21,8 @@ const randomNormal = () => {
 
 export class SimulationPort {
   readable: ReadableStream<Uint8Array>;
+
+  private sweepSeconds: number;
 
   private isOpen = false;
   private controller: ReadableStreamDefaultController<Uint8Array> | null = null;
@@ -43,8 +44,16 @@ export class SimulationPort {
   private pendingFrame: Uint8Array | null = null;
   private pendingFrameIndex = 0;
 
-  constructor() {
+  constructor(options?: { sweepSeconds?: number }) {
+    this.sweepSeconds = options?.sweepSeconds ?? 3;
     this.readable = this.createReadable();
+  }
+
+  setSweepSeconds(seconds: number) {
+    // Keep it sane: avoid divide-by-zero / absurdly fast sweeps.
+    const next = Number(seconds);
+    if (!Number.isFinite(next)) return;
+    this.sweepSeconds = Math.max(0.1, next);
   }
 
   private createReadable(): ReadableStream<Uint8Array> {
@@ -144,9 +153,7 @@ export class SimulationPort {
   private makeNextFrame(): Uint8Array {
     // Sweep (frequency changes smoothly, phase stays continuous)
     this.simulationFrequency +=
-      (SIMULATION_MAX_FREQUENCY - SIMULATION_MIN_FREQUENCY) /
-      SIMULATION_SWEEP_S /
-      FIXED_SAMPLE_RATE;
+      (SIMULATION_MAX_FREQUENCY - SIMULATION_MIN_FREQUENCY) / this.sweepSeconds / FIXED_SAMPLE_RATE;
     if (this.simulationFrequency > SIMULATION_MAX_FREQUENCY)
       this.simulationFrequency = SIMULATION_MIN_FREQUENCY;
 
