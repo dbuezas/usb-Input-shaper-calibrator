@@ -174,7 +174,7 @@ export default function ShaperScreen() {
   const [isOptimising, setIsOptimising] = useState(false);
   const [optimiseProgress, setOptimiseProgress] = useState<OptimisationProgress | null>(null);
   const [bestByType, setBestByType] = useState<BestByType>({});
-  const [optimisePreviewMode, setOptimisePreviewMode] = useState<'best' | 'current'>('best');
+  const [optimisePreviewMode, setOptimisePreviewMode] = useState<'best' | 'current'>('current');
   const optimisePreviewModeRef = useRef<'best' | 'current'>('best');
   const optimiserWorkersRef = useRef<Worker[]>([]);
   const cancelRef = useRef(false);
@@ -344,6 +344,99 @@ export default function ShaperScreen() {
     }
   };
 
+  const runCoarseTuneSelected = async () => {
+    if (!maxHoldSpectrum.length) return;
+    setIsOptimising(true);
+    cancelRef.current = false;
+
+    const magnitudes = maxHoldSpectrum;
+    const peakHz = estimatePeakHz(magnitudes);
+
+    for (const w of optimiserWorkersRef.current) w.terminate();
+    optimiserWorkersRef.current = [];
+
+    const worker = new ShaperOptimiserWorker();
+    optimiserWorkersRef.current = [worker];
+
+    try {
+      let cleanup: (() => void) | undefined;
+
+      const completion = new Promise<void>((resolve) => {
+        let settled = false;
+
+        const handleMessage = (evt: MessageEvent<OptimiserWorkerOut>) => {
+          const msg = evt.data;
+          switch (msg.type) {
+            case 'progress': {
+              setOptimiseProgress(msg);
+              if (msg.bestByType) setBestByType(msg.bestByType);
+
+              const previewParams =
+                optimisePreviewModeRef.current === 'current'
+                  ? msg.current?.params
+                  : msg.best?.params;
+              if (previewParams) {
+                setType(previewParams.type);
+                setF0(previewParams.fHz);
+                setZeta(previewParams.zeta);
+                setVtol(previewParams.vtol);
+              }
+              return;
+            }
+
+            case 'done': {
+              if (msg.best) {
+                setType(msg.best.params.type);
+                setF0(msg.best.params.fHz);
+                setZeta(msg.best.params.zeta);
+                setVtol(msg.best.params.vtol);
+              }
+              if (msg.bestByType) setBestByType({ ...bestByType, ...msg.bestByType });
+              if (settled) return;
+              settled = true;
+              cleanup?.();
+              resolve();
+            }
+          }
+        };
+
+        worker.addEventListener('message', handleMessage);
+        worker.postMessage({
+          type: 'start',
+          magnitudes,
+          peakHz,
+          uiUpdateEveryMs: 75,
+          scoreMode,
+          cornering: corneringToWorker(),
+          candidateTypes: [type],
+          skipFine: true,
+        } satisfies WorkerStartMessage);
+
+        const cancelPoll = window.setInterval(() => {
+          if (!cancelRef.current) return;
+          if (settled) return;
+          settled = true;
+          worker.terminate();
+          cleanup?.();
+          resolve();
+        }, 100);
+
+        cleanup = () => {
+          window.clearInterval(cancelPoll);
+          worker.removeEventListener('message', handleMessage);
+        };
+      });
+
+      await new Promise((r) => setTimeout(r, 0));
+      await completion;
+    } finally {
+      worker.terminate();
+      if (optimiserWorkersRef.current[0] === worker) optimiserWorkersRef.current = [];
+      setIsOptimising(false);
+      setOptimiseProgress(null);
+    }
+  };
+
   const runRefineCurrent = async () => {
     if (!maxHoldSpectrum.length) return;
     setIsOptimising(true);
@@ -484,7 +577,7 @@ export default function ShaperScreen() {
     title: 'Score mode',
     accurate: (
       <>
-        Choose what <b>Auto optimise</b> tries to minimize.
+        Choose what <b>Find best</b> and <b>Coarse tune</b> try to minimize.
         <ul className="mt-2 list-disc space-y-1 pl-5">
           <li>
             <b>Klipper</b>: tradeoff between remaining vibration and smoothing (good general
@@ -572,8 +665,8 @@ export default function ShaperScreen() {
     ),
   };
 
-  const autoOptimise = {
-    title: 'Auto optimise',
+  const findBest = {
+    title: 'Find best',
     accurate: (
       <>
         Brute-force searches shaper type + frequency + damping (+ tolerance for EI/HEI) to minimize
@@ -583,8 +676,16 @@ export default function ShaperScreen() {
     intuition: <>It also runs a gradient refinment at the end.</>,
   };
 
-  const refineCurrent = {
-    title: 'Refine current',
+  const coarseTuneSelected = {
+    title: 'Coarse tune',
+    accurate: (
+      <>Brute-force searches only the currently selected shaper type to minimize the score.</>
+    ),
+    intuition: <>This skips the final gradient refinement pass.</>,
+  };
+
+  const fineTune = {
+    title: 'Fine tune',
     accurate: (
       <>
         Runs a local gradient-based refinement starting from the current shaper settings, to try to
@@ -724,7 +825,7 @@ export default function ShaperScreen() {
               side="right"
               sideOffset={8}
             >
-              <div className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
+              <div className="text-muted-foreground underline decoration-dotted underline-offset-2">
                 Cornering model
               </div>
             </ExplainTooltip>
@@ -827,7 +928,7 @@ export default function ShaperScreen() {
               side="right"
               sideOffset={8}
             >
-              <div className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
+              <div className="text-muted-foreground underline decoration-dotted underline-offset-2">
                 Score mode
               </div>
             </ExplainTooltip>
@@ -866,6 +967,23 @@ export default function ShaperScreen() {
               </Button>
             </ExplainTooltip>
           </div>
+          <div className="mt-4">
+            <ExplainTooltip
+              title={findBest.title}
+              accurate={findBest.accurate}
+              intuition={findBest.intuition}
+            >
+              <Button
+                type="button"
+                className="w-full"
+                variant="destructive"
+                onClick={() => void runAutoOptimise()}
+                disabled={!maxHoldSpectrum.length || isOptimising}
+              >
+                Full auto tune all shapers
+              </Button>
+            </ExplainTooltip>
+          </div>
         </div>
         <div className="mt-5">
           <ExplainTooltip
@@ -873,27 +991,11 @@ export default function ShaperScreen() {
             accurate={shaperFamily.accurate}
             intuition={shaperFamily.intuition}
           >
-            <div className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
+            <div className="text-muted-foreground underline decoration-dotted underline-offset-2">
               Shaper
             </div>
           </ExplainTooltip>
 
-          <div className="mt-2">
-            <ExplainTooltip
-              title={autoOptimise.title}
-              accurate={autoOptimise.accurate}
-              intuition={autoOptimise.intuition}
-            >
-              <Button
-                type="button"
-                className="w-full"
-                onClick={() => void runAutoOptimise()}
-                disabled={!maxHoldSpectrum.length || isOptimising}
-              >
-                {isOptimising ? 'Optimising…' : 'Auto optimise'}
-              </Button>
-            </ExplainTooltip>
-          </div>
           <div className="border-border mt-2 grid w-full grid-cols-4 gap-1 rounded-md border p-1">
             {(
               [
@@ -937,55 +1039,41 @@ export default function ShaperScreen() {
         </div>
 
         <div>
-          <ExplainTooltip
-            title={refineCurrent.title}
-            accurate={refineCurrent.accurate}
-            intuition={refineCurrent.intuition}
-          >
-            <Button
-              type="button"
-              variant="secondary"
-              className="mt-2 w-full"
-              onClick={() => void runRefineCurrent()}
-              disabled={!maxHoldSpectrum.length || isOptimising}
+          <div className="mt-2 grid w-full grid-cols-2 gap-1 rounded-md">
+            <ExplainTooltip
+              title={coarseTuneSelected.title}
+              accurate={coarseTuneSelected.accurate}
+              intuition={coarseTuneSelected.intuition}
             >
-              {isOptimising ? 'Refining…' : 'Refine current'}
-            </Button>
-          </ExplainTooltip>
-          {!isOptimising && (
-            <div className="text-muted-foreground mt-2 text-xs">
-              Current score:{' '}
-              <ExplainTooltip
-                title="Score"
-                accurate={scoreMode === 'flatness' ? flatnessScoreTooltip : scoreTooltip}
-                intuition={<>Used by the optimiser and for quick comparisons.</>}
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 w-full"
+                onClick={() => void runCoarseTuneSelected()}
+                disabled={!maxHoldSpectrum.length || isOptimising}
               >
-                <span className="font-medium underline decoration-dotted underline-offset-2">
-                  {currentScore != null ? currentScore.toFixed(9) : '—'}
-                </span>
-              </ExplainTooltip>
-            </div>
-          )}
-          {!isOptimising && (
-            <div className="text-muted-foreground mt-1 text-xs">
-              Suggested max accel:{' '}
-              <ExplainTooltip
-                title="Suggested max accel"
-                accurate={maxAccelAccurate}
-                intuition={
-                  <>
-                    If you push accel above this, the shaper tends to “round off” corners more (it’s
-                    trading sharpness for reduced ringing).
-                  </>
-                }
+                Coarse tune {type}
+              </Button>
+            </ExplainTooltip>
+
+            <ExplainTooltip
+              title={fineTune.title}
+              accurate={fineTune.accurate}
+              intuition={fineTune.intuition}
+            >
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="h-8 w-full"
+                onClick={() => void runRefineCurrent()}
+                disabled={!maxHoldSpectrum.length || isOptimising}
               >
-                <span className="font-medium underline decoration-dotted underline-offset-2">
-                  {currentMaxAccel != null ? Math.round(currentMaxAccel / 100) * 100 : '—'}
-                </span>
-              </ExplainTooltip>{' '}
-              mm/s²
-            </div>
-          )}
+                Fine tune {type}
+              </Button>
+            </ExplainTooltip>
+          </div>
+
           {optimiseProgress && (
             <div className="mt-3 rounded-md border border-dashed p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
@@ -1154,42 +1242,6 @@ export default function ShaperScreen() {
         <div className="text-muted-foreground mt-6 text-xs leading-relaxed">
           Uses Marlin FT_MOTION coefficients. Shaped plots apply |H(f)| to magnitude.
         </div>
-
-        <div className="border-border mt-4 rounded-lg border p-3">
-          <div className="text-muted-foreground text-sm">Taps</div>
-          <div className="mt-2 text-xs">
-            Shaper: <span className="font-mono">{type.toUpperCase()}</span>
-          </div>
-          <div className="mt-1 text-xs">
-            Count: <span className="font-mono">{taps.t.length}</span>
-          </div>
-          <div className="mt-1 text-xs">
-            Coefficients (<span className="font-mono">a</span>):{' '}
-            <span className="font-mono">[{tapCoefficientsText}]</span>
-          </div>
-          <div className="mt-1 text-xs">
-            Timings (<span className="font-mono">t</span>, ms):{' '}
-            <span className="font-mono">[{tapTimingsMsText}]</span>
-          </div>
-          <div className="mt-1 text-xs">
-            Phases (% of one cycle at <span className="font-mono">f0</span>):{' '}
-            <span className="font-mono">[{tapPhaseText}]</span>
-          </div>
-          <div className="text-muted-foreground mt-2 text-xs">
-            Delay centroid:{' '}
-            <ExplainTooltip title="Delay centroid" accurate={delayCentroidTooltip} intuition={null}>
-              <span className="font-medium underline decoration-dotted underline-offset-2">
-                {delayCentroidSeconds != null
-                  ? `${(delayCentroidSeconds * 1000).toFixed(2)} ms`
-                  : '—'}
-              </span>
-            </ExplainTooltip>
-          </div>
-          <div className="text-muted-foreground mt-2 text-xs">
-            Phase = <span className="font-mono">t·f0</span>. Showing phases makes the tap pattern
-            comparable across frequencies.
-          </div>
-        </div>
       </aside>
 
       <main className="min-w-0 flex-1">
@@ -1214,6 +1266,80 @@ export default function ShaperScreen() {
               freqRange={[0, 200]}
               scaleMax={maxHoldSpectrum.length ? Math.max(...maxHoldSpectrum) : undefined}
             />
+          </div>
+          <div className="border-border mt-4 rounded-lg border p-3">
+            <div className="text-muted-foreground text-sm">Score</div>
+            <div className="text-muted-foreground mt-2 text-xs">
+              Current score:{' '}
+              <ExplainTooltip
+                title="Score"
+                accurate={scoreMode === 'flatness' ? flatnessScoreTooltip : scoreTooltip}
+                intuition={<>Used by the optimiser and for quick comparisons.</>}
+              >
+                <span className="font-medium underline decoration-dotted underline-offset-2">
+                  {currentScore != null ? currentScore.toFixed(9) : '—'}
+                </span>
+              </ExplainTooltip>
+            </div>
+
+            <div className="text-muted-foreground mt-1 text-xs">
+              Suggested max accel:{' '}
+              <ExplainTooltip
+                title="Suggested max accel"
+                accurate={maxAccelAccurate}
+                intuition={
+                  <>
+                    If you push accel above this, the shaper tends to “round off” corners more (it’s
+                    trading sharpness for reduced ringing).
+                  </>
+                }
+              >
+                <span className="font-medium underline decoration-dotted underline-offset-2">
+                  {currentMaxAccel != null ? Math.round(currentMaxAccel / 100) * 100 : '—'}
+                </span>
+              </ExplainTooltip>{' '}
+              mm/s²
+            </div>
+          </div>
+
+          <div className="border-border mt-4 rounded-lg border p-3">
+            <div className="text-muted-foreground text-sm">Taps</div>
+            <div className="mt-2 text-xs">
+              Shaper: <span className="font-mono">{type.toUpperCase()}</span>
+            </div>
+            <div className="mt-1 text-xs">
+              Count: <span className="font-mono">{taps.t.length}</span>
+            </div>
+            <div className="mt-1 text-xs">
+              Coefficients (<span className="font-mono">a</span>):{' '}
+              <span className="font-mono">[{tapCoefficientsText}]</span>
+            </div>
+            <div className="mt-1 text-xs">
+              Timings (<span className="font-mono">t</span>, ms):{' '}
+              <span className="font-mono">[{tapTimingsMsText}]</span>
+            </div>
+            <div className="mt-1 text-xs">
+              Phases (% of one cycle at <span className="font-mono">f0</span>):{' '}
+              <span className="font-mono">[{tapPhaseText}]</span>
+            </div>
+            <div className="text-muted-foreground mt-2 text-xs">
+              Delay centroid:{' '}
+              <ExplainTooltip
+                title="Delay centroid"
+                accurate={delayCentroidTooltip}
+                intuition={null}
+              >
+                <span className="font-medium underline decoration-dotted underline-offset-2">
+                  {delayCentroidSeconds != null
+                    ? `${(delayCentroidSeconds * 1000).toFixed(2)} ms`
+                    : '—'}
+                </span>
+              </ExplainTooltip>
+            </div>
+            <div className="text-muted-foreground mt-2 text-xs">
+              Phase = <span className="font-mono">t·f0</span>. Showing phases makes the tap pattern
+              comparable across frequencies.
+            </div>
           </div>
         </div>
       </main>

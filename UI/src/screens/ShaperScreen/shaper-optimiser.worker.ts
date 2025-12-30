@@ -36,6 +36,8 @@ export type WorkerStartMessage = {
   scoreMode: ShaperScoreMode;
   cornering?: WorkerCorneringSettings;
   candidateTypes?: InputShaperType[];
+  /** If true, stop after the coarse grid search and skip the final gradient-descent refinement. */
+  skipFine?: boolean;
 };
 
 export type WorkerRefineMessage = {
@@ -71,9 +73,9 @@ export type WorkerOutMessage = WorkerProgressMessage | WorkerDoneMessage;
 
 // Optimiser search space (kept local to the worker).
 const SEARCH_TYPES: InputShaperType[] = ['zv', 'zvd', 'zvdd', 'zvddd', 'mzv', 'ei', '2hei', '3hei'];
-const SEARCH_F_STEP_HZ = 0.2;
-const SEARCH_ZETAS = [0.03, 0.05, 0.07, 0.1, 0.14, 0.18, 0.22, 0.28, 0.34];
-const SEARCH_VTOLS = [0.02, 0.05, 0.08, 0.1, 0.14, 0.2, 0.28, 0.38];
+const SEARCH_F_STEP_HZ = 1;
+const SEARCH_ZETAS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35];
+const SEARCH_VTOLS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35];
 const SEARCH_F_WINDOW_HZ = 60;
 const SEARCH_F_MIN_ABS_HZ = 10;
 const SEARCH_F_MAX_ABS_HZ = 150;
@@ -487,6 +489,7 @@ const bruteForce = (msg: WorkerStartMessage) => {
   const types = (msg.candidateTypes?.length ? msg.candidateTypes : SEARCH_TYPES).filter(
     (t): t is InputShaperType => SEARCH_TYPES.includes(t)
   );
+  const skipFine = !!msg.skipFine;
   const fStep = SEARCH_F_STEP_HZ;
   const zetas = SEARCH_ZETAS;
   const vtols = SEARCH_VTOLS;
@@ -574,6 +577,12 @@ const bruteForce = (msg: WorkerStartMessage) => {
       };
       self.postMessage(out satisfies WorkerOutMessage);
     }
+  }
+
+  if (skipFine) {
+    const out: WorkerDoneMessage = { type: 'done', best, bestByType };
+    self.postMessage(out satisfies WorkerOutMessage);
+    return;
   }
 
   // Phase 2: fine local optimisation (gradient descent) from per-type coarse best
