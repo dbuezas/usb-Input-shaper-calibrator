@@ -58,7 +58,7 @@ export const MAX_FREQ = FIXED_SAMPLE_RATE / 2;
 
 // Frequency range slider bounds used in `src/Spectrogram.tsx`.
 // (Set lower than Nyquist for convenience/readability.)
-export const MAX_FREQUENCY_SLIDER = 300; // could be `FIXED_SAMPLE_RATE / 2`
+export const MAX_FREQUENCY_SLIDER = 200; // could be `FIXED_SAMPLE_RATE / 2`
 export const MIN_FREQUENCY_SLIDER = 0;
 
 // === Visualisations ===

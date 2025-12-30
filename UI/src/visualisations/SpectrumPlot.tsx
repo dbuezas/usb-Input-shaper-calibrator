@@ -23,7 +23,6 @@ const SpectrumPlot_render = ({
   height,
   freqRange,
   scaleMax,
-  dynamicRangeDb,
 }: {
   canvasRef: RefObject<HTMLCanvasElement | null>;
   traces: SpectrumPlotTrace[];
@@ -31,7 +30,6 @@ const SpectrumPlot_render = ({
   height: number;
   freqRange: [number, number];
   scaleMax?: number;
-  dynamicRangeDb?: number;
 }) => {
   // eslint-disable-next-line react-hooks/rules-of-hooks
   const datasets = traces.map(({ dataAtom }) => useAtomValue(dataAtom));
@@ -69,7 +67,6 @@ const SpectrumPlot_render = ({
       }
     }
     if (scaleMax != null) max = Math.max(max, scaleMax);
-    if (dynamicRangeDb && dynamicRangeDb > 0) min = max - dynamicRangeDb;
 
     const rangeVal = max - min;
     const safeRange = rangeVal <= 0 ? 1 : rangeVal;
@@ -118,7 +115,7 @@ const SpectrumPlot_render = ({
         ctx.fill();
       }
     }
-  }, [width, height, datasets, freqRange, traces, dynamicRangeDb, scaleMax, canvasRef]);
+  }, [width, height, datasets, freqRange, traces, scaleMax, canvasRef]);
 
   return null;
 };
@@ -130,14 +127,12 @@ export const SpectrumPlot = ({
   height,
   freqRange,
   scaleMax,
-  dynamicRangeDb,
 }: {
   traces: SpectrumPlotTrace[];
   width: number;
   height: number;
   freqRange: [number, number];
   scaleMax?: number;
-  dynamicRangeDb?: number;
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -155,13 +150,7 @@ export const SpectrumPlot = ({
     [freqRange, innerWidth]
   );
 
-  const yDomain = useMemo(() => {
-    if (dynamicRangeDb && dynamicRangeDb > 0) {
-      const max = scaleMax ?? 0;
-      return [max - dynamicRangeDb, max] as [number, number];
-    }
-    return [0, scaleMax ?? 1] as [number, number];
-  }, [dynamicRangeDb, scaleMax]);
+  const yDomain = useMemo(() => [0, scaleMax ?? 1] as [number, number], [scaleMax]);
 
   const yScale = useMemo(
     () => scaleLinear().domain(yDomain).range([innerHeight, 0]),
@@ -223,7 +212,6 @@ export const SpectrumPlot = ({
         height={height}
         freqRange={freqRange}
         scaleMax={scaleMax}
-        dynamicRangeDb={dynamicRangeDb}
       />
       <Tooltip hover={hover} />
     </div>
