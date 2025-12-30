@@ -124,8 +124,8 @@ export const shaperMagnitudeAtHz = (params: ShaperParams, freqHz: number) => {
   return Math.sqrt(re * re + im * im);
 };
 
-export const applyShaperToMagnitudeSpectrum = (params: ShaperParams, magnitudes: number[]) => {
-  const out = new Array<number>(magnitudes.length);
+export const applyShaperToMagnitudeSpectrum = (params: ShaperParams, magnitudes: Float32Array) => {
+  const out = new Float32Array(magnitudes.length);
   for (let i = 0; i < magnitudes.length; i++) {
     const f = i * (FIXED_SAMPLE_RATE / (2 * (magnitudes.length - 1)));
     const h = shaperMagnitudeAtHz(params, f);
@@ -134,7 +134,10 @@ export const applyShaperToMagnitudeSpectrum = (params: ShaperParams, magnitudes:
   return out;
 };
 
-export const flatnessScoreFromMagnitudeSpectrum = (magnitudes: number[], params: ShaperParams) => {
+export const flatnessScoreFromMagnitudeSpectrum = (
+  magnitudes: Float32Array,
+  params: ShaperParams
+) => {
   if (!magnitudes.length) return Number.POSITIVE_INFINITY;
 
   const shaped = applyShaperToMagnitudeSpectrum(params, magnitudes);
@@ -336,7 +339,7 @@ export const suggestedMaxAccel = (
 };
 
 export const klipperScoreFromMagnitudeSpectrum = (
-  magnitudes: number[],
+  magnitudes: Float32Array,
   params: ShaperParams,
   cornering: CorneringSettings = { model: 'scv', scv: 5 },
   smoothingAccel = 5000

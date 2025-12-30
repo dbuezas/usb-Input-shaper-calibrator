@@ -31,23 +31,12 @@ export class SimulationPort {
   private simulationFrequency = SIMULATION_MIN_FREQUENCY;
 
   // Simple 2nd-order resonator (biquad) state to emulate a printer axis response.
-  // We drive the system with a swept sine (input), then observe a resonant response
-  // centered at RESONANCE_HZ.
-  private readonly resonance = {
-    // Target resonance frequency (Hz)
-    f0Hz: 55,
-    // Controls peak sharpness; higher Q => narrower peak.
+  // Each axis gets its own resonance frequency.
+  private readonly resonators = {
     q: 8,
-    // Biquad coefficients (band-pass, constant skirt gain; peak gain = Q)
-    b0: 0,
-    b1: 0,
-    b2: 0,
-    a1: 0,
-    a2: 0,
-    // Direct Form 2 Transposed states per axis
-    x: { z1: 0, z2: 0 },
-    y: { z1: 0, z2: 0 },
-    z: { z1: 0, z2: 0 },
+    x: { f0Hz: 55, b0: 0, b1: 0, b2: 0, a1: 0, a2: 0, z1: 0, z2: 0 },
+    y: { f0Hz: 61, b0: 0, b1: 0, b2: 0, a1: 0, a2: 0, z1: 0, z2: 0 },
+    z: { f0Hz: 22, b0: 0, b1: 0, b2: 0, a1: 0, a2: 0, z1: 0, z2: 0 },
   };
 
   // Used to carry a partially-written 6-byte frame across chunks.
@@ -89,43 +78,54 @@ export class SimulationPort {
   }
 
   private resetResonator() {
-    const { f0Hz, q } = this.resonance;
+    const { q } = this.resonators;
 
-    // RBJ biquad cookbook (band-pass, constant skirt gain; peak gain = Q)
-    const w0 = (2 * Math.PI * f0Hz) / FIXED_SAMPLE_RATE;
-    const cosw0 = Math.cos(w0);
-    const sinw0 = Math.sin(w0);
-    const alpha = sinw0 / (2 * q);
+    const resetAxis = (axis: {
+      f0Hz: number;
+      b0: number;
+      b1: number;
+      b2: number;
+      a1: number;
+      a2: number;
+      z1: number;
+      z2: number;
+    }) => {
+      // RBJ biquad cookbook (band-pass, constant skirt gain; peak gain = Q)
+      const w0 = (2 * Math.PI * axis.f0Hz) / FIXED_SAMPLE_RATE;
+      const cosw0 = Math.cos(w0);
+      const sinw0 = Math.sin(w0);
+      const alpha = sinw0 / (2 * q);
 
-    const b0 = alpha;
-    const b1 = 0;
-    const b2 = -alpha;
-    const a0 = 1 + alpha;
-    const a1 = -2 * cosw0;
-    const a2 = 1 - alpha;
+      const b0 = alpha;
+      const b1 = 0;
+      const b2 = -alpha;
+      const a0 = 1 + alpha;
+      const a1 = -2 * cosw0;
+      const a2 = 1 - alpha;
 
-    // Normalize so a0 = 1
-    this.resonance.b0 = b0 / a0;
-    this.resonance.b1 = b1 / a0;
-    this.resonance.b2 = b2 / a0;
-    this.resonance.a1 = a1 / a0;
-    this.resonance.a2 = a2 / a0;
+      // Normalize so a0 = 1
+      axis.b0 = b0 / a0;
+      axis.b1 = b1 / a0;
+      axis.b2 = b2 / a0;
+      axis.a1 = a1 / a0;
+      axis.a2 = a2 / a0;
+      axis.z1 = 0;
+      axis.z2 = 0;
+    };
 
-    this.resonance.x.z1 = 0;
-    this.resonance.x.z2 = 0;
-    this.resonance.y.z1 = 0;
-    this.resonance.y.z2 = 0;
-    this.resonance.z.z1 = 0;
-    this.resonance.z.z2 = 0;
+    resetAxis(this.resonators.x);
+    resetAxis(this.resonators.y);
+    resetAxis(this.resonators.z);
   }
 
-  private resonatorStep(input: number, state: { z1: number; z2: number }): number {
-    const { b0, b1, b2, a1, a2 } = this.resonance;
-
+  private resonatorStep(
+    input: number,
+    axis: { b0: number; b1: number; b2: number; a1: number; a2: number; z1: number; z2: number }
+  ): number {
     // Direct Form II Transposed
-    const y = b0 * input + state.z1;
-    state.z1 = b1 * input - a1 * y + state.z2;
-    state.z2 = b2 * input - a2 * y;
+    const y = axis.b0 * input + axis.z1;
+    axis.z1 = axis.b1 * input - axis.a1 * y + axis.z2;
+    axis.z2 = axis.b2 * input - axis.a2 * y;
     return y;
   }
 
@@ -157,11 +157,10 @@ export class SimulationPort {
     // The observed signal is the resonator's response, which peaks near 55Hz.
     const drive = Math.sin(this.t) * SIMULATION_AMPLITUDE;
 
-    // Axis responses: slightly different gains and independent noise, but same resonance.
-    // This mimics how a printer's accelerometer axes respond differently.
-    const respX = this.resonatorStep(drive, this.resonance.x) * 1.0;
-    const respY = this.resonatorStep(drive, this.resonance.y) * 0.85;
-    const respZ = this.resonatorStep(drive, this.resonance.z) * 0.65;
+    // Axis responses: different resonance frequencies + gains and independent noise.
+    const respX = this.resonatorStep(drive, this.resonators.x) * 1.0;
+    const respY = this.resonatorStep(drive, this.resonators.y) * 0.85;
+    const respZ = this.resonatorStep(drive, this.resonators.z) * 0.65;
 
     // Add purely random noise (independent per axis).
     // Noise level is fixed relative to the configured simulation amplitude,
@@ -176,10 +175,12 @@ export class SimulationPort {
     const frame = new Uint8Array(6);
     frame[0] = 255;
 
+    // Pack as X in bits 0..12, Y in 13..25, Z in 26..38
+    // to match the decoder in `serial-worker.ts`.
     const packed =
-      (BigInt(simulatedData[2]) & 0x1fffn) |
+      (BigInt(simulatedData[0]) & 0x1fffn) |
       ((BigInt(simulatedData[1]) & 0x1fffn) << 13n) |
-      ((BigInt(simulatedData[0]) & 0x1fffn) << 26n);
+      ((BigInt(simulatedData[2]) & 0x1fffn) << 26n);
 
     frame[1] = Number((packed >> 0n) & 0xffn);
     frame[2] = Number((packed >> 8n) & 0xffn);

@@ -28,9 +28,9 @@ const toCorneringSettings = (v?: WorkerCorneringSettings): CorneringSettings => 
 type OptimisationResult = { params: ShaperParams; score: number };
 type BestByType = Partial<Record<InputShaperType, OptimisationResult>>;
 
-type WorkerStartMessage = {
+export type WorkerStartMessage = {
   type: 'start';
-  magnitudes: number[];
+  magnitudes: Float32Array;
   peakHz: number;
   uiUpdateEveryMs: number;
   scoreMode: ShaperScoreMode;
@@ -38,9 +38,9 @@ type WorkerStartMessage = {
   candidateTypes?: InputShaperType[];
 };
 
-type WorkerRefineMessage = {
+export type WorkerRefineMessage = {
   type: 'refine';
-  magnitudes: number[];
+  magnitudes: Float32Array;
   peakHz: number;
   uiUpdateEveryMs: number;
   scoreMode: ShaperScoreMode;
@@ -49,9 +49,9 @@ type WorkerRefineMessage = {
   steps?: number;
 };
 
-type WorkerMessage = WorkerStartMessage | WorkerRefineMessage;
+export type WorkerMessage = WorkerStartMessage | WorkerRefineMessage;
 
-type WorkerProgressMessage = {
+export type WorkerProgressMessage = {
   type: 'progress';
   percent: number;
   iterationsDone: number;
@@ -61,10 +61,13 @@ type WorkerProgressMessage = {
   bestByType?: BestByType;
 };
 
-type WorkerDoneMessage = { type: 'done'; best?: OptimisationResult; bestByType?: BestByType };
-type WorkerErrorMessage = { type: 'error'; message: string };
+export type WorkerDoneMessage = {
+  type: 'done';
+  best?: OptimisationResult;
+  bestByType?: BestByType;
+};
 
-type WorkerOutMessage = WorkerProgressMessage | WorkerDoneMessage | WorkerErrorMessage;
+export type WorkerOutMessage = WorkerProgressMessage | WorkerDoneMessage;
 
 // Optimiser search space (kept local to the worker).
 const SEARCH_TYPES: InputShaperType[] = ['zv', 'zvd', 'zvdd', 'zvddd', 'mzv', 'ei', '2hei', '3hei'];
@@ -90,7 +93,7 @@ const shaperMagnitudeAtHzFromTaps = (a: number[], t: number[], freqHz: number) =
   return Math.sqrt(re * re + im * im);
 };
 
-const flatnessScoreFromMagnitudeSpectrumFast = (magnitudes: number[], params: ShaperParams) => {
+const flatnessScoreFromMagnitudeSpectrumFast = (magnitudes: Float32Array, params: ShaperParams) => {
   if (!magnitudes.length) return Number.POSITIVE_INFINITY;
 
   // Match the UI scoring range: 0–200 Hz.
@@ -124,7 +127,7 @@ const flatnessScoreFromMagnitudeSpectrumFast = (magnitudes: number[], params: Sh
 };
 
 const scoreCandidate = (
-  magnitudes: number[],
+  magnitudes: Float32Array,
   params: ShaperParams,
   peakHz: number,
   scoreMode: ShaperScoreMode,
@@ -142,7 +145,7 @@ const scoreCandidate = (
 };
 
 const numericGradient = (
-  magnitudes: number[],
+  magnitudes: Float32Array,
   base: ShaperParams,
   peakHz: number,
   scoreMode: ShaperScoreMode,
@@ -349,7 +352,7 @@ class MaxHeap<T> {
 }
 
 const fineStep = (
-  magnitudes: number[],
+  magnitudes: Float32Array,
   state: FineState,
   peakHz: number,
   scoreMode: ShaperScoreMode,

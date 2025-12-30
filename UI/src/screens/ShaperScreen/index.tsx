@@ -25,6 +25,7 @@ import {
 } from './input-shaper';
 import ShaperOptimiserWorker from './shaper-optimiser.worker?worker';
 import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
+import type { WorkerRefineMessage, WorkerStartMessage } from './shaper-optimiser.worker';
 
 type OptimisationResult = { params: ShaperParams; score: number };
 type BestByType = Partial<Record<InputShaperType, OptimisationResult>>;
@@ -40,9 +41,8 @@ type OptimiserWorkerProgress = {
 };
 
 type OptimiserWorkerDone = { type: 'done'; best?: OptimisationResult; bestByType?: BestByType };
-type OptimiserWorkerError = { type: 'error'; message: string };
 
-type OptimiserWorkerOut = OptimiserWorkerProgress | OptimiserWorkerDone | OptimiserWorkerError;
+type OptimiserWorkerOut = OptimiserWorkerProgress | OptimiserWorkerDone;
 
 type OptimiserWorkerCornering =
   | { model: 'scv'; scv: number }
@@ -59,7 +59,7 @@ type OptimisationProgress = {
 
 const binToHz = (bin: number, bins: number) => bin * (FIXED_SAMPLE_RATE / (2 * (bins - 1)));
 
-const estimatePeakHz = (magnitudes: number[]) => {
+const estimatePeakHz = (magnitudes: Float32Array) => {
   if (!magnitudes.length) return 55;
   let peakIdx = 0;
   for (let i = 1; i < magnitudes.length; i++) {
@@ -118,7 +118,7 @@ const shaperParamsAtom = atom<ShaperParams>((get) => ({
 
 const shapedSpectrumAtom = atom((get) => {
   const base = get(spectrogramMaxHoldAtom);
-  if (!base.length) return [];
+  if (!base.length) return new Float32Array();
   return applyShaperToMagnitudeSpectrum(get(shaperParamsAtom), base);
 });
 
@@ -298,11 +298,6 @@ export default function ShaperScreen() {
                 }
                 return;
               }
-              case 'error': {
-                console.error('[shaper-optimiser.worker] error:', msg.message);
-                settle();
-                return;
-              }
 
               case 'done': {
                 doneCount++;
@@ -327,7 +322,7 @@ export default function ShaperScreen() {
             scoreMode,
             cornering: corneringToWorker(),
             candidateTypes,
-          });
+          } satisfies WorkerStartMessage);
         }
 
         const cancelPoll = window.setInterval(() => {
@@ -387,13 +382,6 @@ export default function ShaperScreen() {
               return;
             }
 
-            case 'error': {
-              console.error('[shaper-optimiser.worker] error:', msg.message);
-              cleanup?.();
-              resolve();
-              return;
-            }
-
             case 'done': {
               if (msg.best) {
                 setType(msg.best.params.type);
@@ -417,7 +405,7 @@ export default function ShaperScreen() {
           scoreMode,
           cornering: corneringToWorker(),
           startParams: { type, fHz: f0, zeta, vtol },
-        });
+        } satisfies WorkerRefineMessage);
 
         const cancelPoll = window.setInterval(() => {
           if (!cancelRef.current) return;
