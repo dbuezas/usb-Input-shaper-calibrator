@@ -14,7 +14,6 @@ import { Slider } from '@/components/ui/slider';
 import type { DataSource } from '@/screens/MeasureScreen/data-source';
 import { SpectrumPlot } from '@/visualisations/SpectrumPlot';
 import { Waterfall } from '@/visualisations/Waterfall';
-import { ExplainTooltip } from '@/components/ExplainTooltip';
 import { historicPeakAtom, peakAtom, spectrogramMaxHoldAtom } from './atoms';
 
 const spectrogramAtom = atom<Float32Array>(new Float32Array());
@@ -24,36 +23,9 @@ const freqRangeAtom = atom<[number, number]>([MIN_FREQUENCY_SLIDER, MAX_FREQUENC
 
 export function SpectrogramControls() {
   const [freqRange, setFreqRange] = useAtom(freqRangeAtom);
-  const setSpectrogramMaxHold = useSetAtom(spectrogramMaxHoldAtom);
-  const setSpectrogramScaleMax = useSetAtom(spectrogramScaleMaxAtom);
-  const setHistoricPeak = useSetAtom(historicPeakAtom);
 
   return (
     <div className="flex flex-col gap-5">
-      <div>
-        <ExplainTooltip
-          title="Window function"
-          accurate={
-            <>
-              The FFT isn’t run on the whole stream at once — it’s run on short time chunks
-              (“windows”). This app always uses a <b>Hann</b> window.
-            </>
-          }
-          intuition={
-            <>
-              A Hann window fades the chunk edges toward zero, reducing fake “extra bumps” around a
-              real peak while keeping peaks readable.
-            </>
-          }
-          side="right"
-          sideOffset={8}
-        >
-          <div className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
-            Window: Hann
-          </div>
-        </ExplainTooltip>
-      </div>
-
       <div>
         <label htmlFor="frequency-slider" className="text-muted-foreground text-sm">
           Frequency Range: {freqRange[0]}-{freqRange[1]} Hz
@@ -69,20 +41,6 @@ export function SpectrogramControls() {
             className="w-full"
           />
         </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          className="bg-muted text-foreground hover:bg-muted/80 inline-flex items-center rounded-md px-3 py-2 text-sm"
-          onClick={() => {
-            setSpectrogramMaxHold(new Float32Array());
-            setSpectrogramScaleMax(undefined);
-            setHistoricPeak(undefined);
-          }}
-        >
-          Clear Max-Hold
-        </button>
       </div>
     </div>
   );

@@ -236,6 +236,67 @@ export default function MeasureScreen() {
   return (
     <div className="flex flex-col gap-6 md:flex-row">
       <aside className="border-border bg-card w-full rounded-xl border p-5 shadow-sm md:sticky md:top-6 md:h-[calc(100vh-7.5rem)] md:w-80 md:overflow-auto">
+        <div className="text-left">
+          <h3 className="text-lg font-semibold">Measure Axis</h3>
+          <div className="text-muted-foreground text-sm">
+            Connect and make a frequency sweep before moving on to optimize shaper.
+          </div>
+        </div>
+        <div className="mt-5">
+          <ExplainTooltip
+            title="Axis"
+            accurate={
+              <>Selects which accelerometer axis is used for the spectrogram and peak detection.</>
+            }
+            intuition={
+              <>
+                Pick the axis that matches the direction you’re exciting (X test → <b>X</b> axis is
+                usually most informative).
+              </>
+            }
+            side="right"
+            sideOffset={8}
+          >
+            <div className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
+              Axis
+            </div>
+          </ExplainTooltip>
+          <div className="border-border mt-2 grid w-full grid-cols-3 gap-1 rounded-md border p-1">
+            {(['x', 'y', 'z'] as const).map((axis) => (
+              <ExplainTooltip
+                key={axis}
+                title={`${axis.toUpperCase()} axis`}
+                accurate={
+                  <>
+                    Uses the <b>{axis.toUpperCase()}</b> channel for plots and peak detection.
+                  </>
+                }
+                intuition={
+                  <>Choose the axis that shows the clearest resonance peak for your test move.</>
+                }
+              >
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={selectedAxis === axis ? 'secondary' : 'ghost'}
+                  className="h-8 px-3"
+                  aria-pressed={selectedAxis === axis}
+                  onClick={() => {
+                    setSelectedAxis(axis);
+                    dataSource?.setSelectedAxis(axis);
+
+                    // Axis changes invalidate max-hold + peak stats.
+                    clearMaxHold(new Float32Array());
+                    clearPeak(undefined);
+                    clearHistoricPeak(undefined);
+                  }}
+                >
+                  {axis.toUpperCase()}
+                </Button>
+              </ExplainTooltip>
+            ))}
+          </div>
+        </div>
         <div className="mt-5 flex flex-col gap-3">
           {!isConnected ? (
             <>
@@ -358,93 +419,14 @@ export default function MeasureScreen() {
           </div>
         </div>
 
-        <div className="mt-6">
-          <ExplainTooltip
-            title="Axis"
-            accurate={
-              <>Selects which accelerometer axis is used for the spectrogram and peak detection.</>
-            }
-            intuition={
-              <>
-                Pick the axis that matches the direction you’re exciting (X test → <b>X</b> axis is
-                usually most informative).
-              </>
-            }
-            side="right"
-            sideOffset={8}
-          >
-            <div className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
-              Axis
-            </div>
-          </ExplainTooltip>
-          <div className="border-border mt-2 inline-flex rounded-md border p-1">
-            {(['x', 'y', 'z'] as const).map((axis) => (
-              <ExplainTooltip
-                key={axis}
-                title={`${axis.toUpperCase()} axis`}
-                accurate={
-                  <>
-                    Uses the <b>{axis.toUpperCase()}</b> channel for plots and peak detection.
-                  </>
-                }
-                intuition={
-                  <>Choose the axis that shows the clearest resonance peak for your test move.</>
-                }
-              >
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={selectedAxis === axis ? 'secondary' : 'ghost'}
-                  className="h-8 px-3"
-                  aria-pressed={selectedAxis === axis}
-                  onClick={() => {
-                    setSelectedAxis(axis);
-                    dataSource?.setSelectedAxis(axis);
-
-                    // Axis changes invalidate max-hold + peak stats.
-                    clearMaxHold(new Float32Array());
-                    clearPeak(undefined);
-                    clearHistoricPeak(undefined);
-                  }}
-                >
-                  {axis.toUpperCase()}
-                </Button>
-              </ExplainTooltip>
-            ))}
-          </div>
+        <div className="mt-3">
+          <SpectrogramControls />
         </div>
-
-        <div className="mt-8">
-          <ExplainTooltip
-            title="Spectrogram"
-            accurate={
-              <>
-                A time-varying frequency plot: for each moment, it shows how strong each frequency
-                is.
-              </>
-            }
-            intuition={
-              <>
-                It’s like a “heat map” of vibrations over time. A stable bright band indicates a
-                resonance.
-              </>
-            }
-            side="right"
-            sideOffset={8}
-          >
-            <div className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
-              Spectrogram
-            </div>
-          </ExplainTooltip>
-          <div className="mt-3">
-            <SpectrogramControls />
+        {!isConnected && (
+          <div className="text-muted-foreground mt-2 text-xs">
+            Connect or simulate to start acquisition.
           </div>
-          {!isConnected && (
-            <div className="text-muted-foreground mt-2 text-xs">
-              Connect or simulate to start acquisition.
-            </div>
-          )}
-        </div>
+        )}
 
         <div className="text-muted-foreground mt-8 text-sm leading-relaxed">
           <p className="my-2">Make sure your device is connected and running the firmware.</p>
