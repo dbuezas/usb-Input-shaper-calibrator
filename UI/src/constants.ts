@@ -90,3 +90,23 @@ export const WEB_WORKER_THREADS = navigator.hardwareConcurrency;
 export const SIMULATION_MIN_FREQUENCY = 1;
 export const SIMULATION_MAX_FREQUENCY = 200;
 export const SIMULATION_AMPLITUDE = 1000;
+
+// === Shaper / Optimiser UI bounds ===
+
+// These constants define the min/max shown in the ShaperScreen sliders.
+// Keep the optimiser bounds in sync by importing these in the worker.
+
+export const SHAPER_F0_MIN_HZ = 10;
+export const SHAPER_F0_MAX_HZ = 200;
+
+export const SHAPER_ZETA_MIN = 0;
+export const SHAPER_ZETA_MAX = 0.4;
+
+export const SHAPER_VTOL_MIN = 0;
+export const SHAPER_VTOL_MAX = 0.5;
+
+export const CORNERING_SPEED_MIN_MM_S = 0.5;
+export const CORNERING_SPEED_MAX_MM_S = 60;
+
+export const CORNERING_JUNCTION_DEVIATION_MIN_MM = 0.001;
+export const CORNERING_JUNCTION_DEVIATION_MAX_MM = 0.2;

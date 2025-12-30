@@ -2,7 +2,17 @@ import { useEffect, useRef, useState } from 'react';
 import { atom, useAtom, useAtomValue } from 'jotai';
 import { SpectrumPlot } from '@/visualisations/SpectrumPlot';
 import {
+  CORNERING_JUNCTION_DEVIATION_MAX_MM,
+  CORNERING_JUNCTION_DEVIATION_MIN_MM,
+  CORNERING_SPEED_MAX_MM_S,
+  CORNERING_SPEED_MIN_MM_S,
   FIXED_SAMPLE_RATE,
+  SHAPER_F0_MAX_HZ,
+  SHAPER_F0_MIN_HZ,
+  SHAPER_VTOL_MAX,
+  SHAPER_VTOL_MIN,
+  SHAPER_ZETA_MAX,
+  SHAPER_ZETA_MIN,
   SPECTROGRAM_PLOT_WIDTH,
   SPECTROGRAM_WATERFALL_HEIGHT,
   WEB_WORKER_THREADS,
@@ -872,8 +882,8 @@ export default function ShaperScreen() {
                 </label>
                 <div className="mt-3">
                   <Slider
-                    min={0.5}
-                    max={60}
+                    min={CORNERING_SPEED_MIN_MM_S}
+                    max={CORNERING_SPEED_MAX_MM_S}
                     step={0.5}
                     value={[corneringScv]}
                     onValueChange={(v) => setCorneringScv(v[0] ?? 5)}
@@ -890,8 +900,8 @@ export default function ShaperScreen() {
                 </label>
                 <div className="mt-3">
                   <Slider
-                    min={0.5}
-                    max={60}
+                    min={CORNERING_SPEED_MIN_MM_S}
+                    max={CORNERING_SPEED_MAX_MM_S}
                     step={0.5}
                     value={[corneringJerk]}
                     onValueChange={(v) => setCorneringJerk(v[0] ?? 10)}
@@ -907,8 +917,8 @@ export default function ShaperScreen() {
                 </label>
                 <div className="mt-3">
                   <Slider
-                    min={0.001}
-                    max={0.2}
+                    min={CORNERING_JUNCTION_DEVIATION_MIN_MM}
+                    max={CORNERING_JUNCTION_DEVIATION_MAX_MM}
                     step={0.001}
                     value={[corneringJd]}
                     onValueChange={(v) => setCorneringJd(v[0] ?? 0.02)}
@@ -1167,8 +1177,8 @@ export default function ShaperScreen() {
             </ExplainTooltip>
             <div className="mt-3">
               <Slider
-                min={10}
-                max={200}
+                min={SHAPER_F0_MIN_HZ}
+                max={SHAPER_F0_MAX_HZ}
                 step={0.5}
                 value={[f0]}
                 onValueChange={(v) => setF0(v[0] ?? 55)}
@@ -1189,8 +1199,8 @@ export default function ShaperScreen() {
             </ExplainTooltip>
             <div className="mt-3">
               <Slider
-                min={0}
-                max={0.4}
+                min={SHAPER_ZETA_MIN}
+                max={SHAPER_ZETA_MAX}
                 step={0.005}
                 value={[zeta]}
                 onValueChange={(v) => setZeta(v[0] ?? 0.1)}
@@ -1221,8 +1231,8 @@ export default function ShaperScreen() {
             </ExplainTooltip>
             <div className="mt-3">
               <Slider
-                min={0}
-                max={0.5}
+                min={SHAPER_VTOL_MIN}
+                max={SHAPER_VTOL_MAX}
                 step={0.005}
                 value={[vtol]}
                 onValueChange={(v) => setVtol(v[0] ?? 0.1)}

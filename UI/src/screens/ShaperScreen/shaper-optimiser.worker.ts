@@ -6,7 +6,15 @@ import {
   type ShaperScoreMode,
   klipperScoreFromMagnitudeSpectrum,
 } from '@/screens/ShaperScreen/input-shaper';
-import { FIXED_SAMPLE_RATE } from '@/constants';
+import {
+  FIXED_SAMPLE_RATE,
+  SHAPER_F0_MAX_HZ,
+  SHAPER_F0_MIN_HZ,
+  SHAPER_VTOL_MAX,
+  SHAPER_VTOL_MIN,
+  SHAPER_ZETA_MAX,
+  SHAPER_ZETA_MIN,
+} from '@/constants';
 
 type WorkerCorneringSettings =
   | { model: 'scv'; scv: number }
@@ -76,9 +84,8 @@ const SEARCH_TYPES: InputShaperType[] = ['zv', 'zvd', 'zvdd', 'zvddd', 'mzv', 'e
 const SEARCH_F_STEP_HZ = 1;
 const SEARCH_ZETAS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35];
 const SEARCH_VTOLS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35];
-const SEARCH_F_WINDOW_HZ = 60;
-const SEARCH_F_MIN_ABS_HZ = 10;
-const SEARCH_F_MAX_ABS_HZ = 150;
+const SEARCH_F_MIN_ABS_HZ = SHAPER_F0_MIN_HZ;
+const SEARCH_F_MAX_ABS_HZ = SHAPER_F0_MAX_HZ;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const isEiFamily = (t: InputShaperType) => t === 'ei' || t === '2hei' || t === '3hei';
@@ -359,7 +366,7 @@ const fineStep = (
   peakHz: number,
   scoreMode: ShaperScoreMode,
   cornering: CorneringSettings,
-  bounds: { fMin: number; fMax: number; zMin: number; zMax: number; vMin: number; vMax: number }
+  bounds: { fMin: number; fMax: number }
 ) => {
   if (state.done) return state;
 
@@ -384,9 +391,9 @@ const fineStep = (
     const next: ShaperParams = {
       ...state.params,
       fHz: clamp(state.params.fHz - stepF, bounds.fMin, bounds.fMax),
-      zeta: clamp(state.params.zeta - stepZ, bounds.zMin, bounds.zMax),
+      zeta: clamp(state.params.zeta - stepZ, SHAPER_ZETA_MIN, SHAPER_ZETA_MAX),
       vtol: isEiFamily(state.params.type)
-        ? clamp(state.params.vtol - stepV, bounds.vMin, bounds.vMax)
+        ? clamp(state.params.vtol - stepV, SHAPER_VTOL_MIN, SHAPER_VTOL_MAX)
         : state.params.vtol,
     };
 
@@ -415,13 +422,9 @@ const refine = (msg: WorkerRefineMessage) => {
   const start = msg.startParams;
   const cornering = toCorneringSettings(msg.cornering);
 
-  const zMin = Math.min(...SEARCH_ZETAS);
-  const zMax = Math.max(...SEARCH_ZETAS);
-  const vMin = SEARCH_VTOLS.length ? Math.min(...SEARCH_VTOLS) : 0.02;
-  const vMax = SEARCH_VTOLS.length ? Math.max(...SEARCH_VTOLS) : 0.4;
-  const fMin = Math.max(SEARCH_F_MIN_ABS_HZ, peakHz - SEARCH_F_WINDOW_HZ);
-  const fMax = Math.min(SEARCH_F_MAX_ABS_HZ, peakHz + SEARCH_F_WINDOW_HZ);
-  const bounds = { fMin, fMax, zMin, zMax, vMin, vMax };
+  const fMin = SEARCH_F_MIN_ABS_HZ;
+  const fMax = SEARCH_F_MAX_ABS_HZ;
+  const bounds = { fMin, fMax };
 
   let state: FineState = {
     type: start.type,
@@ -494,8 +497,8 @@ const bruteForce = (msg: WorkerStartMessage) => {
   const zetas = SEARCH_ZETAS;
   const vtols = SEARCH_VTOLS;
 
-  const fMin = Math.max(SEARCH_F_MIN_ABS_HZ, peakHz - SEARCH_F_WINDOW_HZ);
-  const fMax = Math.min(SEARCH_F_MAX_ABS_HZ, peakHz + SEARCH_F_WINDOW_HZ);
+  const fMin = SEARCH_F_MIN_ABS_HZ;
+  const fMax = SEARCH_F_MAX_ABS_HZ;
 
   // Coarse iteration count
   let coarseTotal = 0;
@@ -586,11 +589,6 @@ const bruteForce = (msg: WorkerStartMessage) => {
   }
 
   // Phase 2: fine local optimisation (gradient descent) from per-type coarse best
-  const zMin = Math.min(...zetas);
-  const zMax = Math.max(...zetas);
-  const vMin = vtols.length ? Math.min(...vtols) : 0.02;
-  const vMax = vtols.length ? Math.max(...vtols) : 0.4;
-
   const heap = new MaxHeap<FineState>((s) => s.score);
   const remainingByType = new Map<InputShaperType, number>();
   for (const candidateType of types) {
@@ -601,7 +599,7 @@ const bruteForce = (msg: WorkerStartMessage) => {
   }
 
   // Interleave refinement across types: always refine the currently-worst candidate next.
-  const bounds = { fMin, fMax, zMin, zMax, vMin, vMax };
+  const bounds = { fMin, fMax };
   const fineBudget = fineStepsPerType * types.length;
   for (let i = 0; i < fineBudget; i++) {
     const state = heap.pop();
