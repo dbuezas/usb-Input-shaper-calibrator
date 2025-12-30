@@ -11,7 +11,7 @@ import { useRafThrottledHover } from './plot-hover';
 export type SpectrumPlotMode = 'points' | 'line';
 
 export type SpectrumPlotTrace = {
-  dataAtom: Atom<number[]>;
+  dataAtom: Atom<Float32Array>;
   mode: SpectrumPlotMode;
   color: string;
 };

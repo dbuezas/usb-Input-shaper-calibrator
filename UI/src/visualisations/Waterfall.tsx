@@ -20,7 +20,7 @@ export const Waterfall = ({
   width: number;
   height: number;
   freqRange: [number, number];
-  dataAtom: Atom<number[]>;
+  dataAtom: Atom<Float32Array>;
   scaleMax?: number;
   onPeakFrequency: (freqHz: number) => void;
 }) => {
@@ -126,7 +126,7 @@ const Waterfall_render = ({
   width: number;
   height: number;
   freqRange: [number, number];
-  dataAtom: Atom<number[]>;
+  dataAtom: Atom<Float32Array>;
   scaleMax?: number;
   onPeakFrequency: (freqHz: number) => void;
 }) => {

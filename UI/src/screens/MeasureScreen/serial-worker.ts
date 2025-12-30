@@ -28,14 +28,14 @@ interface WorkerMessage {
   axis?: 'x' | 'y' | 'z';
 }
 
-function hannWindow(size: number): number[] {
-  const window = new Array<number>(size);
+function hannWindow(size: number): Float32Array {
+  const window = new Float32Array(size);
 
   for (let i = 0; i < size; i++) window[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (size - 1)));
   return window;
 }
 
-function windowSum(w: number[]): number {
+function windowSum(w: Float32Array): number {
   let s = 0;
   for (let i = 0; i < w.length; i++) s += w[i];
   return s;
@@ -46,11 +46,11 @@ let accCnt = 0;
 class SpectralProcessor {
   buffer: number[];
   bufferIndex: number;
-  windows: number[];
+  windows: Float32Array;
   windowSum: number;
   fftr: FFTR;
   timeDomain: Float32Array;
-  magnitudes: number[];
+  magnitudes: Float32Array;
 
   constructor() {
     this.buffer = new Array<number>(WINDOW_SIZE).fill(0);
@@ -60,7 +60,7 @@ class SpectralProcessor {
     this.fftr = new FFTR(WINDOW_SIZE);
     this.timeDomain = new Float32Array(WINDOW_SIZE);
     const halfBins = WINDOW_SIZE / 2 + 1;
-    this.magnitudes = new Array<number>(halfBins);
+    this.magnitudes = new Float32Array(halfBins);
   }
 
   addSample(value: number): void {

@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
 
-export const spectrogramMaxHoldAtom = atom<number[]>([]);
+export const spectrogramMaxHoldAtom = atom<Float32Array>(new Float32Array());
 export const peakAtom = atom<number>();
 export const historicPeakAtom = atom<number>();
 

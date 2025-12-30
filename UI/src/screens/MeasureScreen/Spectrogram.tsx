@@ -17,7 +17,7 @@ import { Waterfall } from '@/visualisations/Waterfall';
 import { ExplainTooltip } from '@/components/ExplainTooltip';
 import { historicPeakAtom, peakAtom, spectrogramMaxHoldAtom } from './atoms';
 
-const spectrogramAtom = atom<number[]>([]);
+const spectrogramAtom = atom<Float32Array>(new Float32Array());
 
 const spectrogramScaleMaxAtom = atom<number | undefined>(undefined);
 const freqRangeAtom = atom<[number, number]>([MIN_FREQUENCY_SLIDER, MAX_FREQUENCY_SLIDER]);
@@ -76,7 +76,7 @@ export function SpectrogramControls() {
           type="button"
           className="bg-muted text-foreground hover:bg-muted/80 inline-flex items-center rounded-md px-3 py-2 text-sm"
           onClick={() => {
-            setSpectrogramMaxHold([]);
+            setSpectrogramMaxHold(new Float32Array());
             setSpectrogramScaleMax(undefined);
             setHistoricPeak(undefined);
           }}
@@ -88,7 +88,7 @@ export function SpectrogramControls() {
   );
 }
 
-const peakFromSeries = (series: number[]) => {
+const peakFromSeries = (series: Float32Array) => {
   let max = Number.NEGATIVE_INFINITY;
   let peakIdx = -1;
   for (let i = 0; i < series.length; i++) {
@@ -102,8 +102,8 @@ const peakFromSeries = (series: number[]) => {
   return peakIdx * ACTUAL_RESOLUTION;
 };
 
-const updateMaxHold = (prev: number[] | undefined, nextSlice: number[]) => {
-  if (!prev?.length || prev.length !== nextSlice.length) return [...nextSlice];
+const updateMaxHold = (prev: Float32Array | undefined, nextSlice: Float32Array) => {
+  if (!prev?.length || prev.length !== nextSlice.length) return nextSlice;
   const next = prev.slice();
   for (let i = 0; i < nextSlice.length; i++) next[i] = Math.max(next[i], nextSlice[i]);
   return next;

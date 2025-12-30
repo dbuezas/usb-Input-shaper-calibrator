@@ -5,7 +5,7 @@ export interface RawDataMessage {
 
 export interface SpectrumSliceMessage {
   type: 'spectrumSlice';
-  spectrum: number[];
+  spectrum: Float32Array;
 }
 
 export interface SetSelectedAxisMessage {
