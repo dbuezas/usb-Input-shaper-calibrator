@@ -16,7 +16,7 @@ import {
   SHAPER_ZETA_MIN,
 } from '@/constants';
 
-type WorkerCorneringSettings =
+export type WorkerCorneringSettings =
   | { model: 'scv'; scv: number }
   | { model: 'jerk'; jerk: number }
   | { model: 'junction_deviation'; junctionDeviation: number };
@@ -33,8 +33,8 @@ const toCorneringSettings = (v?: WorkerCorneringSettings): CorneringSettings => 
   }
 };
 
-type OptimisationResult = { params: ShaperParams; score: number };
-type BestByType = Partial<Record<InputShaperType, OptimisationResult>>;
+export type OptimisationResult = { params: ShaperParams; score: number };
+export type BestByType = Partial<Record<InputShaperType, OptimisationResult>>;
 
 export type WorkerStartMessage = {
   type: 'start';

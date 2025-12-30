@@ -6,8 +6,8 @@
   "packageManager": "pnpm@9.0.0",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
-    "lint": "eslint .",
+    "build": "vite build",
+    "lint": "tsc && eslint .",
     "format": "eslint . --fix && prettier --write .",
     "preview": "vite preview"
   },
