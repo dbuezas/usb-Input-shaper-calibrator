@@ -327,8 +327,9 @@ export default function ShaperScreen() {
 
         const cancelPoll = window.setInterval(() => {
           if (!cancelRef.current) return;
-          for (const w of workers) w.postMessage({ type: 'cancel' });
-          window.clearInterval(cancelPoll);
+          // Cancelling should not send messages around; just kill worker threads.
+          for (const w of workers) w.terminate();
+          settle();
         }, 100);
         cleanups.push(() => window.clearInterval(cancelPoll));
       });
@@ -336,7 +337,6 @@ export default function ShaperScreen() {
       await new Promise((r) => setTimeout(r, 0));
       await completion;
     } finally {
-      for (const w of workers) w.postMessage({ type: 'cancel' });
       for (const w of workers) w.terminate();
       if (optimiserWorkersRef.current === workers) optimiserWorkersRef.current = [];
       setIsOptimising(false);
@@ -362,6 +362,8 @@ export default function ShaperScreen() {
       let cleanup: (() => void) | undefined;
 
       const completion = new Promise<void>((resolve) => {
+        let settled = false;
+
         const handleMessage = (evt: MessageEvent<OptimiserWorkerOut>) => {
           const msg = evt.data;
           switch (msg.type) {
@@ -390,6 +392,8 @@ export default function ShaperScreen() {
                 setVtol(msg.best.params.vtol);
               }
               if (msg.bestByType) setBestByType({ ...bestByType, ...msg.bestByType });
+              if (settled) return;
+              settled = true;
               cleanup?.();
               resolve();
             }
@@ -409,8 +413,11 @@ export default function ShaperScreen() {
 
         const cancelPoll = window.setInterval(() => {
           if (!cancelRef.current) return;
-          worker.postMessage({ type: 'cancel' });
-          window.clearInterval(cancelPoll);
+          if (settled) return;
+          settled = true;
+          worker.terminate();
+          cleanup?.();
+          resolve();
         }, 100);
 
         cleanup = () => {
@@ -422,7 +429,6 @@ export default function ShaperScreen() {
       await new Promise((r) => setTimeout(r, 0));
       await completion;
     } finally {
-      worker.postMessage({ type: 'cancel' });
       worker.terminate();
       if (optimiserWorkersRef.current[0] === worker) optimiserWorkersRef.current = [];
       setIsOptimising(false);
