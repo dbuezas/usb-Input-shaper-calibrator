@@ -56,6 +56,20 @@ export class SimulationPort {
     this.sweepSeconds = Math.max(0.1, next);
   }
 
+  /**
+   * Restarts the simulation sweep from t=0.
+   *
+   * This is useful when the UI changes what axis is being visualized, so the
+   * simulation behaves like a fresh acquisition.
+   */
+  restart(): void {
+    this.t = 0;
+    this.simulationFrequency = SIMULATION_MIN_FREQUENCY;
+    this.pendingFrame = null;
+    this.pendingFrameIndex = 0;
+    this.resetResonator();
+  }
+
   private createReadable(): ReadableStream<Uint8Array> {
     return new ReadableStream<Uint8Array>({
       start: (controller) => {
@@ -76,12 +90,7 @@ export class SimulationPort {
     this.readable = this.createReadable();
 
     // Reset simulation state on each open.
-    this.t = 0;
-    this.simulationFrequency = SIMULATION_MIN_FREQUENCY;
-    this.pendingFrame = null;
-    this.pendingFrameIndex = 0;
-
-    this.resetResonator();
+    this.restart();
 
     this.pumpPromise = this.pump();
   }

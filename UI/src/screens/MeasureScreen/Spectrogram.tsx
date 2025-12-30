@@ -113,7 +113,7 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
         onPeakFrequency={(freqHz) => setPeak(freqHz)}
       />
       <>
-        <h3 className="mt-4 mb-2 font-semibold">Last Spectrum (Scatter)</h3>
+        <h3 className="mt-4 mb-2 font-semibold">Last Spectrum and Max Hold</h3>
         <SpectrumPlot
           traces={[
             {

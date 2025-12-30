@@ -285,6 +285,9 @@ export default function MeasureScreen() {
                     setSelectedAxis(axis);
                     dataSource?.setSelectedAxis(axis);
 
+                    // In simulation mode, switching axis should restart the sweep from t=0.
+                    simulationPort?.restart();
+
                     // Axis changes invalidate max-hold + peak stats.
                     clearMaxHold(new Float32Array());
                     clearPeak(undefined);
