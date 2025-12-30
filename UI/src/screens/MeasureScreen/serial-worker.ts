@@ -42,7 +42,7 @@ function windowSum(w: Float32Array): number {
 }
 
 class SpectralProcessor {
-  buffer: number[];
+  buffer: Int16Array;
   bufferIndex: number;
   windows: Float32Array;
   windowSum: number;
@@ -51,7 +51,7 @@ class SpectralProcessor {
   magnitudes: Float32Array;
 
   constructor() {
-    this.buffer = new Array<number>(WINDOW_SIZE).fill(0);
+    this.buffer = new Int16Array(WINDOW_SIZE);
     this.bufferIndex = 0;
     this.windows = hannWindow(WINDOW_SIZE);
     this.windowSum = windowSum(this.windows);
@@ -62,7 +62,9 @@ class SpectralProcessor {
   }
 
   addSample(value: number): void {
-    this.buffer[this.bufferIndex] = value;
+    // Ensure the write stays in integer space as long as possible.
+    // (JS numbers are float64, but bitwise ops keep them as int32.)
+    this.buffer[this.bufferIndex] = value | 0;
     this.bufferIndex = (this.bufferIndex + 1) % WINDOW_SIZE;
 
     if (this.bufferIndex % HOP_SIZE === 0) {
@@ -118,6 +120,7 @@ class DataProcessor {
   processor: SpectralProcessor | null;
   selectedAxis: 'x' | 'y' | 'z';
   lastSent: number;
+  rawFrame: Int16Array;
 
   constructor() {
     this.buffer = new CircularBuffer(BUFFER_SIZE);
@@ -128,6 +131,7 @@ class DataProcessor {
     this.processor = new SpectralProcessor();
     this.selectedAxis = 'x';
     this.lastSent = 0;
+    this.rawFrame = new Int16Array(3);
   }
 
   resetSpectralProcessor(): void {
@@ -160,20 +164,22 @@ class DataProcessor {
         this.sampleCount = 0;
       }
 
-      const packed =
-        (BigInt(b4) << 32n) |
-        (BigInt(b3) << 24n) |
-        (BigInt(b2) << 16n) |
-        (BigInt(b1) << 8n) |
-        BigInt(b0);
+      // Decode 3x signed 13-bit values from 5 data bytes (little-endian bit packing)
+      // without using BigInt (keeps the hot path in 32-bit integer ops).
+      const lo = (b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)) >>> 0;
+      const hi = b4 & 0xff;
 
-      function sign13(v: number) {
-        return v & 0x1000 ? v - 0x2000 : v;
-      }
+      const signExtend13 = (v: number): number => (v << 19) >> 19;
+      const get13 = (startBit: number): number => {
+        let v = lo >>> startBit;
+        // If the 13-bit field straddles the 32-bit boundary, pull in the remaining bits from hi.
+        if (startBit + 13 > 32) v |= hi << (32 - startBit);
+        return signExtend13(v & 0x1fff);
+      };
 
-      const x = sign13(Number((packed >> 0n) & 0x1fffn));
-      const y = sign13(Number((packed >> 13n) & 0x1fffn));
-      const z = sign13(Number((packed >> 26n) & 0x1fffn));
+      const x = get13(0);
+      const y = get13(13);
+      const z = get13(26);
 
       // sign extend
 
@@ -196,8 +202,11 @@ class DataProcessor {
 
       if (++this.lastSent > FIXED_SAMPLE_RATE / AXIS_REPORT_RATE_HZ) {
         this.lastSent = 0;
+        this.rawFrame[0] = x;
+        this.rawFrame[1] = y;
+        this.rawFrame[2] = z;
         serialChannel.postMessage({
-          data: new Int16Array([x, y, z]),
+          data: this.rawFrame,
           frequency: this.frequency,
         } satisfies RawDataMessage);
       }
