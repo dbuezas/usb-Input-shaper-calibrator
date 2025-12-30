@@ -14,6 +14,8 @@ import {
   HOP_SIZE,
 } from '@/constants';
 
+import { FFTR } from 'kissfft-js';
+
 interface SensorData {
   x: number;
   y: number;
@@ -24,40 +26,6 @@ interface WorkerMessage {
   type: 'rawData' | 'reset' | 'setSelectedAxis';
   data?: Uint8Array;
   axis?: 'x' | 'y' | 'z';
-}
-
-function fft(re: number[], im: number[]): void {
-  const N = re.length;
-  if (N <= 1) return;
-
-  const re_even: number[] = [];
-  const im_even: number[] = [];
-  const re_odd: number[] = [];
-  const im_odd: number[] = [];
-
-  for (let i = 0; i < N; i += 2) {
-    re_even.push(re[i]);
-    im_even.push(im[i]);
-    re_odd.push(re[i + 1]);
-    im_odd.push(im[i + 1]);
-  }
-
-  fft(re_even, im_even);
-  fft(re_odd, im_odd);
-
-  for (let k = 0; k < N / 2; k++) {
-    const angle = (-2 * Math.PI * k) / N;
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
-
-    const re_temp = re_odd[k] * cos - im_odd[k] * sin;
-    const im_temp = re_odd[k] * sin + im_odd[k] * cos;
-
-    re[k] = re_even[k] + re_temp;
-    im[k] = im_even[k] + im_temp;
-    re[k + N / 2] = re_even[k] - re_temp;
-    im[k + N / 2] = im_even[k] - im_temp;
-  }
 }
 
 function hannWindow(size: number): number[] {
@@ -78,8 +46,8 @@ class SpectralProcessor {
   bufferIndex: number;
   windows: number[];
   windowSum: number;
-  re: number[];
-  im: number[];
+  fftr: FFTR;
+  timeDomain: Float32Array;
   magnitudes: number[];
 
   constructor() {
@@ -87,8 +55,8 @@ class SpectralProcessor {
     this.bufferIndex = 0;
     this.windows = hannWindow(WINDOW_SIZE);
     this.windowSum = windowSum(this.windows);
-    this.re = new Array<number>(WINDOW_SIZE);
-    this.im = new Array<number>(WINDOW_SIZE);
+    this.fftr = new FFTR(WINDOW_SIZE);
+    this.timeDomain = new Float32Array(WINDOW_SIZE);
     const halfBins = WINDOW_SIZE / 2 + 1;
     this.magnitudes = new Array<number>(halfBins);
   }
@@ -105,11 +73,11 @@ class SpectralProcessor {
   computeSpectrogram(): void {
     for (let i = 0; i < WINDOW_SIZE; i++) {
       const idx = (this.bufferIndex + i) % WINDOW_SIZE;
-      this.re[i] = this.buffer[idx] * this.windows[i];
-      this.im[i] = 0;
+      this.timeDomain[i] = this.buffer[idx] * this.windows[i];
     }
-
-    fft(this.re, this.im);
+    console.time('fft');
+    const frequencyDomain = this.fftr.forward(this.timeDomain);
+    console.timeEnd('fft');
 
     // Magnitude spectrum (for existing waterfall/scatter)
     const halfBins = WINDOW_SIZE / 2 + 1;
@@ -117,17 +85,23 @@ class SpectralProcessor {
 
     // DC bin (no doubling in one-sided spectrum)
     this.magnitudes[0] =
-      Math.sqrt(this.re[0] * this.re[0] + this.im[0] * this.im[0]) * (scale * 0.5);
+      Math.sqrt(frequencyDomain[0] * frequencyDomain[0] + frequencyDomain[1] * frequencyDomain[1]) *
+      (scale * 0.5);
 
     // Non-DC, non-Nyquist bins
     for (let i = 1; i < halfBins - 1; i++) {
-      this.magnitudes[i] = Math.sqrt(this.re[i] * this.re[i] + this.im[i] * this.im[i]) * scale;
+      const re = frequencyDomain[i * 2];
+      const im = frequencyDomain[i * 2 + 1];
+      this.magnitudes[i] = Math.sqrt(re * re + im * im) * scale;
     }
 
     // Nyquist bin (no doubling in one-sided spectrum)
     const nyquist = halfBins - 1;
     this.magnitudes[nyquist] =
-      Math.sqrt(this.re[nyquist] * this.re[nyquist] + this.im[nyquist] * this.im[nyquist]) *
+      Math.sqrt(
+        frequencyDomain[nyquist * 2] * frequencyDomain[nyquist * 2] +
+          frequencyDomain[nyquist * 2 + 1] * frequencyDomain[nyquist * 2 + 1]
+      ) *
       (scale * 0.5);
 
     spectrogramChannel.postMessage({

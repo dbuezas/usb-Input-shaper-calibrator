@@ -28,6 +28,7 @@
     "fft-js": "^0.0.12",
     "jotai": "^2.16.0",
     "jotai-family": "^1.0.1",
+    "kissfft-js": "^0.1.8",
     "lucide-react": "^0.562.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
