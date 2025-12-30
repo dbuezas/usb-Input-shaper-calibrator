@@ -40,6 +40,8 @@ function windowSum(w: number[]): number {
   for (let i = 0; i < w.length; i++) s += w[i];
   return s;
 }
+let accT = 0;
+let accCnt = 0;
 
 class SpectralProcessor {
   buffer: number[];
@@ -71,13 +73,12 @@ class SpectralProcessor {
   }
 
   computeSpectrogram(): void {
+    const t0 = performance.now();
     for (let i = 0; i < WINDOW_SIZE; i++) {
       const idx = (this.bufferIndex + i) % WINDOW_SIZE;
       this.timeDomain[i] = this.buffer[idx] * this.windows[i];
     }
-    console.time('fft');
     const frequencyDomain = this.fftr.forward(this.timeDomain);
-    console.timeEnd('fft');
 
     // Magnitude spectrum (for existing waterfall/scatter)
     const halfBins = WINDOW_SIZE / 2 + 1;
@@ -108,6 +109,11 @@ class SpectralProcessor {
       type: 'spectrumSlice',
       spectrum: this.magnitudes,
     } satisfies SpectrumSliceMessage);
+    const t1 = performance.now();
+
+    accT += t1 - t0;
+    accCnt++;
+    if (accCnt % 100 == 0) console.log(accCnt, accT / accCnt);
   }
 }
 
