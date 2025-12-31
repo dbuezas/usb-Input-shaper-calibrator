@@ -192,78 +192,14 @@ const scoreCandidate = (
   return Number.isFinite(total) ? total : Number.POSITIVE_INFINITY;
 };
 
-const numericGradient = (
-  magnitudes: Float32Array,
-  base: ShaperParams,
-  peakHz: number,
-  scoreMode: ShaperScoreMode,
-  cornering: CorneringSettings,
-  df: number,
-  dz: number,
-  dv: number
-) => {
-  const s0 = scoreCandidate(magnitudes, base, peakHz, scoreMode, cornering);
-  if (!Number.isFinite(s0)) return { s0, df: 0, dz: 0, dv: 0 };
-
-  const fPlus = scoreCandidate(
-    magnitudes,
-    { ...base, fHz: base.fHz + df },
-    peakHz,
-    scoreMode,
-    cornering
-  );
-  const fMinus = scoreCandidate(
-    magnitudes,
-    { ...base, fHz: base.fHz - df },
-    peakHz,
-    scoreMode,
-    cornering
-  );
-  const zPlus = scoreCandidate(
-    magnitudes,
-    { ...base, zeta: base.zeta + dz },
-    peakHz,
-    scoreMode,
-    cornering
-  );
-  const zMinus = scoreCandidate(
-    magnitudes,
-    { ...base, zeta: base.zeta - dz },
-    peakHz,
-    scoreMode,
-    cornering
-  );
-
-  const gF = (fPlus - fMinus) / (2 * df);
-  const gZ = (zPlus - zMinus) / (2 * dz);
-
-  let gV = 0;
-  if (isEiFamily(base.type)) {
-    const vPlus = scoreCandidate(
-      magnitudes,
-      { ...base, vtol: base.vtol + dv },
-      peakHz,
-      scoreMode,
-      cornering
-    );
-    const vMinus = scoreCandidate(
-      magnitudes,
-      { ...base, vtol: base.vtol - dv },
-      peakHz,
-      scoreMode,
-      cornering
-    );
-    gV = (vPlus - vMinus) / (2 * dv);
-  }
-
-  return { s0, df: gF, dz: gZ, dv: gV };
-};
-
 type FineState = {
   type: InputShaperType;
   params: ShaperParams;
   score: number;
   done: boolean;
+  stepFHz: number;
+  stepZeta: number;
+  stepVtol: number;
 };
 
 type CoarseState = {
@@ -409,50 +345,94 @@ const fineStep = (
 ) => {
   if (state.done) return state;
 
-  // With a larger fine-pass budget, use smaller finite-difference steps.
-  const df = 0.001;
-  const dz = 0.0001;
-  const dv = 0.0001;
+  // Derivative-free coordinate descent with per-parameter adaptive step sizes.
+  // Robust across non-smooth objectives.
+  const minStepFHz = 0.05;
+  const minStepZeta = 0.001;
+  const minStepVtol = 0.001;
 
-  const g = numericGradient(magnitudes, state.params, peakHz, scoreMode, cornering, df, dz, dv);
-  const norm = Math.hypot(g.df, g.dz, g.dv);
-  if (!Number.isFinite(norm) || norm < 1e-9) return { ...state, done: true };
+  const tryMove = (next: ShaperParams): number =>
+    scoreCandidate(magnitudes, next, peakHz, scoreMode, cornering);
 
-  // Smaller initial step size; backtracking will reduce further if needed.
-  let alpha = 0.25;
-  for (let bt = 0; bt < 12; bt++) {
-    // Enforce a minimum move resolution: don't take steps below the finite-difference deltas.
-    // If we can't find an improving step at this resolution, we consider it converged.
-    const stepF = Math.sign(g.df) * Math.max(df, Math.abs(alpha * g.df));
-    const stepZ = Math.sign(g.dz) * Math.max(dz, Math.abs(alpha * g.dz));
-    const stepV = Math.sign(g.dv) * Math.max(dv, Math.abs(alpha * g.dv));
+  let bestParams = state.params;
+  let bestScore = state.score;
+  let stepFHz = state.stepFHz;
+  let stepZeta = state.stepZeta;
+  let stepVtol = state.stepVtol;
 
-    const next: ShaperParams = {
-      ...state.params,
-      fHz: clamp(state.params.fHz - stepF, bounds.fMin, bounds.fMax),
-      zeta: clamp(state.params.zeta - stepZ, SHAPER_ZETA_MIN, SHAPER_ZETA_MAX),
-      vtol: isEiFamily(state.params.type)
-        ? clamp(state.params.vtol - stepV, SHAPER_VTOL_MIN, SHAPER_VTOL_MAX)
-        : state.params.vtol,
+  const applyAxisSearch = (
+    axis: 'fHz' | 'zeta' | 'vtol',
+    step: number
+  ): { step: number; improved: boolean } => {
+    if (step <= 0) return { step, improved: false };
+
+    const base = bestParams[axis];
+    const candidates: Array<{ params: ShaperParams; score: number }> = [];
+
+    const clampAxis = (v: number) => {
+      if (axis === 'fHz') return clamp(v, bounds.fMin, bounds.fMax);
+      if (axis === 'zeta') return clamp(v, SHAPER_ZETA_MIN, SHAPER_ZETA_MAX);
+      return clamp(v, SHAPER_VTOL_MIN, SHAPER_VTOL_MAX);
     };
 
-    // If clamping/quantization results in no change, treat as done at this resolution.
-    if (
-      next.fHz === state.params.fHz &&
-      next.zeta === state.params.zeta &&
-      next.vtol === state.params.vtol
-    ) {
-      return { ...state, done: true };
+    const plus = clampAxis(base + step);
+    if (plus !== base) {
+      const p = { ...bestParams, [axis]: plus } as ShaperParams;
+      candidates.push({ params: p, score: tryMove(p) });
     }
 
-    const nextScore = scoreCandidate(magnitudes, next, peakHz, scoreMode, cornering);
-    if (Number.isFinite(nextScore) && nextScore + 1e-12 < state.score) {
-      return { ...state, params: next, score: nextScore };
+    const minus = clampAxis(base - step);
+    if (minus !== base) {
+      const p = { ...bestParams, [axis]: minus } as ShaperParams;
+      candidates.push({ params: p, score: tryMove(p) });
     }
-    alpha *= 0.5;
+
+    let improved = false;
+    for (const c of candidates) {
+      if (Number.isFinite(c.score) && c.score + 1e-12 < bestScore) {
+        bestScore = c.score;
+        bestParams = c.params;
+        improved = true;
+      }
+    }
+
+    return { step: improved ? step * 1.15 : step * 0.5, improved };
+  };
+
+  let anyImproved = false;
+  for (let sweep = 0; sweep < 4; sweep++) {
+    const f = applyAxisSearch('fHz', stepFHz);
+    stepFHz = f.step;
+    anyImproved ||= f.improved;
+
+    const z = applyAxisSearch('zeta', stepZeta);
+    stepZeta = z.step;
+    anyImproved ||= z.improved;
+
+    if (isEiFamily(bestParams.type)) {
+      const v = applyAxisSearch('vtol', stepVtol);
+      stepVtol = v.step;
+      anyImproved ||= v.improved;
+    }
+
+    if (!anyImproved) break;
   }
 
-  return { ...state, done: true };
+  const done =
+    !anyImproved &&
+    stepFHz <= minStepFHz &&
+    stepZeta <= minStepZeta &&
+    (!isEiFamily(bestParams.type) || stepVtol <= minStepVtol);
+
+  return {
+    ...state,
+    params: bestParams,
+    score: bestScore,
+    done,
+    stepFHz,
+    stepZeta,
+    stepVtol,
+  };
 };
 
 const refine = (msg: WorkerRefineMessage) => {
@@ -475,6 +455,9 @@ const refine = (msg: WorkerRefineMessage) => {
     },
     score: scoreCandidate(magnitudes, start, peakHz, msg.scoreMode, cornering),
     done: false,
+    stepFHz: 1,
+    stepZeta: 0.02,
+    stepVtol: 0.02,
   };
 
   let best: OptimisationResult | undefined;
@@ -634,7 +617,15 @@ const bruteForce = (msg: WorkerStartMessage) => {
     remainingByType.set(candidateType, fineStepsPerType);
     const start = bestByType[candidateType];
     if (!start) continue;
-    heap.push({ type: candidateType, params: start.params, score: start.score, done: false });
+    heap.push({
+      type: candidateType,
+      params: start.params,
+      score: start.score,
+      done: false,
+      stepFHz: 1,
+      stepZeta: 0.02,
+      stepVtol: 0.02,
+    });
   }
 
   // Interleave refinement across types: always refine the currently-worst candidate next.
