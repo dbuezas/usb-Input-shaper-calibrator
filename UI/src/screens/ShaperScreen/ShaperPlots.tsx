@@ -82,6 +82,15 @@ export default function ShaperPlots() {
     </>
   );
 
+  const variationScoreTooltip = (
+    <>
+      Measures how “smooth” the <b>shaped</b> spectrum is (lower is better).
+      <div className="text-muted-foreground mt-2">
+        Computed as total variation over 0–200 Hz: <span className="font-mono">Σ |Δy|</span>.
+      </div>
+    </>
+  );
+
   const maxAccelAccurate = (
     <>
       A projection of the highest acceleration where Klipper’s smoothing model stays under a fixed
@@ -158,7 +167,13 @@ export default function ShaperPlots() {
           Current score:{' '}
           <ExplainTooltip
             title="Score"
-            accurate={scoreMode === 'flatness' ? flatnessScoreTooltip : scoreTooltip}
+            accurate={
+              scoreMode === 'flatness'
+                ? flatnessScoreTooltip
+                : scoreMode === 'variation'
+                  ? variationScoreTooltip
+                  : scoreTooltip
+            }
             intuition={<>Used by the optimiser and for quick comparisons.</>}
           >
             <span className="font-medium underline decoration-dotted underline-offset-2">

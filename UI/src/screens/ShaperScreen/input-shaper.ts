@@ -9,7 +9,7 @@ export type ShaperParams = {
   vtol: number;
 };
 
-export type ShaperScoreMode = 'klipper' | 'flatness';
+export type ShaperScoreMode = 'klipper' | 'flatness' | 'variation';
 
 export type CorneringModel = 'scv' | 'jerk' | 'junction_deviation';
 

@@ -403,7 +403,7 @@ export default function useOptimisers() {
           type: 'refine',
           magnitudes,
           peakHz,
-          uiUpdateEveryMs: 75,
+          uiUpdateEveryMs: 50,
           scoreMode,
           cornering: corneringToWorker(),
           startParams: { type, fHz: f0, zeta, vtol },

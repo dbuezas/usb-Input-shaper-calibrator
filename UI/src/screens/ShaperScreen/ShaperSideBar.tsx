@@ -28,6 +28,7 @@ import {
   corneringJdAtom,
 } from './atoms';
 import useOptimisers from './optimisers';
+import { SEARCH_TYPES } from './shaper-optimiser.worker';
 
 export default function ShaperSideBar() {
   const [type, setType] = useAtom(shaperTypeAtom);
@@ -86,6 +87,15 @@ export default function ShaperSideBar() {
     </>
   );
 
+  const variationScoreTooltip = (
+    <>
+      Measures how “smooth” the <b>shaped</b> spectrum is (lower is better).
+      <div className="text-muted-foreground mt-2">
+        Computed as total variation over 0–200 Hz: <span className="font-mono">Σ |Δy|</span>.
+      </div>
+    </>
+  );
+
   const scoreModeTooltip = {
     title: 'Score mode',
     accurate: (
@@ -98,6 +108,9 @@ export default function ShaperSideBar() {
           </li>
           <li>
             <b>Flatness</b>: minimize variation from a horizontal line in the shaped spectrum.
+          </li>
+          <li>
+            <b>Variation</b>: minimize “roughness” of the shaped spectrum (total variation).
           </li>
         </ul>
       </>
@@ -206,6 +219,22 @@ export default function ShaperSideBar() {
       <>
         Use this when you want the least ringing at the cost of lower acceleration (or slightly more
         corner rounding).
+      </>
+    ),
+  };
+
+  const scoreModeVariation = {
+    title: 'Variation score mode',
+    accurate: (
+      <>
+        Minimizes the total variation of the <b>shaped</b> spectrum over 0–200 Hz:
+        <div className="mt-2 font-mono">Σ |y[i] - y[i-1]|</div>
+      </>
+    ),
+    intuition: (
+      <>
+        Use this when you want a smoother shaped spectrum (fewer sharp wiggles), even if it’s not
+        perfectly flat.
       </>
     ),
   };
@@ -398,7 +427,7 @@ export default function ShaperSideBar() {
             </div>
           </ExplainTooltip>
         </div>
-        <div className="border-border grid w-full grid-cols-2 gap-1 rounded-md border p-1">
+        <div className="border-border grid w-full grid-cols-3 gap-1 rounded-md border p-1">
           <ExplainTooltip
             title={scoreModeKlipper.title}
             accurate={scoreModeKlipper.accurate}
@@ -429,6 +458,23 @@ export default function ShaperSideBar() {
               onClick={() => setScoreMode('flatness')}
             >
               Flatness
+            </Button>
+          </ExplainTooltip>
+
+          <ExplainTooltip
+            title={scoreModeVariation.title}
+            accurate={scoreModeVariation.accurate}
+            intuition={scoreModeVariation.intuition}
+          >
+            <Button
+              type="button"
+              size="sm"
+              variant={scoreMode === 'variation' ? 'secondary' : 'ghost'}
+              className="h-8 w-full"
+              aria-pressed={scoreMode === 'variation'}
+              onClick={() => setScoreMode('variation')}
+            >
+              Variation
             </Button>
           </ExplainTooltip>
         </div>
@@ -462,20 +508,9 @@ export default function ShaperSideBar() {
         </ExplainTooltip>
 
         <div className="border-border mt-2 grid w-full grid-cols-4 gap-1 rounded-md border p-1">
-          {(
-            [
-              { value: 'zv', label: 'ZV' },
-              { value: 'zvd', label: 'ZVD' },
-              { value: 'zvdd', label: 'ZVDD' },
-              { value: 'zvddd', label: 'ZVDDD' },
-              { value: 'mzv', label: 'MZV' },
-              { value: 'ei', label: 'EI' },
-              { value: '2hei', label: '2HEI' },
-              { value: '3hei', label: '3HEI' },
-            ] as const
-          ).map((opt) => (
+          {SEARCH_TYPES.map((shaper) => (
             <ExplainTooltip
-              key={opt.value}
+              key={shaper}
               title={shaperTypeButton.title}
               accurate={shaperTypeButton.accurate}
               intuition={shaperTypeButton.intuition}
@@ -483,12 +518,12 @@ export default function ShaperSideBar() {
               <Button
                 type="button"
                 size="sm"
-                variant={type === opt.value ? 'secondary' : 'ghost'}
+                variant={type === shaper ? 'secondary' : 'ghost'}
                 className="h-8 w-full"
-                aria-pressed={type === opt.value}
+                aria-pressed={shaper === shaper}
                 onClick={() => {
-                  setType(opt.value);
-                  const best = bestByType[opt.value];
+                  setType(shaper);
+                  const best = bestByType[shaper];
                   if (best) {
                     setF0(best.params.fHz);
                     setZeta(best.params.zeta);
@@ -496,7 +531,7 @@ export default function ShaperSideBar() {
                   }
                 }}
               >
-                {opt.label}
+                {shaper.toUpperCase()}
               </Button>
             </ExplainTooltip>
           ))}
@@ -588,7 +623,13 @@ export default function ShaperSideBar() {
               Current score:{' '}
               <ExplainTooltip
                 title="Score"
-                accurate={scoreMode === 'flatness' ? flatnessScoreTooltip : scoreTooltip}
+                accurate={
+                  scoreMode === 'flatness'
+                    ? flatnessScoreTooltip
+                    : scoreMode === 'variation'
+                      ? variationScoreTooltip
+                      : scoreTooltip
+                }
                 intuition={
                   <>Shows the optimiser’s current candidate for the selected score mode.</>
                 }
@@ -602,7 +643,13 @@ export default function ShaperSideBar() {
               Best score:{' '}
               <ExplainTooltip
                 title="Score"
-                accurate={scoreMode === 'flatness' ? flatnessScoreTooltip : scoreTooltip}
+                accurate={
+                  scoreMode === 'flatness'
+                    ? flatnessScoreTooltip
+                    : scoreMode === 'variation'
+                      ? variationScoreTooltip
+                      : scoreTooltip
+                }
                 intuition={<>Best score found so far for the selected score mode.</>}
               >
                 <span className="font-medium underline decoration-dotted underline-offset-2">

@@ -80,7 +80,16 @@ export type WorkerDoneMessage = {
 export type WorkerOutMessage = WorkerProgressMessage | WorkerDoneMessage;
 
 // Optimiser search space (kept local to the worker).
-const SEARCH_TYPES: InputShaperType[] = ['zv', 'zvd', 'zvdd', 'zvddd', 'mzv', 'ei', '2hei', '3hei'];
+export const SEARCH_TYPES: InputShaperType[] = [
+  'zv',
+  'zvd',
+  'zvdd',
+  'zvddd',
+  'mzv',
+  'ei',
+  '2hei',
+  '3hei',
+];
 const SEARCH_F_STEP_HZ = 1;
 const SEARCH_ZETAS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35];
 const SEARCH_VTOLS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35];
@@ -135,6 +144,34 @@ const flatnessScoreFromMagnitudeSpectrumFast = (magnitudes: Float32Array, params
   return denom > 0 ? sse / denom : Number.POSITIVE_INFINITY;
 };
 
+const variationScoreFromMagnitudeSpectrumFast = (
+  magnitudes: Float32Array,
+  params: ShaperParams
+) => {
+  if (!magnitudes.length) return Number.POSITIVE_INFINITY;
+
+  // Match the UI scoring range: 0–200 Hz.
+  const freqStepHz = FIXED_SAMPLE_RATE / (2 * (magnitudes.length - 1));
+  const maxBins = Math.min(magnitudes.length, Math.floor(200 / freqStepHz) + 1);
+  if (maxBins <= 1) return Number.POSITIVE_INFINITY;
+
+  const taps = computeMarlinShaperTaps(params);
+  const a = taps.a;
+  const t = taps.t;
+  if (!a.length || !t.length) return Number.POSITIVE_INFINITY;
+
+  // Total variation of the shaped spectrum: Σ |y[i] - y[i-1]|.
+  let prev = magnitudes[0] * shaperMagnitudeAtHzFromTaps(a, t, 0);
+  let tv = 0;
+  for (let i = 1; i < maxBins; i++) {
+    const h = shaperMagnitudeAtHzFromTaps(a, t, i * freqStepHz);
+    const next = magnitudes[i] * h;
+    tv += Math.abs(next - prev);
+    prev = next;
+  }
+  return Number.isFinite(tv) ? tv : Number.POSITIVE_INFINITY;
+};
+
 const scoreCandidate = (
   magnitudes: Float32Array,
   params: ShaperParams,
@@ -149,7 +186,9 @@ const scoreCandidate = (
   const total =
     scoreMode === 'flatness'
       ? flatnessScoreFromMagnitudeSpectrumFast(magnitudes, params)
-      : klipperScoreFromMagnitudeSpectrum(magnitudes, params, cornering);
+      : scoreMode === 'variation'
+        ? variationScoreFromMagnitudeSpectrumFast(magnitudes, params)
+        : klipperScoreFromMagnitudeSpectrum(magnitudes, params, cornering);
   return Number.isFinite(total) ? total : Number.POSITIVE_INFINITY;
 };
 
@@ -371,9 +410,9 @@ const fineStep = (
   if (state.done) return state;
 
   // With a larger fine-pass budget, use smaller finite-difference steps.
-  const df = 0.05;
-  const dz = 0.001;
-  const dv = 0.001;
+  const df = 0.001;
+  const dz = 0.0001;
+  const dv = 0.0001;
 
   const g = numericGradient(magnitudes, state.params, peakHz, scoreMode, cornering, df, dz, dv);
   const norm = Math.hypot(g.df, g.dz, g.dv);

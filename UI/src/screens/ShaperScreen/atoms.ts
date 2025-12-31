@@ -1,4 +1,5 @@
 import { atom } from 'jotai';
+import { FIXED_SAMPLE_RATE } from '@/constants';
 import {
   applyShaperToMagnitudeSpectrum,
   computeMarlinShaperTaps,
@@ -55,10 +56,26 @@ export const currentScoreAtom = atom((get) => {
   const scoreMode = get(shaperScoreModeAtom);
   const params = get(shaperParamsAtom);
   const cornering = get(corneringSettingsAtom);
-  const score =
-    scoreMode === 'flatness'
-      ? flatnessScoreFromMagnitudeSpectrum(base, params)
-      : klipperScoreFromMagnitudeSpectrum(base, params, cornering);
+  const shaped = applyShaperToMagnitudeSpectrum(params, base);
+  const freqStepHz = FIXED_SAMPLE_RATE / (2 * (shaped.length - 1));
+  const maxBins = Math.min(shaped.length, Math.floor(200 / freqStepHz) + 1);
+
+  let score: number;
+  if (scoreMode === 'flatness') {
+    score = flatnessScoreFromMagnitudeSpectrum(base, params);
+  } else if (scoreMode === 'variation') {
+    if (maxBins <= 1) return undefined;
+    let tv = 0;
+    let prev = shaped[0];
+    for (let i = 1; i < maxBins; i++) {
+      const next = shaped[i];
+      tv += Math.abs(next - prev);
+      prev = next;
+    }
+    score = tv;
+  } else {
+    score = klipperScoreFromMagnitudeSpectrum(base, params, cornering);
+  }
   return Number.isFinite(score) ? score : undefined;
 });
 
