@@ -347,7 +347,7 @@ const fineStep = (
 
   // Derivative-free coordinate descent with per-parameter adaptive step sizes.
   // Robust across non-smooth objectives.
-  const minStepFHz = 0.05;
+  const minStepFHz = 0.01;
   const minStepZeta = 0.001;
   const minStepVtol = 0.001;
 
@@ -622,9 +622,9 @@ const bruteForce = (msg: WorkerStartMessage) => {
       params: start.params,
       score: start.score,
       done: false,
-      stepFHz: 1,
-      stepZeta: 0.02,
-      stepVtol: 0.02,
+      stepFHz: 0.5,
+      stepZeta: 0.01,
+      stepVtol: 0.01,
     });
   }
 
