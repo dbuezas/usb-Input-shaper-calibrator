@@ -27,10 +27,9 @@ import {
 import { analysisRangeAtom } from './analysis-range';
 
 const binToHz = (bin: number, bins: number) => bin * (FIXED_SAMPLE_RATE / (2 * (bins - 1)));
-
-const estimatePeakHz = (magnitudes: Float32Array, freqRangeHz: [number, number]) => {
-  if (!magnitudes.length) return 55;
-  const [fMinHz, fMaxHz] = freqRangeHz;
+const estimatePeakHz = (magnitudes: Float32Array) => {
+  const fMinHz = 0;
+  const fMaxHz = FIXED_SAMPLE_RATE / 2;
   const freqStepHz = FIXED_SAMPLE_RATE / (2 * (magnitudes.length - 1));
   const start = Math.max(0, Math.floor(fMinHz / freqStepHz));
   const end = Math.min(magnitudes.length - 1, Math.floor(fMaxHz / freqStepHz));
@@ -73,7 +72,7 @@ export default function useOptimisers() {
   const corneringJd = useAtomValue(corneringJdAtom);
 
   const maxHoldSpectrum = useAtomValue(spectrogramMaxHoldAtom);
-  const freqRangeHz = useAtomValue(analysisRangeAtom);
+  const scoreRangeHz = useAtomValue(analysisRangeAtom);
 
   const [isOptimising, setIsOptimising] = useState(false);
   const [optimiseProgress, setOptimiseProgress] = useState<WorkerProgressMessage | null>(null);
@@ -116,7 +115,7 @@ export default function useOptimisers() {
     cancelRef.current = false;
 
     const magnitudes = maxHoldSpectrum;
-    const peakHz = estimatePeakHz(magnitudes, freqRangeHz);
+    const peakHz = estimatePeakHz(magnitudes);
 
     for (const w of optimiserWorkersRef.current) w.terminate();
     optimiserWorkersRef.current = [];
@@ -231,7 +230,7 @@ export default function useOptimisers() {
             type: 'start',
             magnitudes,
             peakHz,
-            freqRangeHz,
+            scoreRangeHz,
             uiUpdateEveryMs: 75,
             scoreMode,
             cornering: corneringToWorker(),
@@ -264,7 +263,7 @@ export default function useOptimisers() {
     cancelRef.current = false;
 
     const magnitudes = maxHoldSpectrum;
-    const peakHz = estimatePeakHz(magnitudes, freqRangeHz);
+    const peakHz = estimatePeakHz(magnitudes);
 
     for (const w of optimiserWorkersRef.current) w.terminate();
     optimiserWorkersRef.current = [];
@@ -319,7 +318,7 @@ export default function useOptimisers() {
           type: 'start',
           magnitudes,
           peakHz,
-          freqRangeHz,
+          scoreRangeHz,
           uiUpdateEveryMs: 75,
           scoreMode,
           cornering: corneringToWorker(),
@@ -358,7 +357,7 @@ export default function useOptimisers() {
     cancelRef.current = false;
 
     const magnitudes = maxHoldSpectrum;
-    const peakHz = estimatePeakHz(magnitudes, freqRangeHz);
+    const peakHz = estimatePeakHz(magnitudes);
 
     for (const w of optimiserWorkersRef.current) w.terminate();
     optimiserWorkersRef.current = [];
@@ -413,7 +412,7 @@ export default function useOptimisers() {
           type: 'refine',
           magnitudes,
           peakHz,
-          freqRangeHz,
+          scoreRangeHz,
           uiUpdateEveryMs: 50,
           scoreMode,
           cornering: corneringToWorker(),
