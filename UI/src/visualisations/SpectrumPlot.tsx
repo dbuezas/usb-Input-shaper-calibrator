@@ -16,6 +16,11 @@ export type SpectrumPlotTrace = {
   color: string;
 };
 
+export type SpectrumPlotMarker = {
+  freqHz: number;
+  color?: string;
+};
+
 const SpectrumPlot_render = ({
   canvasRef,
   traces,
@@ -127,12 +132,14 @@ export const SpectrumPlot = ({
   height,
   freqRange,
   scaleMax,
+  markers,
 }: {
   traces: SpectrumPlotTrace[];
   width: number;
   height: number;
   freqRange: [number, number];
   scaleMax?: number;
+  markers?: SpectrumPlotMarker[];
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -156,6 +163,33 @@ export const SpectrumPlot = ({
     () => scaleLinear().domain(yDomain).range([innerHeight, 0]),
     [yDomain, innerHeight]
   );
+
+  const markerLines = useMemo(() => {
+    if (!markers?.length) return null;
+    const left = DEFAULT_AXIS_PADDING.left;
+    const top = DEFAULT_AXIS_PADDING.top;
+    const bottom = height - DEFAULT_AXIS_PADDING.bottom;
+
+    return markers
+      .map((m) => {
+        if (m.freqHz < freqRange[0] || m.freqHz > freqRange[1]) return null;
+        const x = left + xScale(m.freqHz);
+        const color = m.color ?? 'rgba(255,255,255,0.7)';
+        return (
+          <line
+            key={`${m.freqHz}`}
+            x1={x}
+            x2={x}
+            y1={top}
+            y2={bottom}
+            stroke={color}
+            strokeWidth={1}
+            strokeDasharray="4 4"
+          />
+        );
+      })
+      .filter(Boolean);
+  }, [markers, freqRange, height, xScale]);
 
   useD3Axes({
     svgRef,
@@ -205,6 +239,11 @@ export const SpectrumPlot = ({
         height={height}
         className="pointer-events-none absolute inset-0"
       />
+      {markerLines && (
+        <svg width={width} height={height} className="pointer-events-none absolute inset-0">
+          {markerLines}
+        </svg>
+      )}
       <SpectrumPlot_render
         canvasRef={canvasRef}
         traces={traces}

@@ -16,6 +16,7 @@ export const Waterfall = ({
   dataAtom,
   scaleMax,
   onPeakFrequency,
+  markers,
 }: {
   width: number;
   height: number;
@@ -23,6 +24,7 @@ export const Waterfall = ({
   dataAtom: Atom<Float32Array>;
   scaleMax?: number;
   onPeakFrequency: (freqHz: number) => void;
+  markers?: Array<{ freqHz: number; color?: string }>;
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -44,6 +46,33 @@ export const Waterfall = ({
     () => scaleLinear().domain([SPECTROGRAM_MAX_TIME_SLICES, 0]).range([innerHeight, 0]),
     [innerHeight]
   );
+
+  const markerLines = useMemo(() => {
+    if (!markers?.length) return null;
+    const left = DEFAULT_AXIS_PADDING.left;
+    const top = DEFAULT_AXIS_PADDING.top;
+    const bottom = height - DEFAULT_AXIS_PADDING.bottom;
+
+    return markers
+      .map((m) => {
+        if (m.freqHz < freqRange[0] || m.freqHz > freqRange[1]) return null;
+        const x = left + xScale(m.freqHz);
+        const color = m.color ?? 'rgba(255,255,255,0.7)';
+        return (
+          <line
+            key={`${m.freqHz}`}
+            x1={x}
+            x2={x}
+            y1={top}
+            y2={bottom}
+            stroke={color}
+            strokeWidth={1}
+            strokeDasharray="4 4"
+          />
+        );
+      })
+      .filter(Boolean);
+  }, [markers, freqRange, height, xScale]);
 
   useD3Axes({
     svgRef,
@@ -99,6 +128,11 @@ export const Waterfall = ({
         height={height}
         className="pointer-events-none absolute inset-0"
       />
+      {markerLines && (
+        <svg width={width} height={height} className="pointer-events-none absolute inset-0">
+          {markerLines}
+        </svg>
+      )}
       <Waterfall_render
         canvasRef={canvasRef}
         width={width}

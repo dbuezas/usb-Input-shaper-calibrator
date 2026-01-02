@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { ExplainTooltip } from '@/components/ExplainTooltip';
 import { cn } from '@/lib/utils';
 import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
+import { analysisRangeAtom } from './analysis-range';
 import {
   shaperTypeAtom,
   shaperF0Atom,
@@ -42,6 +43,7 @@ export default function ShaperSideBar() {
   const [corneringJd, setCorneringJd] = useAtom(corneringJdAtom);
 
   const maxHoldSpectrum = useAtomValue(spectrogramMaxHoldAtom);
+  const [analysisRange, setAnalysisRange] = useAtom(analysisRangeAtom);
 
   const {
     runAutoOptimise,
@@ -311,6 +313,38 @@ export default function ShaperSideBar() {
       </div>
 
       <div className="mt-5">
+        <div className="mb-2">
+          <ExplainTooltip
+            title="Analysis range"
+            accurate={
+              <>
+                Limits what frequencies the optimiser considers when scoring candidates. The plots
+                still show the full spectrum.
+              </>
+            }
+            intuition={<>Narrow this around the resonance band you care about.</>}
+            side="right"
+            sideOffset={8}
+          >
+            <div className="text-muted-foreground underline decoration-dotted underline-offset-2">
+              Analysis range
+            </div>
+          </ExplainTooltip>
+        </div>
+        <label className="text-muted-foreground text-sm">
+          {analysisRange[0].toFixed(0)}–{analysisRange[1].toFixed(0)} Hz
+        </label>
+        <div className="mt-3">
+          <Slider
+            min={0}
+            max={SHAPER_F0_MAX_HZ}
+            step={1}
+            value={analysisRange}
+            onValueChange={(v: [number, number]) => setAnalysisRange(v)}
+            className="w-full"
+          />
+        </div>
+
         <div className="mb-2">
           <ExplainTooltip
             title={corneringModelInfo.title}
@@ -683,7 +717,7 @@ export default function ShaperSideBar() {
               max={SHAPER_F0_MAX_HZ}
               step={0.5}
               value={[f0]}
-              onValueChange={(v) => setF0(v[0] ?? 55)}
+              onValueChange={(v) => setF0(v[0])}
               className="w-full"
             />
           </div>

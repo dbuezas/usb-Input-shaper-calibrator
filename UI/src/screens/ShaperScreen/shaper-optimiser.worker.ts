@@ -40,6 +40,7 @@ export type WorkerStartMessage = {
   type: 'start';
   magnitudes: Float32Array;
   peakHz: number;
+  freqRangeHz: [number, number];
   uiUpdateEveryMs: number;
   scoreMode: ShaperScoreMode;
   cornering?: WorkerCorneringSettings;
@@ -52,6 +53,7 @@ export type WorkerRefineMessage = {
   type: 'refine';
   magnitudes: Float32Array;
   peakHz: number;
+  freqRangeHz: [number, number];
   uiUpdateEveryMs: number;
   scoreMode: ShaperScoreMode;
   cornering?: WorkerCorneringSettings;
@@ -96,6 +98,12 @@ const SEARCH_VTOLS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35];
 const SEARCH_F_MIN_ABS_HZ = SHAPER_F0_MIN_HZ;
 const SEARCH_F_MAX_ABS_HZ = SHAPER_F0_MAX_HZ;
 
+const clampSearchRangeToUi = (freqRangeHz: [number, number]) => {
+  const fMin = Math.max(SEARCH_F_MIN_ABS_HZ, Math.min(freqRangeHz[0], freqRangeHz[1]));
+  const fMax = Math.min(SEARCH_F_MAX_ABS_HZ, Math.max(freqRangeHz[0], freqRangeHz[1]));
+  return fMin <= fMax ? { fMin, fMax } : { fMin: fMax, fMax: fMin };
+};
+
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const isEiFamily = (t: InputShaperType) => t === 'ei' || t === '2hei' || t === '3hei';
 
@@ -111,13 +119,20 @@ const shaperMagnitudeAtHzFromTaps = (a: number[], t: number[], freqHz: number) =
   return Math.sqrt(re * re + im * im);
 };
 
-const flatnessScoreFromMagnitudeSpectrumFast = (magnitudes: Float32Array, params: ShaperParams) => {
+const flatnessScoreFromMagnitudeSpectrumFast = (
+  magnitudes: Float32Array,
+  params: ShaperParams,
+  freqRangeHz: [number, number]
+) => {
   if (!magnitudes.length) return Number.POSITIVE_INFINITY;
 
-  // Match the UI scoring range: 0–200 Hz.
   const freqStepHz = FIXED_SAMPLE_RATE / (2 * (magnitudes.length - 1));
-  const maxBins = Math.min(magnitudes.length, Math.floor(200 / freqStepHz) + 1);
-  if (maxBins <= 0) return Number.POSITIVE_INFINITY;
+  const fMinHz = Math.min(freqRangeHz[0], freqRangeHz[1]);
+  const fMaxHz = Math.max(freqRangeHz[0], freqRangeHz[1]);
+  const start = Math.max(0, Math.floor(fMinHz / freqStepHz));
+  const end = Math.min(magnitudes.length - 1, Math.floor(fMaxHz / freqStepHz));
+  if (end <= start) return Number.POSITIVE_INFINITY;
+  const count = end - start + 1;
 
   const taps = computeMarlinShaperTaps(params);
   const a = taps.a;
@@ -126,34 +141,37 @@ const flatnessScoreFromMagnitudeSpectrumFast = (magnitudes: Float32Array, params
 
   // Two-pass: mean then SSE, but no allocations and taps computed once.
   let sum = 0;
-  for (let i = 0; i < maxBins; i++) {
+  for (let i = start; i <= end; i++) {
     const h = shaperMagnitudeAtHzFromTaps(a, t, i * freqStepHz);
     sum += (magnitudes[i] ?? 0) * h;
   }
-  const mean = sum / maxBins;
+  const mean = sum / count;
   if (!Number.isFinite(mean) || mean <= 0) return Number.POSITIVE_INFINITY;
 
   let sse = 0;
-  for (let i = 0; i < maxBins; i++) {
+  for (let i = start; i <= end; i++) {
     const h = shaperMagnitudeAtHzFromTaps(a, t, i * freqStepHz);
     const d = (magnitudes[i] ?? 0) * h - mean;
     sse += d * d;
   }
 
-  const denom = mean * mean * maxBins;
+  const denom = mean * mean * count;
   return denom > 0 ? sse / denom : Number.POSITIVE_INFINITY;
 };
 
 const variationScoreFromMagnitudeSpectrumFast = (
   magnitudes: Float32Array,
-  params: ShaperParams
+  params: ShaperParams,
+  freqRangeHz: [number, number]
 ) => {
   if (!magnitudes.length) return Number.POSITIVE_INFINITY;
 
-  // Match the UI scoring range: 0–200 Hz.
   const freqStepHz = FIXED_SAMPLE_RATE / (2 * (magnitudes.length - 1));
-  const maxBins = Math.min(magnitudes.length, Math.floor(200 / freqStepHz) + 1);
-  if (maxBins <= 1) return Number.POSITIVE_INFINITY;
+  const fMinHz = Math.min(freqRangeHz[0], freqRangeHz[1]);
+  const fMaxHz = Math.max(freqRangeHz[0], freqRangeHz[1]);
+  const start = Math.max(0, Math.floor(fMinHz / freqStepHz));
+  const end = Math.min(magnitudes.length - 1, Math.floor(fMaxHz / freqStepHz));
+  if (end <= start) return Number.POSITIVE_INFINITY;
 
   const taps = computeMarlinShaperTaps(params);
   const a = taps.a;
@@ -161,9 +179,9 @@ const variationScoreFromMagnitudeSpectrumFast = (
   if (!a.length || !t.length) return Number.POSITIVE_INFINITY;
 
   // Total variation of the shaped spectrum: Σ |y[i] - y[i-1]|.
-  let prev = magnitudes[0] * shaperMagnitudeAtHzFromTaps(a, t, 0);
+  let prev = magnitudes[start] * shaperMagnitudeAtHzFromTaps(a, t, start * freqStepHz);
   let tv = 0;
-  for (let i = 1; i < maxBins; i++) {
+  for (let i = start + 1; i <= end; i++) {
     const h = shaperMagnitudeAtHzFromTaps(a, t, i * freqStepHz);
     const next = magnitudes[i] * h;
     tv += Math.abs(next - prev);
@@ -177,7 +195,8 @@ const scoreCandidate = (
   params: ShaperParams,
   peakHz: number,
   scoreMode: ShaperScoreMode,
-  cornering: CorneringSettings
+  cornering: CorneringSettings,
+  freqRangeHz: [number, number]
 ) => {
   const { a, t } = computeMarlinShaperTaps(params);
   const hPeak = shaperMagnitudeAtHzFromTaps(a, t, peakHz);
@@ -185,10 +204,10 @@ const scoreCandidate = (
 
   const total =
     scoreMode === 'flatness'
-      ? flatnessScoreFromMagnitudeSpectrumFast(magnitudes, params)
+      ? flatnessScoreFromMagnitudeSpectrumFast(magnitudes, params, freqRangeHz)
       : scoreMode === 'variation'
-        ? variationScoreFromMagnitudeSpectrumFast(magnitudes, params)
-        : klipperScoreFromMagnitudeSpectrum(magnitudes, params, cornering);
+        ? variationScoreFromMagnitudeSpectrumFast(magnitudes, params, freqRangeHz)
+        : klipperScoreFromMagnitudeSpectrum(magnitudes, params, cornering, 5000, freqRangeHz);
   return Number.isFinite(total) ? total : Number.POSITIVE_INFINITY;
 };
 
@@ -341,6 +360,7 @@ const fineStep = (
   peakHz: number,
   scoreMode: ShaperScoreMode,
   cornering: CorneringSettings,
+  freqRangeHz: [number, number],
   bounds: { fMin: number; fMax: number }
 ) => {
   if (state.done) return state;
@@ -352,7 +372,7 @@ const fineStep = (
   const minStepVtol = 0.001;
 
   const tryMove = (next: ShaperParams): number =>
-    scoreCandidate(magnitudes, next, peakHz, scoreMode, cornering);
+    scoreCandidate(magnitudes, next, peakHz, scoreMode, cornering, freqRangeHz);
 
   let bestParams = state.params;
   let bestScore = state.score;
@@ -436,13 +456,12 @@ const fineStep = (
 };
 
 const refine = (msg: WorkerRefineMessage) => {
-  const { magnitudes, peakHz, uiUpdateEveryMs } = msg;
+  const { magnitudes, peakHz, uiUpdateEveryMs, freqRangeHz } = msg;
   const safetyCapSteps = msg.steps ?? 20_000;
   const start = msg.startParams;
   const cornering = toCorneringSettings(msg.cornering);
 
-  const fMin = SEARCH_F_MIN_ABS_HZ;
-  const fMax = SEARCH_F_MAX_ABS_HZ;
+  const { fMin, fMax } = clampSearchRangeToUi(freqRangeHz);
   const bounds = { fMin, fMax };
 
   let state: FineState = {
@@ -453,7 +472,7 @@ const refine = (msg: WorkerRefineMessage) => {
       zeta: start.zeta,
       vtol: start.vtol,
     },
-    score: scoreCandidate(magnitudes, start, peakHz, msg.scoreMode, cornering),
+    score: scoreCandidate(magnitudes, start, peakHz, msg.scoreMode, cornering, freqRangeHz),
     done: false,
     stepFHz: 1,
     stepZeta: 0.02,
@@ -467,7 +486,7 @@ const refine = (msg: WorkerRefineMessage) => {
 
   let iterationsDone = 0;
   for (let i = 0; i < safetyCapSteps; i++) {
-    state = fineStep(magnitudes, state, peakHz, msg.scoreMode, cornering, bounds);
+    state = fineStep(magnitudes, state, peakHz, msg.scoreMode, cornering, freqRangeHz, bounds);
     if (!best || state.score < best.score) best = { params: state.params, score: state.score };
 
     iterationsDone = i + 1;
@@ -509,7 +528,7 @@ const refine = (msg: WorkerRefineMessage) => {
 };
 
 const bruteForce = (msg: WorkerStartMessage) => {
-  const { magnitudes, peakHz, uiUpdateEveryMs, scoreMode } = msg;
+  const { magnitudes, peakHz, uiUpdateEveryMs, scoreMode, freqRangeHz } = msg;
   const cornering = toCorneringSettings(msg.cornering);
   const types = (msg.candidateTypes?.length ? msg.candidateTypes : SEARCH_TYPES).filter(
     (t): t is InputShaperType => SEARCH_TYPES.includes(t)
@@ -519,8 +538,7 @@ const bruteForce = (msg: WorkerStartMessage) => {
   const zetas = SEARCH_ZETAS;
   const vtols = SEARCH_VTOLS;
 
-  const fMin = SEARCH_F_MIN_ABS_HZ;
-  const fMax = SEARCH_F_MAX_ABS_HZ;
+  const { fMin, fMax } = clampSearchRangeToUi(freqRangeHz);
 
   // Coarse iteration count
   let coarseTotal = 0;
@@ -573,7 +591,7 @@ const bruteForce = (msg: WorkerStartMessage) => {
 
     iterationsDone++;
     const params = next.params;
-    const score = scoreCandidate(magnitudes, params, peakHz, scoreMode, cornering);
+    const score = scoreCandidate(magnitudes, params, peakHz, scoreMode, cornering, freqRangeHz);
     const current: OptimisationResult = { params, score };
 
     if (Number.isFinite(score)) {
@@ -644,7 +662,15 @@ const bruteForce = (msg: WorkerStartMessage) => {
     }
     remainingByType.set(state.type, left - 1);
 
-    const nextState = fineStep(magnitudes, state, peakHz, scoreMode, cornering, bounds);
+    const nextState = fineStep(
+      magnitudes,
+      state,
+      peakHz,
+      scoreMode,
+      cornering,
+      freqRangeHz,
+      bounds
+    );
     iterationsDone++;
 
     const current: OptimisationResult = { params: nextState.params, score: nextState.score };

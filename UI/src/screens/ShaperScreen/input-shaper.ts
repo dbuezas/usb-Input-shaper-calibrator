@@ -136,17 +136,21 @@ export const applyShaperToMagnitudeSpectrum = (params: ShaperParams, magnitudes:
 
 export const flatnessScoreFromMagnitudeSpectrum = (
   magnitudes: Float32Array,
-  params: ShaperParams
+  params: ShaperParams,
+  freqRangeHz: [number, number] = [0, 200]
 ) => {
   if (!magnitudes.length) return Number.POSITIVE_INFINITY;
 
   const shaped = applyShaperToMagnitudeSpectrum(params, magnitudes);
 
+  const fMin = Math.max(0, Math.min(freqRangeHz[0], freqRangeHz[1]));
+  const fMax = Math.max(0, Math.max(freqRangeHz[0], freqRangeHz[1]));
   let sum = 0;
   let count = 0;
   for (let i = 0; i < shaped.length; i++) {
     const f = binToHz(i, shaped.length);
-    if (f > 200) break;
+    if (f < fMin) continue;
+    if (f > fMax) break;
     sum += shaped[i] ?? 0;
     count++;
   }
@@ -154,13 +158,19 @@ export const flatnessScoreFromMagnitudeSpectrum = (
   const mean = sum / count;
 
   let sse = 0;
-  for (let i = 0; i < count; i++) {
+  // Second pass must iterate the same bins as the first pass.
+  let seen = 0;
+  for (let i = 0; i < shaped.length; i++) {
+    const f = binToHz(i, shaped.length);
+    if (f < fMin) continue;
+    if (f > fMax) break;
     const d = (shaped[i] ?? 0) - mean;
     sse += d * d;
+    seen++;
   }
 
   // Normalize by mean² so the score is roughly scale-invariant.
-  const denom = mean * mean * count;
+  const denom = mean * mean * seen;
   return denom > 0 ? sse / denom : Number.POSITIVE_INFINITY;
 };
 
@@ -342,17 +352,22 @@ export const klipperScoreFromMagnitudeSpectrum = (
   magnitudes: Float32Array,
   params: ShaperParams,
   cornering: CorneringSettings = { model: 'scv', scv: 5 },
-  smoothingAccel = 5000
+  smoothingAccel = 5000,
+  freqRangeHz: [number, number] = [0, 200]
 ) => {
   if (!magnitudes.length) return Number.POSITIVE_INFINITY;
+
+  const fMin = Math.max(0, Math.min(freqRangeHz[0], freqRangeHz[1]));
+  const fMax = Math.max(0, Math.max(freqRangeHz[0], freqRangeHz[1]));
 
   const freqsHz: number[] = [];
   const psd: number[] = [];
   for (let i = 0; i < magnitudes.length; i++) {
     const f = binToHz(i, magnitudes.length);
-    if (f > 200) break;
+    if (f < fMin) continue;
+    if (f > fMax) break;
     freqsHz.push(f);
-    const m = magnitudes[i] ?? 0;
+    const m = magnitudes[i];
     psd.push(m * m);
   }
 

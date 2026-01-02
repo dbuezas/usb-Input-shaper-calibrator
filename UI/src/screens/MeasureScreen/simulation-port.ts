@@ -24,6 +24,9 @@ export class SimulationPort {
 
   private sweepSeconds: number;
 
+  private sweepMinFrequencyHz = SIMULATION_MIN_FREQUENCY;
+  private sweepMaxFrequencyHz = SIMULATION_MAX_FREQUENCY;
+
   private isOpen = false;
   private controller: ReadableStreamDefaultController<Uint8Array> | null = null;
   private pumpPromise: Promise<void> | null = null;
@@ -49,6 +52,17 @@ export class SimulationPort {
     this.readable = this.createReadable();
   }
 
+  setSweepFrequencyRange(rangeHz: { minHz: number; maxHz: number }) {
+    const minHz = Number(rangeHz.minHz);
+    const maxHz = Number(rangeHz.maxHz);
+    if (!Number.isFinite(minHz) || !Number.isFinite(maxHz)) return;
+    const lo = Math.max(0, Math.min(minHz, maxHz));
+    const hi = Math.max(0, Math.max(minHz, maxHz));
+    // Keep a non-zero span to avoid a stuck sweep.
+    this.sweepMinFrequencyHz = lo;
+    this.sweepMaxFrequencyHz = Math.max(hi, lo + 1e-6);
+  }
+
   setSweepSeconds(seconds: number) {
     // Keep it sane: avoid divide-by-zero / absurdly fast sweeps.
     const next = Number(seconds);
@@ -64,7 +78,7 @@ export class SimulationPort {
    */
   restart(): void {
     this.t = 0;
-    this.simulationFrequency = SIMULATION_MIN_FREQUENCY;
+    this.simulationFrequency = this.sweepMinFrequencyHz;
     this.pendingFrame = null;
     this.pendingFrameIndex = 0;
     this.resetResonator();
@@ -161,10 +175,10 @@ export class SimulationPort {
 
   private makeNextFrame(): Uint8Array {
     // Sweep (frequency changes smoothly, phase stays continuous)
-    this.simulationFrequency +=
-      (SIMULATION_MAX_FREQUENCY - SIMULATION_MIN_FREQUENCY) / this.sweepSeconds / FIXED_SAMPLE_RATE;
-    if (this.simulationFrequency > SIMULATION_MAX_FREQUENCY)
-      this.simulationFrequency = SIMULATION_MIN_FREQUENCY;
+    const span = this.sweepMaxFrequencyHz - this.sweepMinFrequencyHz;
+    this.simulationFrequency += span / this.sweepSeconds / FIXED_SAMPLE_RATE;
+    if (this.simulationFrequency > this.sweepMaxFrequencyHz)
+      this.simulationFrequency = this.sweepMinFrequencyHz;
 
     // Phase-accurate integration
     this.t += (2 * Math.PI * this.simulationFrequency) / FIXED_SAMPLE_RATE;

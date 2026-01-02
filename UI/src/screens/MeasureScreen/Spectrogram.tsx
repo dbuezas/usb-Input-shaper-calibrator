@@ -1,7 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import type { SpectrumSliceMessage } from '@/screens/MeasureScreen/messages';
 import { spectrogramChannel } from '@/screens/MeasureScreen/messages';
-import { atom, useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { atom, useAtomValue, useSetAtom } from 'jotai';
 import {
   ACTUAL_RESOLUTION,
   MAX_FREQUENCY_SLIDER,
@@ -10,7 +10,6 @@ import {
   SPECTROGRAM_PLOT_WIDTH,
   SPECTROGRAM_WATERFALL_HEIGHT,
 } from '@/constants';
-import { Slider } from '@/components/ui/slider';
 import type { DataSource } from '@/screens/MeasureScreen/data-source';
 import { SpectrumPlot } from '@/visualisations/SpectrumPlot';
 import { Waterfall } from '@/visualisations/Waterfall';
@@ -19,37 +18,20 @@ import { historicPeakAtom, peakAtom, spectrogramMaxHoldAtom } from './atoms';
 const spectrogramAtom = atom<Float32Array>(new Float32Array());
 
 const spectrogramScaleMaxAtom = atom<number | undefined>(undefined);
-const freqRangeAtom = atom<[number, number]>([MIN_FREQUENCY_SLIDER, MAX_FREQUENCY_SLIDER]);
 
 export function SpectrogramControls() {
-  const [freqRange, setFreqRange] = useAtom(freqRangeAtom);
-
-  return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <label htmlFor="frequency-slider" className="text-muted-foreground text-sm">
-          Frequency Range: {freqRange[0]}-{freqRange[1]} Hz
-        </label>
-        <div className="mt-3">
-          <Slider
-            id="frequency-slider"
-            min={MIN_FREQUENCY_SLIDER}
-            max={MAX_FREQUENCY_SLIDER}
-            step={1}
-            value={freqRange}
-            onValueChange={(v: [number, number]) => setFreqRange(v)}
-            className="w-full"
-          />
-        </div>
-      </div>
-    </div>
-  );
+  return null;
 }
 
-const peakFromSeries = (series: Float32Array) => {
+const peakFromSeries = (series: Float32Array, freqRangeHz: [number, number]) => {
   let max = Number.NEGATIVE_INFINITY;
   let peakIdx = -1;
-  for (let i = 0; i < series.length; i++) {
+  const freqStepHz = ACTUAL_RESOLUTION || 1;
+  const [fMinHz, fMaxHz] = freqRangeHz;
+  const start = Math.max(0, Math.floor(fMinHz / freqStepHz));
+  const end = Math.min(series.length - 1, Math.floor(fMaxHz / freqStepHz));
+
+  for (let i = start; i <= end; i++) {
     const v = series[i];
     if (v > max) {
       max = v;
@@ -75,7 +57,10 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
   const setHistoricPeak = useSetAtom(historicPeakAtom);
   const width = SPECTROGRAM_PLOT_WIDTH;
   const height = SPECTROGRAM_WATERFALL_HEIGHT;
-  const freqRange = useAtomValue(freqRangeAtom);
+  const freqRange = useMemo(
+    () => [MIN_FREQUENCY_SLIDER, MAX_FREQUENCY_SLIDER] as [number, number],
+    []
+  );
   const spectrogramScaleMax = useAtomValue(spectrogramScaleMaxAtom);
 
   useEffect(() => {
@@ -89,7 +74,7 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
       });
       setSpectrogramMaxHold((prev) => {
         const next = updateMaxHold(prev, msg.spectrum);
-        setHistoricPeak(peakFromSeries(next));
+        setHistoricPeak(peakFromSeries(next, freqRange));
         return next;
       });
     };
@@ -98,7 +83,7 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
     return () => {
       spectrogramChannel.removeEventListener('message', handleMessage);
     };
-  }, [setHistoricPeak, setSpectrogram, setSpectrogramMaxHold, setSpectrogramScaleMax]);
+  }, [freqRange, setHistoricPeak, setSpectrogram, setSpectrogramMaxHold, setSpectrogramScaleMax]);
 
   return (
     <div className="text-center">
