@@ -5,7 +5,12 @@ import {
   type ShaperScoreMode,
   estimatePeakHz,
 } from '@/screens/ShaperScreen/input-shaper';
-import { SHAPER_F0_RANGE_HZ, SHAPER_VTOL_RANGE, SHAPER_ZETA_RANGE } from '@/constants';
+import {
+  SHAPER_F0_RANGE_HZ,
+  SHAPER_VTOL_RANGE,
+  SHAPER_ZETA_RANGE,
+  OPTIMIZER_UPDATE_EVERY_MS,
+} from '@/constants';
 
 import { variationScoreFromMagnitudeSpectrum } from '@/screens/ShaperScreen/shaper-scores/variation';
 import { flatnessScoreFromMagnitudeSpectrum } from './shaper-scores/flatness';
@@ -16,8 +21,7 @@ export type WorkerCorneringSettings =
   | { model: 'jerk'; jerk: number }
   | { model: 'junction_deviation'; junctionDeviation: number };
 
-const toCorneringSettings = (v?: WorkerCorneringSettings): CorneringSettings => {
-  if (!v) return { model: 'scv', scv: 5 };
+const toCorneringSettings = (v: WorkerCorneringSettings): CorneringSettings => {
   switch (v.model) {
     case 'scv':
       return { model: 'scv', scv: v.scv };
@@ -35,9 +39,8 @@ export type WorkerStartMessage = {
   type: 'start';
   magnitudes: Float32Array;
   scoreRangeHz: [number, number];
-  uiUpdateEveryMs: number;
   scoreMode: ShaperScoreMode;
-  cornering?: WorkerCorneringSettings;
+  cornering: WorkerCorneringSettings;
   candidateTypes?: InputShaperType[];
   /** If true, stop after the coarse grid search and skip the final gradient-descent refinement. */
   skipFine?: boolean;
@@ -47,9 +50,8 @@ export type WorkerRefineMessage = {
   type: 'refine';
   magnitudes: Float32Array;
   scoreRangeHz: [number, number];
-  uiUpdateEveryMs: number;
   scoreMode: ShaperScoreMode;
-  cornering?: WorkerCorneringSettings;
+  cornering: WorkerCorneringSettings;
   startParams: ShaperParams;
   steps?: number;
 };
@@ -353,7 +355,7 @@ const fineStep = (
 };
 
 const refine = (msg: WorkerRefineMessage) => {
-  const { magnitudes, uiUpdateEveryMs, scoreRangeHz } = msg;
+  const { magnitudes, scoreRangeHz } = msg;
   const safetyCapSteps = msg.steps ?? 20_000;
   const start = msg.startParams;
   const cornering = toCorneringSettings(msg.cornering);
@@ -388,7 +390,7 @@ const refine = (msg: WorkerRefineMessage) => {
     iterationsDone = i + 1;
 
     const now = performance.now();
-    if (now - lastUiUpdate > uiUpdateEveryMs) {
+    if (now - lastUiUpdate > OPTIMIZER_UPDATE_EVERY_MS) {
       lastUiUpdate = now;
       const out: WorkerProgressMessage = {
         type: 'progress',
@@ -424,7 +426,7 @@ const refine = (msg: WorkerRefineMessage) => {
 };
 
 const bruteForce = (msg: WorkerStartMessage) => {
-  const { magnitudes, uiUpdateEveryMs, scoreMode, scoreRangeHz } = msg;
+  const { magnitudes, scoreMode, scoreRangeHz } = msg;
   const cornering = toCorneringSettings(msg.cornering);
   const types = (msg.candidateTypes?.length ? msg.candidateTypes : SEARCH_TYPES).filter(
     (t): t is InputShaperType => SEARCH_TYPES.includes(t)
@@ -505,7 +507,7 @@ const bruteForce = (msg: WorkerStartMessage) => {
     }
 
     const now = performance.now();
-    if (now - lastUiUpdate > uiUpdateEveryMs) {
+    if (now - lastUiUpdate > OPTIMIZER_UPDATE_EVERY_MS) {
       lastUiUpdate = now;
       const out: WorkerProgressMessage = {
         type: 'progress',
@@ -573,7 +575,7 @@ const bruteForce = (msg: WorkerStartMessage) => {
     }
 
     const now = performance.now();
-    if (now - lastUiUpdate > uiUpdateEveryMs) {
+    if (now - lastUiUpdate > OPTIMIZER_UPDATE_EVERY_MS) {
       lastUiUpdate = now;
       const out: WorkerProgressMessage = {
         type: 'progress',
