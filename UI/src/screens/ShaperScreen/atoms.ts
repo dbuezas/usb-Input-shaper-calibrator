@@ -3,7 +3,7 @@ import { FIXED_SAMPLE_RATE, FREQUENCY_SLIDER_RANGE_HZ } from '@/constants';
 import { frequencyRangeAtom } from '@/atoms/frequency-range';
 import {
   applyShaperToMagnitudeSpectrum,
-  computeMarlinShaperTaps,
+  computeDelayCentroidSeconds,
   type CorneringModel,
   type CorneringSettings,
   type InputShaperType,
@@ -89,13 +89,15 @@ export const currentMaxAccelAtom = atom((get) => {
 });
 
 export const delayCentroidSecondsAtom = atom((get) => {
-  const { a, t } = computeMarlinShaperTaps(get(shaperParamsAtom));
-  const sumA = a.reduce((s, v) => s + v, 0);
-  if (!Number.isFinite(sumA) || sumA === 0) return undefined;
-  let centroid = 0;
-  for (let i = 0; i < a.length; i++) centroid += a[i] * t[i];
-  centroid /= sumA;
-  return Number.isFinite(centroid) ? centroid : undefined;
+  return computeDelayCentroidSeconds(get(shaperParamsAtom));
 });
+
+export type OptimisationHistoryEntry = {
+  params: ShaperParams;
+  score: number;
+  recordedAtMs: number;
+};
+
+export const optimisationHistoryAtom = atom<OptimisationHistoryEntry[]>([]);
 
 export const analysisRangeAtom = atom(FREQUENCY_SLIDER_RANGE_HZ);

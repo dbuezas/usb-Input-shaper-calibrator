@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useAtomValue } from 'jotai';
+import { useAtom, useAtomValue } from 'jotai';
 import { SpectrumPlot } from '@/visualisations/SpectrumPlot';
 import {
   FREQUENCY_SLIDER_RANGE_HZ,
@@ -7,6 +7,7 @@ import {
   SPECTROGRAM_WATERFALL_HEIGHT,
 } from '@/constants';
 import { ExplainTooltip } from '@/components/ExplainTooltip';
+import { ScatterPlot } from '@/visualisations/ScatterPlot';
 import { computeMarlinShaperTaps } from './input-shaper';
 import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
 import {
@@ -14,6 +15,7 @@ import {
   currentMaxAccelAtom,
   currentScoreAtom,
   delayCentroidSecondsAtom,
+  optimisationHistoryAtom,
   shapedSpectrumAtom,
   shaperF0Atom,
   shaperScoreModeAtom,
@@ -21,15 +23,16 @@ import {
   shaperVtolAtom,
   shaperZetaAtom,
 } from './atoms';
+import { computeDelayCentroidSeconds, type InputShaperType } from './input-shaper';
 
 export default function ShaperPlots() {
   const width = SPECTROGRAM_PLOT_WIDTH;
   const height = SPECTROGRAM_WATERFALL_HEIGHT;
 
-  const type = useAtomValue(shaperTypeAtom);
-  const f0 = useAtomValue(shaperF0Atom);
-  const zeta = useAtomValue(shaperZetaAtom);
-  const vtol = useAtomValue(shaperVtolAtom);
+  const [type, setType] = useAtom(shaperTypeAtom);
+  const [f0, setF0] = useAtom(shaperF0Atom);
+  const [zeta, setZeta] = useAtom(shaperZetaAtom);
+  const [vtol, setVtol] = useAtom(shaperVtolAtom);
   const scoreMode = useAtomValue(shaperScoreModeAtom);
 
   const maxHoldSpectrum = useAtomValue(spectrogramMaxHoldAtom);
@@ -37,6 +40,46 @@ export default function ShaperPlots() {
   const currentScore = useAtomValue(currentScoreAtom);
   const currentMaxAccel = useAtomValue(currentMaxAccelAtom);
   const delayCentroidSeconds = useAtomValue(delayCentroidSecondsAtom);
+  const optimisationHistory = useAtomValue(optimisationHistoryAtom);
+
+  const typeColor: Record<InputShaperType, string> = {
+    zv: 'rgba(0, 220, 255, 0.85)',
+    zvd: 'rgba(0, 255, 120, 0.85)',
+    zvdd: 'rgba(255, 200, 0, 0.85)',
+    zvddd: 'rgba(255, 120, 0, 0.85)',
+    mzv: 'rgba(255, 0, 200, 0.85)',
+    ei: 'rgba(180, 140, 255, 0.85)',
+    '2hei': 'rgba(255, 90, 140, 0.85)',
+    '3hei': 'rgba(120, 200, 255, 0.85)',
+  };
+
+  const historyPoints = optimisationHistory
+    .map((h) => {
+      const centroidSec = computeDelayCentroidSeconds(h.params);
+      if (centroidSec == null) return null;
+      const centroidMs = centroidSec * 1000;
+      const clickToSelect = () => {
+        setType(h.params.type);
+        setF0(h.params.fHz);
+        setZeta(h.params.zeta);
+        setVtol(h.params.vtol);
+      };
+      return {
+        x: centroidMs,
+        y: h.score,
+        color: typeColor[h.params.type],
+        title: h.params.type.toUpperCase(),
+        lines: [
+          `centroid: ${centroidMs.toFixed(2)} ms`,
+          `score: ${h.score.toFixed(9)}`,
+          `f0: ${h.params.fHz.toFixed(2)} Hz`,
+          `zeta: ${h.params.zeta.toFixed(3)}`,
+          `vtol: ${h.params.vtol.toFixed(3)}`,
+        ],
+        onClick: clickToSelect,
+      };
+    })
+    .filter((v): v is NonNullable<typeof v> => Boolean(v));
 
   const optimiserWorkersRef = useRef<Worker[]>([]);
   const cancelRef = useRef(false);
@@ -211,6 +254,22 @@ export default function ShaperPlots() {
           mm/s²
         </div>
       </div>
+
+      {historyPoints.length > 0 && (
+        <div>
+          <h4 className="mb-2 font-semibold">Optimiser Results: Delay Centroid vs Score</h4>
+          <div className="text-muted-foreground mb-2 text-xs">
+            Each dot is a new best-so-far candidate found during the optimiser run (lower score is
+            better). X axis is delay centroid (ms).
+          </div>
+          <ScatterPlot
+            points={historyPoints}
+            width={width}
+            height={height}
+            xTickFormat={(v) => `${Math.round(v)}`}
+          />
+        </div>
+      )}
 
       <div className="border-border mt-4 rounded-lg border p-3">
         <div className="text-muted-foreground text-sm">Taps</div>

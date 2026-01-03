@@ -24,6 +24,8 @@ import {
   corneringJerkAtom,
   corneringJdAtom,
   analysisRangeAtom,
+  optimisationHistoryAtom,
+  type OptimisationHistoryEntry,
 } from './atoms';
 
 const ALL_SHAPER_TYPES: InputShaperType[] = [
@@ -61,10 +63,38 @@ export default function useOptimisers() {
   const [isOptimising, setIsOptimising] = useState(false);
   const [optimiseProgress, setOptimiseProgress] = useState<WorkerProgressMessage | null>(null);
   const [bestByType, setBestByType] = useState<BestByType>({});
+  const [, setOptimisationHistory] = useAtom(optimisationHistoryAtom);
   const [optimisePreviewMode, setOptimisePreviewMode] = useState<'best' | 'current'>('current');
   const optimisePreviewModeRef = useRef<'best' | 'current'>('best');
   const optimiserWorkersRef = useRef<Worker[]>([]);
   const cancelRef = useRef(false);
+  const lastBestByTypeRef = useRef<BestByType>({});
+  const seenHistoryKeysRef = useRef<Set<string>>(new Set());
+
+  const recordBestByType = (next: BestByType) => {
+    const now = performance.now();
+    const prev = lastBestByTypeRef.current;
+
+    const newEntries: OptimisationHistoryEntry[] = [];
+    for (const [typeKey, result] of Object.entries(next) as [
+      InputShaperType,
+      OptimisationResult,
+    ][]) {
+      const prevResult = prev[typeKey];
+      if (prevResult && prevResult.score === result.score) continue;
+
+      const p = result.params;
+      const key = `${p.type}:${p.fHz.toFixed(4)}:${p.zeta.toFixed(6)}:${p.vtol.toFixed(6)}:${result.score.toFixed(12)}`;
+      if (seenHistoryKeysRef.current.has(key)) continue;
+      seenHistoryKeysRef.current.add(key);
+      newEntries.push({ params: p, score: result.score, recordedAtMs: now });
+    }
+
+    if (newEntries.length) {
+      setOptimisationHistory((existing) => [...existing, ...newEntries]);
+    }
+    lastBestByTypeRef.current = next;
+  };
 
   useEffect(() => {
     cancelRef.current = false;
@@ -97,6 +127,9 @@ export default function useOptimisers() {
     if (!maxHoldSpectrum.length) return;
     setIsOptimising(true);
     cancelRef.current = false;
+    setOptimisationHistory([]);
+    lastBestByTypeRef.current = {};
+    seenHistoryKeysRef.current = new Set();
 
     const magnitudes = maxHoldSpectrum;
 
@@ -179,7 +212,9 @@ export default function useOptimisers() {
 
                 const aggregate = computeAggregateProgress();
                 if (aggregate) setOptimiseProgress(aggregate);
-                setBestByType(mergeBestByType());
+                const merged = mergeBestByType();
+                setBestByType(merged);
+                recordBestByType(merged);
 
                 const previewParams =
                   optimisePreviewModeRef.current === 'current'
@@ -197,7 +232,9 @@ export default function useOptimisers() {
               case 'done': {
                 doneCount++;
                 if (msg.bestByType) perWorkerBestByType.set(worker, msg.bestByType);
-                setBestByType(mergeBestByType());
+                const merged = mergeBestByType();
+                setBestByType(merged);
+                recordBestByType(merged);
                 if (msg.best && (!finalBest || msg.best.score < finalBest.score)) {
                   finalBest = msg.best;
                 }
@@ -243,6 +280,9 @@ export default function useOptimisers() {
     if (!maxHoldSpectrum.length) return;
     setIsOptimising(true);
     cancelRef.current = false;
+    setOptimisationHistory([]);
+    lastBestByTypeRef.current = {};
+    seenHistoryKeysRef.current = new Set();
 
     const magnitudes = maxHoldSpectrum;
 
@@ -263,7 +303,10 @@ export default function useOptimisers() {
           switch (msg.type) {
             case 'progress': {
               setOptimiseProgress(msg);
-              if (msg.bestByType) setBestByType(msg.bestByType);
+              if (msg.bestByType) {
+                setBestByType(msg.bestByType);
+                recordBestByType(msg.bestByType);
+              }
 
               const previewParams =
                 optimisePreviewModeRef.current === 'current'
@@ -285,7 +328,11 @@ export default function useOptimisers() {
                 setZeta(msg.best.params.zeta);
                 setVtol(msg.best.params.vtol);
               }
-              if (msg.bestByType) setBestByType({ ...bestByType, ...msg.bestByType });
+              if (msg.bestByType) {
+                const merged = { ...bestByType, ...msg.bestByType };
+                setBestByType(merged);
+                recordBestByType(merged);
+              }
               if (settled) return;
               settled = true;
               cleanup?.();
@@ -335,6 +382,9 @@ export default function useOptimisers() {
     if (!maxHoldSpectrum.length) return;
     setIsOptimising(true);
     cancelRef.current = false;
+    setOptimisationHistory([]);
+    lastBestByTypeRef.current = {};
+    seenHistoryKeysRef.current = new Set();
 
     const magnitudes = maxHoldSpectrum;
 
@@ -355,7 +405,10 @@ export default function useOptimisers() {
           switch (msg.type) {
             case 'progress': {
               setOptimiseProgress(msg);
-              if (msg.bestByType) setBestByType(msg.bestByType);
+              if (msg.bestByType) {
+                setBestByType(msg.bestByType);
+                recordBestByType(msg.bestByType);
+              }
 
               const previewParams =
                 optimisePreviewModeRef.current === 'current'
@@ -377,7 +430,11 @@ export default function useOptimisers() {
                 setZeta(msg.best.params.zeta);
                 setVtol(msg.best.params.vtol);
               }
-              if (msg.bestByType) setBestByType({ ...bestByType, ...msg.bestByType });
+              if (msg.bestByType) {
+                const merged = { ...bestByType, ...msg.bestByType };
+                setBestByType(merged);
+                recordBestByType(merged);
+              }
               if (settled) return;
               settled = true;
               cleanup?.();
