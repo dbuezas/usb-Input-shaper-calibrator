@@ -23,8 +23,8 @@ import {
   corneringScvAtom,
   corneringJerkAtom,
   corneringJdAtom,
+  analysisRangeAtom,
 } from './atoms';
-import { analysisRangeAtom } from './analysis-range';
 
 const binToHz = (bin: number, bins: number) => bin * (FIXED_SAMPLE_RATE / (2 * (bins - 1)));
 const estimatePeakHz = (magnitudes: Float32Array) => {

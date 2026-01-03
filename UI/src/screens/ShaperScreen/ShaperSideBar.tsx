@@ -1,22 +1,16 @@
 import { useAtom, useAtomValue } from 'jotai';
 import {
-  CORNERING_JUNCTION_DEVIATION_MAX_MM,
-  CORNERING_JUNCTION_DEVIATION_MIN_MM,
-  CORNERING_SPEED_MAX_MM_S,
-  CORNERING_SPEED_MIN_MM_S,
-  SHAPER_F0_MAX_HZ,
-  SHAPER_F0_MIN_HZ,
-  SHAPER_VTOL_MAX,
-  SHAPER_VTOL_MIN,
-  SHAPER_ZETA_MAX,
-  SHAPER_ZETA_MIN,
+  CORNERING_JUNCTION_DEVIATION_RANGE_MM,
+  CORNERING_SPEED_RANGE_MM_S,
+  SHAPER_F0_RANGE_HZ,
+  SHAPER_VTOL_RANGE,
+  SHAPER_ZETA_RANGE,
 } from '@/constants';
 import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
 import { ExplainTooltip } from '@/components/ExplainTooltip';
 import { cn } from '@/lib/utils';
 import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
-import { analysisRangeAtom } from './analysis-range';
 import {
   shaperTypeAtom,
   shaperF0Atom,
@@ -27,6 +21,7 @@ import {
   corneringScvAtom,
   corneringJerkAtom,
   corneringJdAtom,
+  analysisRangeAtom,
 } from './atoms';
 import useOptimisers from './optimisers';
 import { SEARCH_TYPES } from './shaper-optimiser.worker';
@@ -337,7 +332,7 @@ export default function ShaperSideBar() {
         <div className="mt-3">
           <Slider
             min={0}
-            max={SHAPER_F0_MAX_HZ}
+            max={SHAPER_F0_RANGE_HZ[1]}
             step={1}
             value={analysisRange}
             onValueChange={(v: [number, number]) => setAnalysisRange(v)}
@@ -400,11 +395,11 @@ export default function ShaperSideBar() {
               </label>
               <div className="mt-3">
                 <Slider
-                  min={CORNERING_SPEED_MIN_MM_S}
-                  max={CORNERING_SPEED_MAX_MM_S}
+                  min={CORNERING_SPEED_RANGE_MM_S[0]}
+                  max={CORNERING_SPEED_RANGE_MM_S[1]}
                   step={0.5}
                   value={[corneringScv]}
-                  onValueChange={(v) => setCorneringScv(v[0] ?? 5)}
+                  onValueChange={(v) => setCorneringScv(v[0])}
                   className="w-full"
                 />
               </div>
@@ -418,11 +413,11 @@ export default function ShaperSideBar() {
               </label>
               <div className="mt-3">
                 <Slider
-                  min={CORNERING_SPEED_MIN_MM_S}
-                  max={CORNERING_SPEED_MAX_MM_S}
+                  min={CORNERING_SPEED_RANGE_MM_S[0]}
+                  max={CORNERING_SPEED_RANGE_MM_S[1]}
                   step={0.5}
                   value={[corneringJerk]}
-                  onValueChange={(v) => setCorneringJerk(v[0] ?? 10)}
+                  onValueChange={(v) => setCorneringJerk(v[0])}
                   className="w-full"
                 />
               </div>
@@ -435,11 +430,11 @@ export default function ShaperSideBar() {
               </label>
               <div className="mt-3">
                 <Slider
-                  min={CORNERING_JUNCTION_DEVIATION_MIN_MM}
-                  max={CORNERING_JUNCTION_DEVIATION_MAX_MM}
+                  min={CORNERING_JUNCTION_DEVIATION_RANGE_MM[0]}
+                  max={CORNERING_JUNCTION_DEVIATION_RANGE_MM[1]}
                   step={0.001}
                   value={[corneringJd]}
-                  onValueChange={(v) => setCorneringJd(v[0] ?? 0.02)}
+                  onValueChange={(v) => setCorneringJd(v[0])}
                   className="w-full"
                 />
               </div>
@@ -713,8 +708,8 @@ export default function ShaperSideBar() {
           </ExplainTooltip>
           <div className="mt-3">
             <Slider
-              min={SHAPER_F0_MIN_HZ}
-              max={SHAPER_F0_MAX_HZ}
+              min={SHAPER_F0_RANGE_HZ[0]}
+              max={SHAPER_F0_RANGE_HZ[1]}
               step={0.5}
               value={[f0]}
               onValueChange={(v) => setF0(v[0])}
@@ -735,11 +730,11 @@ export default function ShaperSideBar() {
           </ExplainTooltip>
           <div className="mt-3">
             <Slider
-              min={SHAPER_ZETA_MIN}
-              max={SHAPER_ZETA_MAX}
+              min={SHAPER_ZETA_RANGE[0]}
+              max={SHAPER_ZETA_RANGE[1]}
               step={0.005}
               value={[zeta]}
-              onValueChange={(v) => setZeta(v[0] ?? 0.1)}
+              onValueChange={(v) => setZeta(v[0])}
               className="w-full"
             />
           </div>
@@ -763,11 +758,11 @@ export default function ShaperSideBar() {
           </ExplainTooltip>
           <div className="mt-3">
             <Slider
-              min={SHAPER_VTOL_MIN}
-              max={SHAPER_VTOL_MAX}
+              min={SHAPER_VTOL_RANGE[0]}
+              max={SHAPER_VTOL_RANGE[1]}
               step={0.005}
               value={[vtol]}
-              onValueChange={(v) => setVtol(v[0] ?? 0.1)}
+              onValueChange={(v) => setVtol(v[0])}
               className="w-full"
               disabled={
                 type === 'zv' ||

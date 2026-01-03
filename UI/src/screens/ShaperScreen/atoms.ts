@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
-import { FIXED_SAMPLE_RATE } from '@/constants';
-import { clampedFrequencyRangeAtom } from '@/atoms/frequency-range';
+import { FIXED_SAMPLE_RATE, FREQUENCY_SLIDER_RANGE_HZ } from '@/constants';
+import { frequencyRangeAtom } from '@/atoms/frequency-range';
 import {
   applyShaperToMagnitudeSpectrum,
   computeMarlinShaperTaps,
@@ -59,7 +59,7 @@ export const currentScoreAtom = atom((get) => {
   const cornering = get(corneringSettingsAtom);
   const shaped = applyShaperToMagnitudeSpectrum(params, base);
   const freqStepHz = FIXED_SAMPLE_RATE / (2 * (shaped.length - 1));
-  const [fMinHz, fMaxHz] = get(clampedFrequencyRangeAtom);
+  const [fMinHz, fMaxHz] = get(frequencyRangeAtom);
   const minBins = Math.max(0, Math.floor(fMinHz / freqStepHz));
   const maxBins = Math.min(shaped.length, Math.floor(fMaxHz / freqStepHz) + 1);
 
@@ -69,7 +69,7 @@ export const currentScoreAtom = atom((get) => {
   } else if (scoreMode === 'variation') {
     if (maxBins - minBins <= 1) return undefined;
     let tv = 0;
-    let prev = shaped[minBins] ?? 0;
+    let prev = shaped[minBins];
     for (let i = minBins + 1; i < maxBins; i++) {
       const next = shaped[i];
       tv += Math.abs(next - prev);
@@ -94,7 +94,9 @@ export const delayCentroidSecondsAtom = atom((get) => {
   const sumA = a.reduce((s, v) => s + v, 0);
   if (!Number.isFinite(sumA) || sumA === 0) return undefined;
   let centroid = 0;
-  for (let i = 0; i < a.length; i++) centroid += (a[i] ?? 0) * (t[i] ?? 0);
+  for (let i = 0; i < a.length; i++) centroid += a[i] * t[i];
   centroid /= sumA;
   return Number.isFinite(centroid) ? centroid : undefined;
 });
+
+export const analysisRangeAtom = atom(FREQUENCY_SLIDER_RANGE_HZ);

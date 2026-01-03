@@ -1,4 +1,4 @@
-import { FIXED_SAMPLE_RATE } from '../../constants';
+import { FIXED_SAMPLE_RATE } from '@/constants';
 
 export type InputShaperType = 'zv' | 'zvd' | 'zvdd' | 'zvddd' | 'ei' | '2hei' | '3hei' | 'mzv';
 
@@ -124,6 +124,8 @@ export const shaperMagnitudeAtHz = (params: ShaperParams, freqHz: number) => {
   return Math.sqrt(re * re + im * im);
 };
 
+const binToHz = (bin: number, bins: number) => bin * (FIXED_SAMPLE_RATE / (2 * (bins - 1)));
+
 export const applyShaperToMagnitudeSpectrum = (params: ShaperParams, magnitudes: Float32Array) => {
   const out = new Float32Array(magnitudes.length);
   for (let i = 0; i < magnitudes.length; i++) {
@@ -151,7 +153,7 @@ export const flatnessScoreFromMagnitudeSpectrum = (
     const f = binToHz(i, shaped.length);
     if (f < fMin) continue;
     if (f > fMax) break;
-    sum += shaped[i] ?? 0;
+    sum += shaped[i];
     count++;
   }
   if (!count) return Number.POSITIVE_INFINITY;
@@ -164,7 +166,7 @@ export const flatnessScoreFromMagnitudeSpectrum = (
     const f = binToHz(i, shaped.length);
     if (f < fMin) continue;
     if (f > fMax) break;
-    const d = (shaped[i] ?? 0) - mean;
+    const d = shaped[i] - mean;
     sse += d * d;
     seen++;
   }
@@ -190,8 +192,6 @@ export const applyShaperToWelchPsd = (params: ShaperParams, psd: number[]) => {
 
 const TEST_DAMPING_RATIOS = [0.075, 0.1, 0.15] as const;
 const SHAPER_VIBRATION_REDUCTION = 20;
-
-const binToHz = (bin: number, bins: number) => bin * (FIXED_SAMPLE_RATE / (2 * (bins - 1)));
 
 const estimateShaperVals = (
   a: number[],

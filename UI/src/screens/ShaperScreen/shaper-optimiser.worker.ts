@@ -8,12 +8,9 @@ import {
 } from '@/screens/ShaperScreen/input-shaper';
 import {
   FIXED_SAMPLE_RATE,
-  SHAPER_F0_MAX_HZ,
-  SHAPER_F0_MIN_HZ,
-  SHAPER_VTOL_MAX,
-  SHAPER_VTOL_MIN,
-  SHAPER_ZETA_MAX,
-  SHAPER_ZETA_MIN,
+  SHAPER_F0_RANGE_HZ,
+  SHAPER_VTOL_RANGE,
+  SHAPER_ZETA_RANGE,
 } from '@/constants';
 
 export type WorkerCorneringSettings =
@@ -95,8 +92,6 @@ export const SEARCH_TYPES: InputShaperType[] = [
 const SEARCH_F_STEP_HZ = 1;
 const SEARCH_ZETAS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35];
 const SEARCH_VTOLS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35];
-const SEARCH_F_MIN_ABS_HZ = SHAPER_F0_MIN_HZ;
-const SEARCH_F_MAX_ABS_HZ = SHAPER_F0_MAX_HZ;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const isEiFamily = (t: InputShaperType) => t === 'ei' || t === '2hei' || t === '3hei';
@@ -385,8 +380,8 @@ const fineStep = (
 
     const clampAxis = (v: number) => {
       if (axis === 'fHz') return clamp(v, bounds.fMin, bounds.fMax);
-      if (axis === 'zeta') return clamp(v, SHAPER_ZETA_MIN, SHAPER_ZETA_MAX);
-      return clamp(v, SHAPER_VTOL_MIN, SHAPER_VTOL_MAX);
+      if (axis === 'zeta') return clamp(v, ...SHAPER_ZETA_RANGE);
+      return clamp(v, ...SHAPER_VTOL_RANGE);
     };
 
     const plus = clampAxis(base + step);
@@ -455,7 +450,7 @@ const refine = (msg: WorkerRefineMessage) => {
   const start = msg.startParams;
   const cornering = toCorneringSettings(msg.cornering);
 
-  const bounds = { fMin: SEARCH_F_MIN_ABS_HZ, fMax: SEARCH_F_MAX_ABS_HZ };
+  const bounds = { fMin: SHAPER_F0_RANGE_HZ[0], fMax: SHAPER_F0_RANGE_HZ[1] };
 
   let state: FineState = {
     type: start.type,
@@ -531,8 +526,8 @@ const bruteForce = (msg: WorkerStartMessage) => {
   const zetas = SEARCH_ZETAS;
   const vtols = SEARCH_VTOLS;
 
-  const fMin = SEARCH_F_MIN_ABS_HZ;
-  const fMax = SEARCH_F_MAX_ABS_HZ;
+  const fMin = SHAPER_F0_RANGE_HZ[0];
+  const fMax = SHAPER_F0_RANGE_HZ[1];
 
   // Coarse iteration count
   let coarseTotal = 0;

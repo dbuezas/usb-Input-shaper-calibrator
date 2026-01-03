@@ -1,6 +1,6 @@
 import { serialChannel, type RawDataMessage } from './messages';
 import SerialWorker from './serial-worker?worker';
-import { SERIAL_BAUD_RATE, BATCH_SIZE } from '../../constants';
+import { BATCH_SIZE, SERIAL_BAUD_RATE } from '@/constants';
 const serialWorker = new SerialWorker();
 
 export interface DataSource {

@@ -4,7 +4,7 @@ import {
   SIMULATION_AMPLITUDE,
   SIMULATION_MAX_FREQUENCY,
   SIMULATION_MIN_FREQUENCY,
-} from '../../constants';
+} from '@/constants';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

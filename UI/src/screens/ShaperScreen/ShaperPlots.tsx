@@ -2,8 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useAtomValue } from 'jotai';
 import { SpectrumPlot } from '@/visualisations/SpectrumPlot';
 import {
-  MAX_FREQUENCY_SLIDER,
-  MIN_FREQUENCY_SLIDER,
+  FREQUENCY_SLIDER_RANGE_HZ,
   SPECTROGRAM_PLOT_WIDTH,
   SPECTROGRAM_WATERFALL_HEIGHT,
 } from '@/constants';
@@ -11,6 +10,7 @@ import { ExplainTooltip } from '@/components/ExplainTooltip';
 import { computeMarlinShaperTaps } from './input-shaper';
 import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
 import {
+  analysisRangeAtom,
   currentMaxAccelAtom,
   currentScoreAtom,
   delayCentroidSecondsAtom,
@@ -21,7 +21,6 @@ import {
   shaperVtolAtom,
   shaperZetaAtom,
 } from './atoms';
-import { analysisRangeAtom } from './analysis-range';
 
 export default function ShaperPlots() {
   const width = SPECTROGRAM_PLOT_WIDTH;
@@ -164,7 +163,7 @@ export default function ShaperPlots() {
           ]}
           height={height}
           width={width}
-          freqRange={[MIN_FREQUENCY_SLIDER, MAX_FREQUENCY_SLIDER]}
+          freqRange={FREQUENCY_SLIDER_RANGE_HZ}
           markers={[
             { freqHz: analysisRange[0], color: 'rgba(255,255,255,0.75)' },
             { freqHz: analysisRange[1], color: 'rgba(255,255,255,0.75)' },

@@ -1,11 +1,9 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect } from 'react';
 import type { SpectrumSliceMessage } from '@/screens/MeasureScreen/messages';
 import { spectrogramChannel } from '@/screens/MeasureScreen/messages';
 import { atom, useAtomValue, useSetAtom } from 'jotai';
 import {
   ACTUAL_RESOLUTION,
-  MAX_FREQUENCY_SLIDER,
-  MIN_FREQUENCY_SLIDER,
   SPECTROGRAM_MAX_TIME_SLICES,
   SPECTROGRAM_PLOT_WIDTH,
   SPECTROGRAM_WATERFALL_HEIGHT,
@@ -14,6 +12,7 @@ import type { DataSource } from '@/screens/MeasureScreen/data-source';
 import { SpectrumPlot } from '@/visualisations/SpectrumPlot';
 import { Waterfall } from '@/visualisations/Waterfall';
 import { historicPeakAtom, peakAtom, spectrogramMaxHoldAtom } from './atoms';
+import { frequencyRangeAtom } from '@/atoms/frequency-range';
 
 const spectrogramAtom = atom<Float32Array>(new Float32Array());
 
@@ -57,10 +56,7 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
   const setHistoricPeak = useSetAtom(historicPeakAtom);
   const width = SPECTROGRAM_PLOT_WIDTH;
   const height = SPECTROGRAM_WATERFALL_HEIGHT;
-  const freqRange = useMemo(
-    () => [MIN_FREQUENCY_SLIDER, MAX_FREQUENCY_SLIDER] as [number, number],
-    []
-  );
+  const freqRange = useAtomValue(frequencyRangeAtom);
   const spectrogramScaleMax = useAtomValue(spectrogramScaleMaxAtom);
 
   useEffect(() => {
