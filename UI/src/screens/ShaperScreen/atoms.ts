@@ -4,9 +4,6 @@ import { frequencyRangeAtom } from '@/atoms/frequency-range';
 import {
   applyShaperToMagnitudeSpectrum,
   computeMarlinShaperTaps,
-  flatnessScoreFromMagnitudeSpectrum,
-  klipperScoreFromMagnitudeSpectrum,
-  suggestedMaxAccel,
   type CorneringModel,
   type CorneringSettings,
   type InputShaperType,
@@ -14,6 +11,8 @@ import {
   type ShaperScoreMode,
 } from './input-shaper';
 import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
+import { flatnessScoreFromMagnitudeSpectrum } from './shaper-scores/flatness';
+import { klipperScoreFromMagnitudeSpectrum, suggestedMaxAccel } from './shaper-scores/klipper';
 
 export const shaperTypeAtom = atom<InputShaperType>('zvd');
 export const shaperF0Atom = atom(55);

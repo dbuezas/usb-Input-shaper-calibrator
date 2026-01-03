@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
-import { FIXED_SAMPLE_RATE, WEB_WORKER_THREADS } from '@/constants';
+import { WEB_WORKER_THREADS } from '@/constants';
 import type { InputShaperType } from './input-shaper';
 import ShaperOptimiserWorker from './shaper-optimiser.worker?worker';
 import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
@@ -25,22 +25,6 @@ import {
   corneringJdAtom,
   analysisRangeAtom,
 } from './atoms';
-
-const binToHz = (bin: number, bins: number) => bin * (FIXED_SAMPLE_RATE / (2 * (bins - 1)));
-const estimatePeakHz = (magnitudes: Float32Array) => {
-  const fMinHz = 0;
-  const fMaxHz = FIXED_SAMPLE_RATE / 2;
-  const freqStepHz = FIXED_SAMPLE_RATE / (2 * (magnitudes.length - 1));
-  const start = Math.max(0, Math.floor(fMinHz / freqStepHz));
-  const end = Math.min(magnitudes.length - 1, Math.floor(fMaxHz / freqStepHz));
-  if (end <= start) return 55;
-
-  let peakIdx = start;
-  for (let i = start + 1; i <= end; i++) {
-    if ((magnitudes[i] ?? 0) > (magnitudes[peakIdx] ?? 0)) peakIdx = i;
-  }
-  return binToHz(peakIdx, magnitudes.length);
-};
 
 const ALL_SHAPER_TYPES: InputShaperType[] = [
   'zv',
@@ -115,7 +99,6 @@ export default function useOptimisers() {
     cancelRef.current = false;
 
     const magnitudes = maxHoldSpectrum;
-    const peakHz = estimatePeakHz(magnitudes);
 
     for (const w of optimiserWorkersRef.current) w.terminate();
     optimiserWorkersRef.current = [];
@@ -229,7 +212,6 @@ export default function useOptimisers() {
           worker.postMessage({
             type: 'start',
             magnitudes,
-            peakHz,
             scoreRangeHz,
             uiUpdateEveryMs: 75,
             scoreMode,
@@ -263,7 +245,6 @@ export default function useOptimisers() {
     cancelRef.current = false;
 
     const magnitudes = maxHoldSpectrum;
-    const peakHz = estimatePeakHz(magnitudes);
 
     for (const w of optimiserWorkersRef.current) w.terminate();
     optimiserWorkersRef.current = [];
@@ -317,7 +298,6 @@ export default function useOptimisers() {
         worker.postMessage({
           type: 'start',
           magnitudes,
-          peakHz,
           scoreRangeHz,
           uiUpdateEveryMs: 75,
           scoreMode,
@@ -357,7 +337,6 @@ export default function useOptimisers() {
     cancelRef.current = false;
 
     const magnitudes = maxHoldSpectrum;
-    const peakHz = estimatePeakHz(magnitudes);
 
     for (const w of optimiserWorkersRef.current) w.terminate();
     optimiserWorkersRef.current = [];
@@ -411,7 +390,6 @@ export default function useOptimisers() {
         worker.postMessage({
           type: 'refine',
           magnitudes,
-          peakHz,
           scoreRangeHz,
           uiUpdateEveryMs: 50,
           scoreMode,

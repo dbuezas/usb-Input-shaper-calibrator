@@ -163,14 +163,14 @@ export default function MeasureScreen() {
           title: 'Peak',
           accurate: (
             <>
-              Current dominant resonance frequency detected from the live spectrum for the selected
-              axis. <i>max</i> is the highest peak seen so far in this session.
+              Highest peak seen so far in this session. This is usually the “main ringing”
+              frequency. If it’s stable, it’s a good starting point for input shaper tuning.
             </>
           ),
           intuition: (
             <>
-              This is usually the “main ringing” frequency. If it’s stable, it’s a good starting
-              point for input shaper tuning.
+              <i>now</i> is the instantaneous dominant resonance frequency detected from the live
+              spectrum for the selected axis.
             </>
           ),
         },
@@ -178,14 +178,14 @@ export default function MeasureScreen() {
           <>
             <div>
               <span className="tabular-nums">
-                <AtomValue atom={peakFrequencyAtom} />
+                <AtomValue atom={historicPeakFrequencyAtom} />
               </span>{' '}
               Hz
             </div>
             <div className="text-muted-foreground mt-1 text-xs">
-              max:{' '}
+              now:{' '}
               <span className="tabular-nums">
-                <AtomValue atom={historicPeakFrequencyAtom} />
+                <AtomValue atom={peakFrequencyAtom} />
               </span>{' '}
               Hz
             </div>

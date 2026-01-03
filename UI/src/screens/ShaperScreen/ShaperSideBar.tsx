@@ -23,7 +23,7 @@ import {
   corneringJdAtom,
   analysisRangeAtom,
 } from './atoms';
-import useOptimisers from './optimisers';
+import useOptimisers from './useOptimizers';
 import { SEARCH_TYPES } from './shaper-optimiser.worker';
 
 export default function ShaperSideBar() {
