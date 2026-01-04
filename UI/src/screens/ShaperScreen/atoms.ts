@@ -4,7 +4,6 @@ import { frequencyRangeAtom } from '@/atoms/frequency-range';
 import {
   applyShaperToMagnitudeSpectrum,
   computeDelayCentroidSeconds,
-  type CorneringModel,
   type CorneringSettings,
   type ShaperParams,
   type ShaperScoreMode,
@@ -22,22 +21,7 @@ export const shaperParamsAtom = atom<ShaperParams>({
 
 export const shaperScoreModeAtom = atom<ShaperScoreMode>('klipper');
 
-export const corneringModelAtom = atom<CorneringModel>('scv');
-export const corneringScvAtom = atom(5);
-export const corneringJerkAtom = atom(10);
-export const corneringJdAtom = atom(0.02);
-
-export const corneringSettingsAtom = atom<CorneringSettings>((get) => {
-  const model = get(corneringModelAtom);
-  switch (model) {
-    case 'scv':
-      return { model: 'scv', scv: get(corneringScvAtom) };
-    case 'jerk':
-      return { model: 'jerk', jerk: get(corneringJerkAtom) };
-    case 'junction_deviation':
-      return { model: 'junction_deviation', junctionDeviation: get(corneringJdAtom) };
-  }
-});
+export const corneringSettingsAtom = atom<CorneringSettings>({ model: 'jerk', value: 10 });
 
 export const shapedSpectrumAtom = atom((get) => {
   const base = get(spectrogramMaxHoldAtom);

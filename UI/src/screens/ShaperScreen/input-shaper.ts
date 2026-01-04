@@ -1,6 +1,16 @@
 import { FIXED_SAMPLE_RATE } from '@/constants';
 
-export type InputShaperType = 'zv' | 'zvd' | 'zvdd' | 'zvddd' | 'ei' | '2hei' | '3hei' | 'mzv';
+export const ALL_SHAPER_TYPES = [
+  '3hei',
+  'zvddd',
+  '2hei',
+  'zvdd',
+  'ei',
+  'zvd',
+  'mzv',
+  'zv',
+] as const;
+export type InputShaperType = (typeof ALL_SHAPER_TYPES)[number];
 
 export type ShaperParams = {
   type: InputShaperType;
@@ -11,12 +21,10 @@ export type ShaperParams = {
 
 export type ShaperScoreMode = 'klipper' | 'flatness' | 'variation';
 
-export type CorneringModel = 'scv' | 'jerk' | 'junction_deviation';
-
 export type CorneringSettings =
-  | { model: 'scv'; scv: number }
-  | { model: 'jerk'; jerk: number }
-  | { model: 'junction_deviation'; junctionDeviation: number };
+  | { model: 'scv'; value: number }
+  | { model: 'jerk'; value: number }
+  | { model: 'junction_deviation'; value: number };
 
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 

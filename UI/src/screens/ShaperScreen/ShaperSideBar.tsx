@@ -14,10 +14,7 @@ import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
 import {
   shaperParamsAtom,
   shaperScoreModeAtom,
-  corneringModelAtom,
-  corneringScvAtom,
-  corneringJerkAtom,
-  corneringJdAtom,
+  corneringSettingsAtom,
   analysisRangeAtom,
 } from './atoms';
 import useOptimisers from './useOptimizers';
@@ -29,10 +26,7 @@ export default function ShaperSideBar() {
   const [isOptimising, setIsOptimizing] = useState(false);
   const [shaperParams, setShaperParams] = useAtom(shaperParamsAtom);
   const [scoreMode, setScoreMode] = useAtom(shaperScoreModeAtom);
-  const [corneringModel, setCorneringModel] = useAtom(corneringModelAtom);
-  const [corneringScv, setCorneringScv] = useAtom(corneringScvAtom);
-  const [corneringJerk, setCorneringJerk] = useAtom(corneringJerkAtom);
-  const [corneringJd, setCorneringJd] = useAtom(corneringJdAtom);
+  const [corneringSettings, setCorneringSettings] = useAtom(corneringSettingsAtom);
 
   const maxHoldSpectrum = useAtomValue(spectrogramMaxHoldAtom);
   const [analysisRange, setAnalysisRange] = useAtom(analysisRangeAtom);
@@ -327,83 +321,84 @@ export default function ShaperSideBar() {
           <Button
             type="button"
             size="sm"
-            variant={corneringModel === 'scv' ? 'secondary' : 'ghost'}
+            variant={corneringSettings.model === 'scv' ? 'secondary' : 'ghost'}
             className="h-8 w-full"
-            aria-pressed={corneringModel === 'scv'}
-            onClick={() => setCorneringModel('scv')}
+            onClick={() => setCorneringSettings({ model: 'scv', value: 5 })}
           >
             SCV
           </Button>
           <Button
             type="button"
             size="sm"
-            variant={corneringModel === 'jerk' ? 'secondary' : 'ghost'}
+            variant={corneringSettings.model === 'jerk' ? 'secondary' : 'ghost'}
             className="h-8 w-full"
-            aria-pressed={corneringModel === 'jerk'}
-            onClick={() => setCorneringModel('jerk')}
+            aria-pressed={corneringSettings.model === 'jerk'}
+            onClick={() => setCorneringSettings({ model: 'jerk', value: 10 })}
           >
             Jerk
           </Button>
           <Button
             type="button"
             size="sm"
-            variant={corneringModel === 'junction_deviation' ? 'secondary' : 'ghost'}
+            variant={corneringSettings.model === 'junction_deviation' ? 'secondary' : 'ghost'}
             className="h-8 w-full"
-            aria-pressed={corneringModel === 'junction_deviation'}
-            onClick={() => setCorneringModel('junction_deviation')}
+            aria-pressed={corneringSettings.model === 'junction_deviation'}
+            onClick={() => setCorneringSettings({ model: 'junction_deviation', value: 0.013 })}
           >
             Junction dev
           </Button>
         </div>
 
         <div className="mt-4 grid gap-4">
-          {corneringModel === 'scv' && (
+          {corneringSettings.model === 'scv' && (
             <div>
               <label className="text-muted-foreground text-sm">
-                SCV: {corneringScv.toFixed(1)} mm/s
+                SCV: {corneringSettings.value.toFixed(1)} mm/s
               </label>
               <div className="mt-3">
                 <Slider
                   min={CORNERING_SPEED_RANGE_MM_S[0]}
                   max={CORNERING_SPEED_RANGE_MM_S[1]}
                   step={0.5}
-                  value={[corneringScv]}
-                  onValueChange={(v) => setCorneringScv(v[0])}
+                  value={[corneringSettings.value]}
+                  onValueChange={([value]) => setCorneringSettings({ model: 'scv', value })}
                   className="w-full"
                 />
               </div>
             </div>
           )}
 
-          {corneringModel === 'jerk' && (
+          {corneringSettings.model === 'jerk' && (
             <div>
               <label className="text-muted-foreground text-sm">
-                Jerk: {corneringJerk.toFixed(1)} mm/s
+                Jerk: {corneringSettings.value.toFixed(1)} mm/s
               </label>
               <div className="mt-3">
                 <Slider
                   min={CORNERING_SPEED_RANGE_MM_S[0]}
                   max={CORNERING_SPEED_RANGE_MM_S[1]}
                   step={0.5}
-                  value={[corneringJerk]}
-                  onValueChange={(v) => setCorneringJerk(v[0])}
+                  value={[corneringSettings.value]}
+                  onValueChange={([value]) => setCorneringSettings({ model: 'jerk', value })}
                   className="w-full"
                 />
               </div>
             </div>
           )}
-          {corneringModel === 'junction_deviation' && (
+          {corneringSettings.model === 'junction_deviation' && (
             <div>
               <label className="text-muted-foreground text-sm">
-                Junction deviation: {corneringJd.toFixed(3)} mm
+                Junction deviation: {corneringSettings.value.toFixed(3)} mm
               </label>
               <div className="mt-3">
                 <Slider
                   min={CORNERING_JUNCTION_DEVIATION_RANGE_MM[0]}
                   max={CORNERING_JUNCTION_DEVIATION_RANGE_MM[1]}
                   step={0.001}
-                  value={[corneringJd]}
-                  onValueChange={(v) => setCorneringJd(v[0])}
+                  value={[corneringSettings.value]}
+                  onValueChange={([value]) =>
+                    setCorneringSettings({ model: 'junction_deviation', value })
+                  }
                   className="w-full"
                 />
               </div>

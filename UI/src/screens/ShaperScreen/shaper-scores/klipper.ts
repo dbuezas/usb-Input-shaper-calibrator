@@ -8,7 +8,7 @@ import {
 export const klipperScoreFromMagnitudeSpectrum = (
   magnitudes: Float32Array,
   params: ShaperParams,
-  cornering: CorneringSettings = { model: 'scv', scv: 5 },
+  cornering: CorneringSettings = { model: 'scv', value: 5 },
   smoothingAccel = 5000,
   freqRangeHz: [number, number] = [0, 200]
 ) => {
@@ -103,8 +103,8 @@ const estimateShaperVals = (
 const klipperSmoothing = (
   a: number[],
   t: number[],
-  accel = 5000,
-  cornering: CorneringSettings = { model: 'scv', scv: 5 }
+  accel: number,
+  cornering: CorneringSettings
 ) => {
   const invD = 1 / a.reduce((s, v) => s + v, 0);
   const halfAccel = accel * 0.5;
@@ -142,18 +142,18 @@ export const suggestedMaxAccel = (
 
 const clampPositive = (v: number, fallback: number) => (Number.isFinite(v) && v > 0 ? v : fallback);
 
-const scvEquivalentAtAccel = (settings: CorneringSettings, accel: number) => {
-  switch (settings.model) {
+const scvEquivalentAtAccel = ({ model, value }: CorneringSettings, accel: number) => {
+  switch (model) {
     case 'scv':
-      return clampPositive(settings.scv, 5);
+      return clampPositive(value, 5);
     case 'jerk':
       // Approximation: classic jerk is a velocity delta allowance at corners.
-      return clampPositive(settings.jerk, 10);
+      return clampPositive(value, 10);
     case 'junction_deviation': {
       // Marlin-style junction deviation: approximate the 90° cornering speed.
       // For θ=90°, sin(θ/2)=sin(45°)=√2/2, giving factor sin/(1-sin) = 1+√2.
       // v ≈ sqrt(a * jd * (1+√2))
-      const jd = clampPositive(settings.junctionDeviation, 0.02);
+      const jd = clampPositive(value, 0.02);
       const a = Math.max(0, accel);
       return Math.sqrt(a * jd * (1 + Math.SQRT2));
     }
