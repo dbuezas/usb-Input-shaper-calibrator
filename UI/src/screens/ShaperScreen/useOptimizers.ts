@@ -12,10 +12,6 @@ import type {
   WorkerStartMessage,
 } from './shaper-optimiser.worker';
 import {
-  shaperTypeAtom,
-  shaperF0Atom,
-  shaperZetaAtom,
-  shaperVtolAtom,
   shaperScoreModeAtom,
   corneringModelAtom,
   corneringScvAtom,
@@ -24,6 +20,7 @@ import {
   analysisRangeAtom,
   optimisationHistoryAtom,
   type OptimisationHistoryEntry,
+  shaperParamsAtom,
 } from './atoms';
 
 const ALL_SHAPER_TYPES: InputShaperType[] = [
@@ -45,10 +42,7 @@ const chunkRoundRobin = <T>(items: T[], chunks: number): T[][] => {
 };
 
 export default function useOptimisers() {
-  const setType = useSetAtom(shaperTypeAtom);
-  const setF0 = useSetAtom(shaperF0Atom);
-  const setZeta = useSetAtom(shaperZetaAtom);
-  const setVtol = useSetAtom(shaperVtolAtom);
+  const setShaperParams = useSetAtom(shaperParamsAtom);
   const scoreMode = useAtomValue(shaperScoreModeAtom);
   const corneringModel = useAtomValue(corneringModelAtom);
   const corneringScv = useAtomValue(corneringScvAtom);
@@ -180,10 +174,7 @@ export default function useOptimisers() {
               const now = performance.now();
               if (previewParams && now - lastUpdateTime > OPTIMIZER_UPDATE_EVERY_MS) {
                 lastUpdateTime = now;
-                setType(previewParams.type);
-                setF0(previewParams.fHz);
-                setZeta(previewParams.zeta);
-                setVtol(previewParams.vtol);
+                setShaperParams(previewParams);
               }
               return;
             }
@@ -201,14 +192,8 @@ export default function useOptimisers() {
                     }
                   }
                 }
-                console.log(finalBest);
                 // Snap UI to the final best result after optimisation finishes.
-                if (finalBest) {
-                  setType(finalBest.params.type);
-                  setF0(finalBest.params.fHz);
-                  setZeta(finalBest.params.zeta);
-                  setVtol(finalBest.params.vtol);
-                }
+                if (finalBest) setShaperParams(finalBest.params);
                 resolve();
               }
             }

@@ -3,6 +3,7 @@ import {
   type CorneringSettings,
   type ShaperParams,
   type ShaperScoreMode,
+  isEiFamily,
 } from '@/screens/ShaperScreen/input-shaper';
 import { SHAPER_F0_RANGE_HZ, SHAPER_VTOL_RANGE, SHAPER_ZETA_RANGE } from '@/constants';
 
@@ -68,7 +69,6 @@ const SEARCH_ZETAS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35];
 const SEARCH_VTOLS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35];
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-const isEiFamily = (t: InputShaperType) => t === 'ei' || t === '2hei' || t === '3hei';
 
 const scoreCandidate = (
   magnitudes: Float32Array,

@@ -17,11 +17,8 @@ import {
   delayCentroidSecondsAtom,
   optimisationHistoryAtom,
   shapedSpectrumAtom,
-  shaperF0Atom,
   shaperScoreModeAtom,
-  shaperTypeAtom,
-  shaperVtolAtom,
-  shaperZetaAtom,
+  shaperParamsAtom,
 } from './atoms';
 import { computeDelayCentroidSeconds, type InputShaperType } from './input-shaper';
 
@@ -29,10 +26,7 @@ export default function ShaperPlots() {
   const width = SPECTROGRAM_PLOT_WIDTH;
   const height = SPECTROGRAM_WATERFALL_HEIGHT;
 
-  const [type, setType] = useAtom(shaperTypeAtom);
-  const [f0, setF0] = useAtom(shaperF0Atom);
-  const [zeta, setZeta] = useAtom(shaperZetaAtom);
-  const [vtol, setVtol] = useAtom(shaperVtolAtom);
+  const [shaperParams, setShaperParams] = useAtom(shaperParamsAtom);
   const scoreMode = useAtomValue(shaperScoreModeAtom);
 
   const maxHoldSpectrum = useAtomValue(spectrogramMaxHoldAtom);
@@ -58,12 +52,6 @@ export default function ShaperPlots() {
       const centroidSec = computeDelayCentroidSeconds(h.params);
       if (centroidSec == null) return null;
       const centroidMs = centroidSec * 1000;
-      const clickToSelect = () => {
-        setType(h.params.type);
-        setF0(h.params.fHz);
-        setZeta(h.params.zeta);
-        setVtol(h.params.vtol);
-      };
       return {
         x: centroidMs,
         y: h.score,
@@ -76,7 +64,7 @@ export default function ShaperPlots() {
           `zeta: ${h.params.zeta.toFixed(3)}`,
           `vtol: ${h.params.vtol.toFixed(3)}`,
         ],
-        onClick: clickToSelect,
+        onClick: () => void setShaperParams(h.params),
       };
     })
     .filter((v): v is NonNullable<typeof v> => Boolean(v));
@@ -165,10 +153,10 @@ export default function ShaperPlots() {
     </>
   );
 
-  const taps = computeMarlinShaperTaps({ type, fHz: f0, zeta, vtol });
+  const taps = computeMarlinShaperTaps(shaperParams);
   const tapCoefficientsText = taps.a.map((v) => v.toFixed(6)).join(', ');
   const tapTimingsMsText = taps.t.map((t) => (t * 1000).toFixed(2)).join(', ');
-  const tapPhasePercent = taps.t.map((t) => t * f0 * 100);
+  const tapPhasePercent = taps.t.map((t) => t * shaperParams.fHz * 100);
   const tapPhaseText = tapPhasePercent.map((v) => v.toFixed(1)).join(', ');
 
   const delayCentroidTooltip = (
@@ -274,7 +262,7 @@ export default function ShaperPlots() {
       <div className="border-border mt-4 rounded-lg border p-3">
         <div className="text-muted-foreground text-sm">Taps</div>
         <div className="mt-2 text-xs">
-          Shaper: <span className="font-mono">{type.toUpperCase()}</span>
+          Shaper: <span className="font-mono">{shaperParams.type.toUpperCase()}</span>
         </div>
         <div className="mt-1 text-xs">
           Count: <span className="font-mono">{taps.t.length}</span>

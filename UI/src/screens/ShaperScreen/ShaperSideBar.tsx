@@ -12,10 +12,7 @@ import { ExplainTooltip } from '@/components/ExplainTooltip';
 import { cn } from '@/lib/utils';
 import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
 import {
-  shaperTypeAtom,
-  shaperF0Atom,
-  shaperZetaAtom,
-  shaperVtolAtom,
+  shaperParamsAtom,
   shaperScoreModeAtom,
   corneringModelAtom,
   corneringScvAtom,
@@ -26,13 +23,11 @@ import {
 import useOptimisers from './useOptimizers';
 import { SEARCH_TYPES } from './shaper-optimiser.worker';
 import { useState } from 'react';
+import { isEiFamily } from './input-shaper';
 
 export default function ShaperSideBar() {
   const [isOptimising, setIsOptimizing] = useState(false);
-  const [type, setType] = useAtom(shaperTypeAtom);
-  const [f0, setF0] = useAtom(shaperF0Atom);
-  const [zeta, setZeta] = useAtom(shaperZetaAtom);
-  const [vtol, setVtol] = useAtom(shaperVtolAtom);
+  const [shaperParams, setShaperParams] = useAtom(shaperParamsAtom);
   const [scoreMode, setScoreMode] = useAtom(shaperScoreModeAtom);
   const [corneringModel, setCorneringModel] = useAtom(corneringModelAtom);
   const [corneringScv, setCorneringScv] = useAtom(corneringScvAtom);
@@ -595,17 +590,15 @@ export default function ShaperSideBar() {
               <Button
                 type="button"
                 size="sm"
-                variant={type === shaper ? 'secondary' : 'ghost'}
+                variant={shaperParams.type === shaper ? 'secondary' : 'ghost'}
                 className="h-8 w-full"
                 aria-pressed={shaper === shaper}
                 onClick={() => {
-                  setType(shaper);
-                  const best = bestByType[shaper];
-                  if (best) {
-                    setF0(best.params.fHz);
-                    setZeta(best.params.zeta);
-                    setVtol(best.params.vtol);
-                  }
+                  setShaperParams((old) => ({
+                    ...old,
+                    type: shaper,
+                    ...(bestByType[shaper] ?? {}),
+                  }));
                 }}
               >
                 {shaper.toUpperCase()}
@@ -623,7 +616,7 @@ export default function ShaperSideBar() {
             intuition={f0Info.intuition}
           >
             <label className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
-              Resonance f0: {f0.toFixed(1)} Hz
+              Resonance f0: {shaperParams.fHz.toFixed(1)} Hz
             </label>
           </ExplainTooltip>
           <div className="mt-3">
@@ -631,8 +624,8 @@ export default function ShaperSideBar() {
               min={SHAPER_F0_RANGE_HZ[0]}
               max={SHAPER_F0_RANGE_HZ[1]}
               step={0.5}
-              value={[f0]}
-              onValueChange={(v) => setF0(v[0])}
+              value={[shaperParams.fHz]}
+              onValueChange={([fHz]) => setShaperParams((old) => ({ ...old, fHz }))}
               className="w-full"
             />
           </div>
@@ -645,7 +638,7 @@ export default function ShaperSideBar() {
             intuition={zetaInfo.intuition}
           >
             <label className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
-              Damping (ζ): {zeta.toFixed(3)}
+              Damping (ζ): {shaperParams.zeta.toFixed(3)}
             </label>
           </ExplainTooltip>
           <div className="mt-3">
@@ -653,27 +646,21 @@ export default function ShaperSideBar() {
               min={SHAPER_ZETA_RANGE[0]}
               max={SHAPER_ZETA_RANGE[1]}
               step={0.005}
-              value={[zeta]}
-              onValueChange={(v) => setZeta(v[0])}
+              value={[shaperParams.zeta]}
+              onValueChange={([zeta]) => setShaperParams((old) => ({ ...old, zeta }))}
               className="w-full"
             />
           </div>
         </div>
 
-        <div
-          className={cn(
-            type === 'zv' || type === 'zvd' || type === 'zvdd' || type === 'zvddd' || type === 'mzv'
-              ? 'opacity-60'
-              : ''
-          )}
-        >
+        <div className={cn({ 'opacity-60': !isEiFamily(shaperParams.type) })}>
           <ExplainTooltip
             title={vtolInfo.title}
             accurate={vtolInfo.accurate}
             intuition={vtolInfo.intuition}
           >
             <label className="text-muted-foreground text-sm underline decoration-dotted underline-offset-2">
-              Tolerance (vtol): {vtol.toFixed(3)}
+              Tolerance (vtol): {shaperParams.vtol.toFixed(3)}
             </label>
           </ExplainTooltip>
           <div className="mt-3">
@@ -681,16 +668,10 @@ export default function ShaperSideBar() {
               min={SHAPER_VTOL_RANGE[0]}
               max={SHAPER_VTOL_RANGE[1]}
               step={0.005}
-              value={[vtol]}
-              onValueChange={(v) => setVtol(v[0])}
+              value={[shaperParams.vtol]}
+              onValueChange={([vtol]) => setShaperParams((old) => ({ ...old, vtol }))}
               className="w-full"
-              disabled={
-                type === 'zv' ||
-                type === 'zvd' ||
-                type === 'zvdd' ||
-                type === 'zvddd' ||
-                type === 'mzv'
-              }
+              disabled={!isEiFamily(shaperParams.type)}
             />
           </div>
         </div>

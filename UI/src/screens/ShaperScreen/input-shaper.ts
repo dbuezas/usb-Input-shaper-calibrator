@@ -157,3 +157,5 @@ export const shaperMagnitudeAtHzFromTaps = (a: number[], t: number[], freqHz: nu
   }
   return Math.sqrt(re * re + im * im);
 };
+
+export const isEiFamily = (t: InputShaperType) => t === 'ei' || t === '2hei' || t === '3hei';

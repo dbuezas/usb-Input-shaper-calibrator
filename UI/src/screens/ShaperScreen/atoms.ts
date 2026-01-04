@@ -6,7 +6,6 @@ import {
   computeDelayCentroidSeconds,
   type CorneringModel,
   type CorneringSettings,
-  type InputShaperType,
   type ShaperParams,
   type ShaperScoreMode,
 } from './input-shaper';
@@ -14,10 +13,13 @@ import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
 import { flatnessScoreFromMagnitudeSpectrum } from './shaper-scores/flatness';
 import { klipperScoreFromMagnitudeSpectrum, suggestedMaxAccel } from './shaper-scores/klipper';
 
-export const shaperTypeAtom = atom<InputShaperType>('zvd');
-export const shaperF0Atom = atom(55);
-export const shaperZetaAtom = atom(0.1);
-export const shaperVtolAtom = atom(0.1);
+export const shaperParamsAtom = atom<ShaperParams>({
+  type: 'zv',
+  fHz: 55,
+  zeta: 0.1,
+  vtol: 0.1,
+});
+
 export const shaperScoreModeAtom = atom<ShaperScoreMode>('klipper');
 
 export const corneringModelAtom = atom<CorneringModel>('scv');
@@ -36,13 +38,6 @@ export const corneringSettingsAtom = atom<CorneringSettings>((get) => {
       return { model: 'junction_deviation', junctionDeviation: get(corneringJdAtom) };
   }
 });
-
-const shaperParamsAtom = atom<ShaperParams>((get) => ({
-  type: get(shaperTypeAtom),
-  fHz: get(shaperF0Atom),
-  zeta: get(shaperZetaAtom),
-  vtol: get(shaperVtolAtom),
-}));
 
 export const shapedSpectrumAtom = atom((get) => {
   const base = get(spectrogramMaxHoldAtom);
