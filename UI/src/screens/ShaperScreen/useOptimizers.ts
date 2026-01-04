@@ -24,14 +24,14 @@ import {
 } from './atoms';
 
 const ALL_SHAPER_TYPES: InputShaperType[] = [
-  'zv',
-  'zvd',
-  'zvdd',
-  'zvddd',
-  'mzv',
-  'ei',
-  '2hei',
   '3hei',
+  'zvddd',
+  '2hei',
+  'zvdd',
+  'ei',
+  'zvd',
+  'mzv',
+  'zv',
 ];
 
 const chunkRoundRobin = <T>(items: T[], chunks: number): T[][] => {
