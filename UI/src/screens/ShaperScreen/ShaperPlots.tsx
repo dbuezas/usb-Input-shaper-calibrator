@@ -1,4 +1,3 @@
-import { useEffect, useRef } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { SpectrumPlot } from '@/visualisations/SpectrumPlot';
 import {
@@ -37,14 +36,14 @@ export default function ShaperPlots() {
   const optimisationHistory = useAtomValue(optimisationHistoryAtom);
 
   const typeColor: Record<InputShaperType, string> = {
-    zv: 'rgba(0, 220, 255, 0.85)',
-    zvd: 'rgba(0, 255, 120, 0.85)',
-    zvdd: 'rgba(255, 200, 0, 0.85)',
-    zvddd: 'rgba(255, 120, 0, 0.85)',
-    mzv: 'rgba(255, 0, 200, 0.85)',
-    ei: 'rgba(180, 140, 255, 0.85)',
-    '2hei': 'rgba(255, 90, 140, 0.85)',
-    '3hei': 'rgba(120, 200, 255, 0.85)',
+    zv: `rgba(0, 220, 255, ${shaperParams.type === 'zv' ? 1 : 0.1})`,
+    zvd: `rgba(0, 255, 120, ${shaperParams.type === 'zvd' ? 1 : 0.1})`,
+    zvdd: `rgba(255, 200, 0, ${shaperParams.type === 'zvdd' ? 1 : 0.1})`,
+    zvddd: `rgba(255, 120, 0, ${shaperParams.type === 'zvddd' ? 1 : 0.1})`,
+    mzv: `rgba(255, 0, 200, ${shaperParams.type === 'mzv' ? 1 : 0.1})`,
+    ei: `rgba(180, 140, 255, ${shaperParams.type === 'ei' ? 1 : 0.1})`,
+    '2hei': `rgba(255, 90, 140, ${shaperParams.type === '2hei' ? 1 : 0.1})`,
+    '3hei': `rgba(120, 200, 255, ${shaperParams.type === '3hei' ? 1 : 0.1})`,
   };
 
   const historyPoints = optimisationHistory
@@ -57,6 +56,7 @@ export default function ShaperPlots() {
         y: h.score,
         color: typeColor[h.params.type],
         title: h.params.type.toUpperCase(),
+        type: h.params.type,
         lines: [
           `centroid: ${centroidMs.toFixed(2)} ms`,
           `score: ${h.score.toFixed(9)}`,
@@ -67,24 +67,8 @@ export default function ShaperPlots() {
         onClick: () => void setShaperParams(h.params),
       };
     })
-    .filter((v): v is NonNullable<typeof v> => Boolean(v));
-
-  const optimiserWorkersRef = useRef<Worker[]>([]);
-  const cancelRef = useRef(false);
-
-  useEffect(() => {
-    cancelRef.current = false;
-    return () => {
-      cancelRef.current = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      for (const w of optimiserWorkersRef.current) w.terminate();
-      optimiserWorkersRef.current = [];
-    };
-  }, []);
+    .filter((v): v is NonNullable<typeof v> => Boolean(v))
+    .sort((a, _b) => (a.type === shaperParams.type ? 1 : -1));
 
   const scoreTooltip = (
     <>
