@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { OPTIMIZER_UPDATE_EVERY_MS, WEB_WORKER_THREADS } from '@/constants';
-import type { InputShaperType } from './input-shaper';
+import type { CorneringSettings, InputShaperType } from './input-shaper';
 import ShaperOptimiserWorker from './shaper-optimiser.worker?worker';
 import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
 import type {
   BestByType,
   OptimisationResult,
-  WorkerCorneringSettings,
   WorkerOutMessage,
   WorkerProgressMessage,
   WorkerRefineMessage,
@@ -113,7 +112,7 @@ export default function useOptimisers() {
       optimiserWorkersRef.current = [];
     };
   }, []);
-  const corneringToWorker = (): WorkerCorneringSettings => {
+  const corneringToWorker = (): CorneringSettings => {
     switch (corneringModel) {
       case 'scv':
         return { model: 'scv', scv: corneringScv };
