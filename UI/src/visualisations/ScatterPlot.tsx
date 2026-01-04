@@ -10,7 +10,7 @@ export type ScatterPoint = {
   color?: string;
   title?: string;
   lines?: string[];
-  onClick?: () => void;
+  onClick?: () => unknown;
 };
 
 const computeDomain = (values: number[]) => {
@@ -153,6 +153,7 @@ export const ScatterPlot = ({
         const p = points[bestIdx];
         hoveredPointIndexRef.current = bestIdx;
         setIsHoveringPoint(Boolean(p.onClick));
+        p.onClick?.();
         setHover({
           visible: true,
           x,

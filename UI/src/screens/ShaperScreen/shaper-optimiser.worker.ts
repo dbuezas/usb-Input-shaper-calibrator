@@ -4,6 +4,7 @@ import {
   type ShaperParams,
   type ShaperScoreMode,
   isEiFamily,
+  computeDelayCentroidSeconds,
 } from '@/screens/ShaperScreen/input-shaper';
 import { SHAPER_F0_RANGE_HZ, SHAPER_VTOL_RANGE, SHAPER_ZETA_RANGE } from '@/constants';
 
@@ -11,7 +12,7 @@ import { variationScoreFromMagnitudeSpectrum } from '@/screens/ShaperScreen/shap
 import { flatnessScoreFromMagnitudeSpectrum } from './shaper-scores/flatness';
 import { klipperScoreFromMagnitudeSpectrum } from './shaper-scores/klipper';
 
-export type OptimisationResult = { params: ShaperParams; score: number };
+export type OptimisationResult = { params: ShaperParams; score: number; delay: number };
 export type BestByType = Partial<Record<InputShaperType, OptimisationResult>>;
 
 export type WorkerStartMessage = {
@@ -62,9 +63,11 @@ export const SEARCH_TYPES: InputShaperType[] = [
   '2hei',
   '3hei',
 ];
-const SEARCH_F_STEP_HZ = 1;
-const SEARCH_ZETAS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35];
-const SEARCH_VTOLS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35];
+const SEARCH_F_STEP_HZ = 0.5;
+// const SEARCH_ZETAS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35];
+// const SEARCH_VTOLS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35];
+const SEARCH_ZETAS = Array.from({ length: 7 }).map((_, i, { length }) => (0.35 * (i + 1)) / length);
+const SEARCH_VTOLS = Array.from({ length: 7 }).map((_, i, { length }) => (0.35 * (i + 1)) / length);
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -92,6 +95,7 @@ type FineState = {
   stepFHz: number;
   stepZeta: number;
   stepVtol: number;
+  delay: number;
 };
 
 const runRefinementLoop = (opts: {
@@ -213,11 +217,13 @@ const refine = (msg: WorkerRefineMessage) => {
     scoreRangeHz
   );
   let best: OptimisationResult | undefined;
-  if (Number.isFinite(initialScore)) best = { params: start, score: initialScore };
+  const delay = computeDelayCentroidSeconds(start);
+  if (Number.isFinite(initialScore)) best = { params: start, score: initialScore, delay };
 
   const initialState: FineState = {
     params: start,
     score: initialScore,
+    delay,
     done: false,
     stepFHz: 1,
     stepZeta: 0.02,
@@ -232,7 +238,7 @@ const refine = (msg: WorkerRefineMessage) => {
     scoreRangeHz,
     onStep: (s) => {
       if (!best || s.score < best.score) {
-        best = { params: s.params, score: s.score };
+        best = { params: s.params, score: s.score, delay: s.delay };
       }
 
       self.postMessage({
@@ -241,7 +247,7 @@ const refine = (msg: WorkerRefineMessage) => {
         // Do not account it towards iteration totals.
         iterationsDone: 0,
         iterationsTotal: 0,
-        current: { params: s.params, score: s.score },
+        current: { params: s.params, score: s.score, delay: s.delay },
         best,
       } satisfies WorkerOutMessage);
     },
@@ -292,7 +298,8 @@ const bruteForce = (msg: WorkerStartMessage) => {
 
           const params: ShaperParams = { type: candidateType, fHz, zeta, vtol };
           const score = scoreCandidate(magnitudes, params, scoreMode, msg.cornering, scoreRangeHz);
-          const current: OptimisationResult = { params, score };
+          const delay = computeDelayCentroidSeconds(params);
+          const current: OptimisationResult = { params, score, delay };
 
           const prevByType = bestByType[candidateType];
           if (!prevByType || score < prevByType.score) bestByType[candidateType] = current;
@@ -329,6 +336,7 @@ const bruteForce = (msg: WorkerStartMessage) => {
       stepFHz: 0.5,
       stepZeta: 0.01,
       stepVtol: 0.01,
+      delay: computeDelayCentroidSeconds(start.params),
     };
 
     runRefinementLoop({
@@ -338,7 +346,7 @@ const bruteForce = (msg: WorkerStartMessage) => {
       cornering: msg.cornering,
       scoreRangeHz,
       onStep: (s) => {
-        const current: OptimisationResult = { params: s.params, score: s.score };
+        const current: OptimisationResult = { params: s.params, score: s.score, delay: s.delay };
         const prevByType = bestByType[candidateType];
         if (!prevByType || current.score < prevByType.score) bestByType[candidateType] = current;
         if (!best || current.score < best.score) best = current;

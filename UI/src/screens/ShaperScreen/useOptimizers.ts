@@ -86,7 +86,29 @@ export default function useOptimisers() {
           switch (msg.type) {
             case 'progress': {
               perWorkerProgress.set(worker, msg);
-              setOptimisationHistory((existing) => [...existing, msg.current]);
+              setOptimisationHistory((history) => {
+                const results: OptimisationResult[] = [msg.current];
+                for (const old of history) {
+                  if (
+                    old.params.type === msg.current.params.type &&
+                    old.delay <= msg.current.delay &&
+                    old.score <= msg.current.score
+                  ) {
+                    // there's already something better
+                    return history;
+                  } else if (
+                    old.params.type === msg.current.params.type &&
+                    old.delay > msg.current.delay &&
+                    old.score > msg.current.score
+                  ) {
+                    // the old needs to be replaced
+                  } else {
+                    results.push(old);
+                  }
+                }
+
+                return results;
+              });
               setOptimiseProgress(computeAggregateProgress(msg));
               const oldBestOfType =
                 bestByType[msg.current.params.type]?.score ?? Number.POSITIVE_INFINITY;

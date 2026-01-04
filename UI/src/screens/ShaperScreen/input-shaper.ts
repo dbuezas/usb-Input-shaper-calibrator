@@ -40,11 +40,10 @@ type ShaperTaps = { a: number[]; t: number[] };
 export const computeDelayCentroidSeconds = (params: ShaperParams) => {
   const { a, t } = computeMarlinShaperTaps(params);
   const sumA = a.reduce((s, v) => s + v, 0);
-  if (!Number.isFinite(sumA) || sumA === 0) return undefined;
   let centroid = 0;
   for (let i = 0; i < a.length; i++) centroid += a[i] * t[i];
   centroid /= sumA;
-  return Number.isFinite(centroid) ? centroid : undefined;
+  return centroid;
 };
 
 export const computeMarlinShaperTaps = ({ type, fHz, zeta, vtol }: ShaperParams): ShaperTaps => {

@@ -19,7 +19,7 @@ import {
   shaperScoreModeAtom,
   shaperParamsAtom,
 } from './atoms';
-import { computeDelayCentroidSeconds, type InputShaperType } from './input-shaper';
+import { type InputShaperType } from './input-shaper';
 
 export default function ShaperPlots() {
   const width = SPECTROGRAM_PLOT_WIDTH;
@@ -36,21 +36,19 @@ export default function ShaperPlots() {
   const optimisationHistory = useAtomValue(optimisationHistoryAtom);
 
   const typeColor: Record<InputShaperType, string> = {
-    zv: `rgba(0, 220, 255, ${shaperParams.type === 'zv' ? 1 : 0.1})`,
-    zvd: `rgba(0, 255, 120, ${shaperParams.type === 'zvd' ? 1 : 0.1})`,
-    zvdd: `rgba(255, 200, 0, ${shaperParams.type === 'zvdd' ? 1 : 0.1})`,
-    zvddd: `rgba(255, 120, 0, ${shaperParams.type === 'zvddd' ? 1 : 0.1})`,
-    mzv: `rgba(255, 0, 200, ${shaperParams.type === 'mzv' ? 1 : 0.1})`,
-    ei: `rgba(180, 140, 255, ${shaperParams.type === 'ei' ? 1 : 0.1})`,
-    '2hei': `rgba(255, 90, 140, ${shaperParams.type === '2hei' ? 1 : 0.1})`,
-    '3hei': `rgba(120, 200, 255, ${shaperParams.type === '3hei' ? 1 : 0.1})`,
+    zv: `rgba(0, 220, 255, ${shaperParams.type === 'zv' ? 1 : 0.3})`,
+    zvd: `rgba(0, 255, 120, ${shaperParams.type === 'zvd' ? 1 : 0.3})`,
+    zvdd: `rgba(255, 200, 0, ${shaperParams.type === 'zvdd' ? 1 : 0.3})`,
+    zvddd: `rgba(255, 120, 0, ${shaperParams.type === 'zvddd' ? 1 : 0.3})`,
+    mzv: `rgba(255, 0, 200, ${shaperParams.type === 'mzv' ? 1 : 0.3})`,
+    ei: `rgba(180, 140, 255, ${shaperParams.type === 'ei' ? 1 : 0.3})`,
+    '2hei': `rgba(255, 90, 140, ${shaperParams.type === '2hei' ? 1 : 0.3})`,
+    '3hei': `rgba(120, 200, 255, ${shaperParams.type === '3hei' ? 1 : 0.3})`,
   };
 
   const historyPoints = optimisationHistory
     .map((h) => {
-      const centroidSec = computeDelayCentroidSeconds(h.params);
-      if (centroidSec == null) return null;
-      const centroidMs = centroidSec * 1000;
+      const centroidMs = h.delay * 1000;
       return {
         x: centroidMs,
         y: h.score,
@@ -267,9 +265,7 @@ export default function ShaperPlots() {
           Delay centroid:{' '}
           <ExplainTooltip title="Delay centroid" accurate={delayCentroidTooltip} intuition={null}>
             <span className="font-medium underline decoration-dotted underline-offset-2">
-              {delayCentroidSeconds != null
-                ? `${(delayCentroidSeconds * 1000).toFixed(2)} ms`
-                : '—'}
+              {(delayCentroidSeconds * 1000).toFixed(2)} ms
             </span>
           </ExplainTooltip>
         </div>
