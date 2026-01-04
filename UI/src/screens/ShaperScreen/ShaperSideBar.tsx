@@ -25,8 +25,10 @@ import {
 } from './atoms';
 import useOptimisers from './useOptimizers';
 import { SEARCH_TYPES } from './shaper-optimiser.worker';
+import { useState } from 'react';
 
 export default function ShaperSideBar() {
+  const [isOptimising, setIsOptimizing] = useState(false);
   const [type, setType] = useAtom(shaperTypeAtom);
   const [f0, setF0] = useAtom(shaperF0Atom);
   const [zeta, setZeta] = useAtom(shaperZetaAtom);
@@ -40,16 +42,7 @@ export default function ShaperSideBar() {
   const maxHoldSpectrum = useAtomValue(spectrogramMaxHoldAtom);
   const [analysisRange, setAnalysisRange] = useAtom(analysisRangeAtom);
 
-  const {
-    runAutoOptimise,
-    runCoarseTuneSelected,
-    runRefineCurrent,
-    isOptimising,
-    optimiseProgress,
-    bestByType,
-    optimisePreviewMode,
-    setOptimisePreviewMode,
-  } = useOptimisers();
+  const { runAutoOptimise, optimiseProgress, bestByType } = useOptimisers();
 
   const scoreTooltip = (
     <>
@@ -172,25 +165,6 @@ export default function ShaperSideBar() {
       </>
     ),
     intuition: <>It also runs a gradient refinment at the end.</>,
-  };
-
-  const coarseTuneSelected = {
-    title: 'Coarse tune',
-    accurate: (
-      <>Brute-force searches only the currently selected shaper type to minimize the score.</>
-    ),
-    intuition: <>This skips the final gradient refinement pass.</>,
-  };
-
-  const fineTune = {
-    title: 'Fine tune',
-    accurate: (
-      <>
-        Runs a local gradient-based refinement starting from the current shaper settings, to try to
-        reduce the selected score mode.
-      </>
-    ),
-    intuition: <>Use this when you’re already close and want a last small improvement.</>,
   };
 
   const scoreModeKlipper = {
@@ -508,21 +482,95 @@ export default function ShaperSideBar() {
           </ExplainTooltip>
         </div>
         <div className="mt-4">
-          <ExplainTooltip
-            title={findBest.title}
-            accurate={findBest.accurate}
-            intuition={findBest.intuition}
-          >
-            <Button
-              type="button"
-              className="w-full"
-              variant="destructive"
-              onClick={() => void runAutoOptimise()}
-              disabled={!maxHoldSpectrum.length || isOptimising}
+          {!isOptimising && (
+            <ExplainTooltip
+              title={findBest.title}
+              accurate={findBest.accurate}
+              intuition={findBest.intuition}
             >
-              Full auto tune all shapers
-            </Button>
-          </ExplainTooltip>
+              <Button
+                type="button"
+                className="w-full"
+                variant="destructive"
+                onClick={async () => {
+                  setIsOptimizing(true);
+                  await runAutoOptimise();
+                  setIsOptimizing(false);
+                }}
+                disabled={!maxHoldSpectrum.length || isOptimising}
+              >
+                Full auto tune all shapers
+              </Button>
+            </ExplainTooltip>
+          )}
+          {optimiseProgress && isOptimising && (
+            <div className="mt-3 rounded-md border border-dashed p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <ExplainTooltip
+                  title={previewMode.title}
+                  accurate={previewMode.accurate}
+                  intuition={previewMode.intuition}
+                >
+                  <div className="text-muted-foreground text-xs underline decoration-dotted underline-offset-2">
+                    Preview
+                  </div>
+                </ExplainTooltip>
+              </div>
+              <div className="text-muted-foreground text-xs">
+                {optimiseProgress.percent.toFixed(0)}% ({optimiseProgress.iterationsDone}/
+                {optimiseProgress.iterationsTotal})
+              </div>
+              <div className="bg-muted mt-2 h-2 w-full rounded">
+                <div
+                  className="bg-primary h-2 rounded"
+                  style={{ width: `${Math.max(0, Math.min(100, optimiseProgress.percent))}%` }}
+                />
+              </div>
+              <div className="text-muted-foreground mt-2 text-xs">
+                Current score:{' '}
+                <ExplainTooltip
+                  title="Score"
+                  accurate={
+                    scoreMode === 'flatness'
+                      ? flatnessScoreTooltip
+                      : scoreMode === 'variation'
+                        ? variationScoreTooltip
+                        : scoreTooltip
+                  }
+                  intuition={
+                    <>Shows the optimiser’s current candidate for the selected score mode.</>
+                  }
+                >
+                  <span className="font-medium underline decoration-dotted underline-offset-2">
+                    {optimiseProgress.current ? optimiseProgress.current.score.toFixed(9) : '—'}
+                  </span>
+                </ExplainTooltip>
+              </div>
+              <div className="text-muted-foreground mt-1 text-xs">
+                Best score:{' '}
+                <ExplainTooltip
+                  title="Score"
+                  accurate={
+                    scoreMode === 'flatness'
+                      ? flatnessScoreTooltip
+                      : scoreMode === 'variation'
+                        ? variationScoreTooltip
+                        : scoreTooltip
+                  }
+                  intuition={<>Best score found so far for the selected score mode.</>}
+                >
+                  <span className="font-medium underline decoration-dotted underline-offset-2">
+                    {optimiseProgress.best ? optimiseProgress.best.score.toFixed(9) : '—'}
+                  </span>
+                </ExplainTooltip>
+              </div>
+            </div>
+          )}
+          {!maxHoldSpectrum.length && (
+            <div className="text-muted-foreground mt-2 text-xs">
+              Collect max-hold data in Measure first.
+            </div>
+          )}
         </div>
       </div>
       <div className="mt-5">
@@ -565,134 +613,6 @@ export default function ShaperSideBar() {
             </ExplainTooltip>
           ))}
         </div>
-      </div>
-
-      <div>
-        <div className="mt-2 grid w-full grid-cols-2 gap-1 rounded-md">
-          <ExplainTooltip
-            title={coarseTuneSelected.title}
-            accurate={coarseTuneSelected.accurate}
-            intuition={coarseTuneSelected.intuition}
-          >
-            <Button
-              type="button"
-              size="sm"
-              className="h-8 w-full"
-              onClick={() => void runCoarseTuneSelected()}
-              disabled={!maxHoldSpectrum.length || isOptimising}
-            >
-              Coarse tune {type}
-            </Button>
-          </ExplainTooltip>
-
-          <ExplainTooltip
-            title={fineTune.title}
-            accurate={fineTune.accurate}
-            intuition={fineTune.intuition}
-          >
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              className="h-8 w-full"
-              onClick={() => void runRefineCurrent()}
-              disabled={!maxHoldSpectrum.length || isOptimising}
-            >
-              Fine tune {type}
-            </Button>
-          </ExplainTooltip>
-        </div>
-
-        {optimiseProgress && (
-          <div className="mt-3 rounded-md border border-dashed p-3">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <ExplainTooltip
-                title={previewMode.title}
-                accurate={previewMode.accurate}
-                intuition={previewMode.intuition}
-              >
-                <div className="text-muted-foreground text-xs underline decoration-dotted underline-offset-2">
-                  Preview
-                </div>
-              </ExplainTooltip>
-              <div className="border-border inline-flex gap-1 rounded-md border p-1">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={optimisePreviewMode === 'best' ? 'secondary' : 'ghost'}
-                  className="h-7 px-2"
-                  aria-pressed={optimisePreviewMode === 'best'}
-                  onClick={() => setOptimisePreviewMode('best')}
-                >
-                  Best
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={optimisePreviewMode === 'current' ? 'secondary' : 'ghost'}
-                  className="h-7 px-2"
-                  aria-pressed={optimisePreviewMode === 'current'}
-                  onClick={() => setOptimisePreviewMode('current')}
-                >
-                  Current
-                </Button>
-              </div>
-            </div>
-            <div className="text-muted-foreground text-xs">
-              {optimiseProgress.percent.toFixed(0)}% ({optimiseProgress.iterationsDone}/
-              {optimiseProgress.iterationsTotal})
-            </div>
-            <div className="bg-muted mt-2 h-2 w-full rounded">
-              <div
-                className="bg-primary h-2 rounded"
-                style={{ width: `${Math.max(0, Math.min(100, optimiseProgress.percent))}%` }}
-              />
-            </div>
-            <div className="text-muted-foreground mt-2 text-xs">
-              Current score:{' '}
-              <ExplainTooltip
-                title="Score"
-                accurate={
-                  scoreMode === 'flatness'
-                    ? flatnessScoreTooltip
-                    : scoreMode === 'variation'
-                      ? variationScoreTooltip
-                      : scoreTooltip
-                }
-                intuition={
-                  <>Shows the optimiser’s current candidate for the selected score mode.</>
-                }
-              >
-                <span className="font-medium underline decoration-dotted underline-offset-2">
-                  {optimiseProgress.current ? optimiseProgress.current.score.toFixed(9) : '—'}
-                </span>
-              </ExplainTooltip>
-            </div>
-            <div className="text-muted-foreground mt-1 text-xs">
-              Best score:{' '}
-              <ExplainTooltip
-                title="Score"
-                accurate={
-                  scoreMode === 'flatness'
-                    ? flatnessScoreTooltip
-                    : scoreMode === 'variation'
-                      ? variationScoreTooltip
-                      : scoreTooltip
-                }
-                intuition={<>Best score found so far for the selected score mode.</>}
-              >
-                <span className="font-medium underline decoration-dotted underline-offset-2">
-                  {optimiseProgress.best ? optimiseProgress.best.score.toFixed(9) : '—'}
-                </span>
-              </ExplainTooltip>
-            </div>
-          </div>
-        )}
-        {!maxHoldSpectrum.length && (
-          <div className="text-muted-foreground mt-2 text-xs">
-            Collect max-hold data in Measure first.
-          </div>
-        )}
       </div>
 
       <div className="mt-5 grid gap-4">

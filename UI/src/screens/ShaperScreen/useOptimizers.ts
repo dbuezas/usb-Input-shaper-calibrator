@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useAtom, useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { OPTIMIZER_UPDATE_EVERY_MS, WEB_WORKER_THREADS } from '@/constants';
 import type { CorneringSettings, InputShaperType } from './input-shaper';
 import ShaperOptimiserWorker from './shaper-optimiser.worker?worker';
@@ -9,7 +9,6 @@ import type {
   OptimisationResult,
   WorkerOutMessage,
   WorkerProgressMessage,
-  WorkerRefineMessage,
   WorkerStartMessage,
 } from './shaper-optimiser.worker';
 import {
@@ -46,10 +45,10 @@ const chunkRoundRobin = <T>(items: T[], chunks: number): T[][] => {
 };
 
 export default function useOptimisers() {
-  const [type, setType] = useAtom(shaperTypeAtom);
-  const [f0, setF0] = useAtom(shaperF0Atom);
-  const [zeta, setZeta] = useAtom(shaperZetaAtom);
-  const [vtol, setVtol] = useAtom(shaperVtolAtom);
+  const setType = useSetAtom(shaperTypeAtom);
+  const setF0 = useSetAtom(shaperF0Atom);
+  const setZeta = useSetAtom(shaperZetaAtom);
+  const setVtol = useSetAtom(shaperVtolAtom);
   const scoreMode = useAtomValue(shaperScoreModeAtom);
   const corneringModel = useAtomValue(corneringModelAtom);
   const corneringScv = useAtomValue(corneringScvAtom);
@@ -59,14 +58,10 @@ export default function useOptimisers() {
   const maxHoldSpectrum = useAtomValue(spectrogramMaxHoldAtom);
   const scoreRangeHz = useAtomValue(analysisRangeAtom);
 
-  const [isOptimising, setIsOptimising] = useState(false);
   const [optimiseProgress, setOptimiseProgress] = useState<WorkerProgressMessage | null>(null);
   const [bestByType, setBestByType] = useState<BestByType>({});
-  const [, setOptimisationHistory] = useAtom(optimisationHistoryAtom);
-  const [optimisePreviewMode, setOptimisePreviewMode] = useState<'best' | 'current'>('current');
-  const optimisePreviewModeRef = useRef<'best' | 'current'>('current');
+  const setOptimisationHistory = useSetAtom(optimisationHistoryAtom);
   const optimiserWorkersRef = useRef<Worker[]>([]);
-  const cancelRef = useRef(false);
   const lastBestByTypeRef = useRef<BestByType>({});
   const seenHistoryKeysRef = useRef<Set<string>>(new Set());
 
@@ -96,17 +91,6 @@ export default function useOptimisers() {
   };
 
   useEffect(() => {
-    cancelRef.current = false;
-    return () => {
-      cancelRef.current = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    optimisePreviewModeRef.current = optimisePreviewMode;
-  }, [optimisePreviewMode]);
-
-  useEffect(() => {
     return () => {
       for (const w of optimiserWorkersRef.current) w.terminate();
       optimiserWorkersRef.current = [];
@@ -124,8 +108,6 @@ export default function useOptimisers() {
   };
   const runAutoOptimise = async () => {
     if (!maxHoldSpectrum.length) return;
-    setIsOptimising(true);
-    cancelRef.current = false;
     setOptimisationHistory([]);
     lastBestByTypeRef.current = {};
     seenHistoryKeysRef.current = new Set();
@@ -177,26 +159,6 @@ export default function useOptimisers() {
 
     const completion = new Promise<void>((resolve) => {
       let doneCount = 0;
-      let settled = false;
-      const cleanups: Array<() => void> = [];
-
-      let finalBest: OptimisationResult | undefined;
-
-      const settle = () => {
-        if (settled) return;
-        settled = true;
-        for (const c of cleanups) c();
-
-        // Snap UI to the final best result after optimisation finishes.
-        if (finalBest && !cancelRef.current) {
-          setType(finalBest.params.type);
-          setF0(finalBest.params.fHz);
-          setZeta(finalBest.params.zeta);
-          setVtol(finalBest.params.vtol);
-        }
-        resolve();
-      };
-
       for (let idx = 0; idx < workers.length; idx++) {
         const worker = workers[idx];
         const candidateTypes = typeChunks[idx];
@@ -214,10 +176,7 @@ export default function useOptimisers() {
               setBestByType(merged);
               recordBestByType(merged);
 
-              const previewParams =
-                optimisePreviewModeRef.current === 'current'
-                  ? msg.current?.params
-                  : aggregate?.best?.params;
+              const previewParams = msg.current?.params;
               const now = performance.now();
               if (previewParams && now - lastUpdateTime > OPTIMIZER_UPDATE_EVERY_MS) {
                 lastUpdateTime = now;
@@ -230,21 +189,33 @@ export default function useOptimisers() {
             }
 
             case 'done': {
+              worker.terminate();
+
               doneCount++;
-              if (msg.bestByType) perWorkerBestByType.set(worker, msg.bestByType);
-              const merged = mergeBestByType();
-              setBestByType(merged);
-              recordBestByType(merged);
-              if (msg.best && (!finalBest || msg.best.score < finalBest.score)) {
-                finalBest = msg.best;
+              if (doneCount == workers.length) {
+                let finalBest: OptimisationResult | undefined = undefined;
+                for (const [, bestByType] of perWorkerBestByType) {
+                  for (const result of Object.values(bestByType)) {
+                    if (result.score < (finalBest?.score ?? Number.POSITIVE_INFINITY)) {
+                      finalBest = result;
+                    }
+                  }
+                }
+                console.log(finalBest);
+                // Snap UI to the final best result after optimisation finishes.
+                if (finalBest) {
+                  setType(finalBest.params.type);
+                  setF0(finalBest.params.fHz);
+                  setZeta(finalBest.params.zeta);
+                  setVtol(finalBest.params.vtol);
+                }
+                resolve();
               }
-              if (doneCount >= workers.length) settle();
             }
           }
         };
 
         worker.addEventListener('message', handleMessage);
-        cleanups.push(() => worker.removeEventListener('message', handleMessage));
 
         worker.postMessage({
           type: 'start',
@@ -255,228 +226,14 @@ export default function useOptimisers() {
           candidateTypes,
         } satisfies WorkerStartMessage);
       }
-
-      const cancelPoll = window.setInterval(() => {
-        if (!cancelRef.current) return;
-        // Cancelling should not send messages around; just kill worker threads.
-        for (const w of workers) w.terminate();
-        settle();
-      }, 100);
-      cleanups.push(() => window.clearInterval(cancelPoll));
     });
 
-    await new Promise((r) => setTimeout(r, 0));
     await completion;
   };
 
-  const runCoarseTuneSelected = async () => {
-    if (!maxHoldSpectrum.length) return;
-    setIsOptimising(true);
-    cancelRef.current = false;
-    setOptimisationHistory([]);
-    lastBestByTypeRef.current = {};
-    seenHistoryKeysRef.current = new Set();
-
-    const magnitudes = maxHoldSpectrum;
-
-    for (const w of optimiserWorkersRef.current) w.terminate();
-    optimiserWorkersRef.current = [];
-
-    const worker = new ShaperOptimiserWorker();
-    optimiserWorkersRef.current = [worker];
-
-    try {
-      let cleanup: (() => void) | undefined;
-
-      const completion = new Promise<void>((resolve) => {
-        let settled = false;
-
-        const handleMessage = (evt: MessageEvent<WorkerOutMessage>) => {
-          const msg = evt.data;
-          switch (msg.type) {
-            case 'progress': {
-              setOptimiseProgress(msg);
-              if (msg.bestByType) {
-                setBestByType(msg.bestByType);
-                recordBestByType(msg.bestByType);
-              }
-
-              const previewParams =
-                optimisePreviewModeRef.current === 'current'
-                  ? msg.current?.params
-                  : msg.best?.params;
-              if (previewParams) {
-                setType(previewParams.type);
-                setF0(previewParams.fHz);
-                setZeta(previewParams.zeta);
-                setVtol(previewParams.vtol);
-              }
-              return;
-            }
-
-            case 'done': {
-              if (msg.best) {
-                setType(msg.best.params.type);
-                setF0(msg.best.params.fHz);
-                setZeta(msg.best.params.zeta);
-                setVtol(msg.best.params.vtol);
-              }
-              if (msg.bestByType) {
-                const merged = { ...bestByType, ...msg.bestByType };
-                setBestByType(merged);
-                recordBestByType(merged);
-              }
-              if (settled) return;
-              settled = true;
-              cleanup?.();
-              resolve();
-            }
-          }
-        };
-
-        worker.addEventListener('message', handleMessage);
-        worker.postMessage({
-          type: 'start',
-          magnitudes,
-          scoreRangeHz,
-          scoreMode,
-          cornering: corneringToWorker(),
-          candidateTypes: [type],
-          skipFine: true,
-        } satisfies WorkerStartMessage);
-
-        const cancelPoll = window.setInterval(() => {
-          if (!cancelRef.current) return;
-          if (settled) return;
-          settled = true;
-          worker.terminate();
-          cleanup?.();
-          resolve();
-        }, 100);
-
-        cleanup = () => {
-          window.clearInterval(cancelPoll);
-          worker.removeEventListener('message', handleMessage);
-        };
-      });
-
-      await new Promise((r) => setTimeout(r, 0));
-      await completion;
-    } finally {
-      worker.terminate();
-      if (optimiserWorkersRef.current[0] === worker) optimiserWorkersRef.current = [];
-      setIsOptimising(false);
-      setOptimiseProgress(null);
-    }
-  };
-
-  const runRefineCurrent = async () => {
-    if (!maxHoldSpectrum.length) return;
-    setIsOptimising(true);
-    cancelRef.current = false;
-    setOptimisationHistory([]);
-    lastBestByTypeRef.current = {};
-    seenHistoryKeysRef.current = new Set();
-
-    const magnitudes = maxHoldSpectrum;
-
-    for (const w of optimiserWorkersRef.current) w.terminate();
-    optimiserWorkersRef.current = [];
-
-    const worker = new ShaperOptimiserWorker();
-    optimiserWorkersRef.current = [worker];
-
-    try {
-      let cleanup: (() => void) | undefined;
-
-      const completion = new Promise<void>((resolve) => {
-        let settled = false;
-
-        const handleMessage = (evt: MessageEvent<WorkerOutMessage>) => {
-          const msg = evt.data;
-          switch (msg.type) {
-            case 'progress': {
-              setOptimiseProgress(msg);
-              if (msg.bestByType) {
-                setBestByType(msg.bestByType);
-                recordBestByType(msg.bestByType);
-              }
-
-              const previewParams =
-                optimisePreviewModeRef.current === 'current'
-                  ? msg.current?.params
-                  : msg.best?.params;
-              if (previewParams) {
-                setType(previewParams.type);
-                setF0(previewParams.fHz);
-                setZeta(previewParams.zeta);
-                setVtol(previewParams.vtol);
-              }
-              return;
-            }
-
-            case 'done': {
-              if (msg.best) {
-                setType(msg.best.params.type);
-                setF0(msg.best.params.fHz);
-                setZeta(msg.best.params.zeta);
-                setVtol(msg.best.params.vtol);
-              }
-              if (msg.bestByType) {
-                const merged = { ...bestByType, ...msg.bestByType };
-                setBestByType(merged);
-                recordBestByType(merged);
-              }
-              if (settled) return;
-              settled = true;
-              cleanup?.();
-              resolve();
-            }
-          }
-        };
-
-        worker.addEventListener('message', handleMessage);
-        worker.postMessage({
-          type: 'refine',
-          magnitudes,
-          scoreRangeHz,
-          scoreMode,
-          cornering: corneringToWorker(),
-          startParams: { type, fHz: f0, zeta, vtol },
-        } satisfies WorkerRefineMessage);
-
-        const cancelPoll = window.setInterval(() => {
-          if (!cancelRef.current) return;
-          if (settled) return;
-          settled = true;
-          worker.terminate();
-          cleanup?.();
-          resolve();
-        }, 100);
-
-        cleanup = () => {
-          window.clearInterval(cancelPoll);
-          worker.removeEventListener('message', handleMessage);
-        };
-      });
-
-      await new Promise((r) => setTimeout(r, 0));
-      await completion;
-    } finally {
-      worker.terminate();
-      if (optimiserWorkersRef.current[0] === worker) optimiserWorkersRef.current = [];
-      setIsOptimising(false);
-      setOptimiseProgress(null);
-    }
-  };
   return {
     runAutoOptimise,
-    runCoarseTuneSelected,
-    runRefineCurrent,
-    isOptimising,
     optimiseProgress,
     bestByType,
-    optimisePreviewMode,
-    setOptimisePreviewMode,
   };
 }

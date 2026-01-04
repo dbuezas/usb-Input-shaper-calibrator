@@ -48,8 +48,6 @@ export type WorkerProgressMessage = {
 
 export type WorkerDoneMessage = {
   type: 'done';
-  best?: OptimisationResult;
-  bestByType?: BestByType;
 };
 
 export type WorkerOutMessage = WorkerProgressMessage | WorkerDoneMessage;
@@ -228,7 +226,7 @@ const refine = (msg: WorkerRefineMessage) => {
     stepVtol: 0.02,
   };
 
-  const state = runRefinementLoop({
+  runRefinementLoop({
     magnitudes,
     initialState,
     scoreMode: msg.scoreMode,
@@ -253,21 +251,8 @@ const refine = (msg: WorkerRefineMessage) => {
     },
   });
 
-  // Ensure the UI gets a final progress update reflecting the final params/score.
-  self.postMessage({
-    type: 'progress',
-    percent: 0,
-    iterationsDone: 0,
-    iterationsTotal: 0,
-    current: { params: state.params, score: state.score },
-    best,
-    bestByType: best ? ({ [start.type]: best } satisfies BestByType) : undefined,
-  } satisfies WorkerOutMessage);
-
   self.postMessage({
     type: 'done',
-    best,
-    bestByType: best ? ({ [start.type]: best } satisfies BestByType) : undefined,
   } satisfies WorkerOutMessage);
   return;
 };
@@ -319,7 +304,7 @@ const bruteForce = (msg: WorkerStartMessage) => {
             if (!best || score < best.score) best = current;
           }
 
-          const out: WorkerProgressMessage = {
+          self.postMessage({
             type: 'progress',
             percent: (100 * iterationsDone) / Math.max(1, iterationsTotal),
             iterationsDone,
@@ -327,16 +312,14 @@ const bruteForce = (msg: WorkerStartMessage) => {
             current,
             best,
             bestByType,
-          };
-          self.postMessage(out satisfies WorkerOutMessage);
+          } satisfies WorkerOutMessage);
         }
       }
     }
   }
 
   if (skipFine) {
-    const out: WorkerDoneMessage = { type: 'done', best, bestByType };
-    self.postMessage(out satisfies WorkerOutMessage);
+    self.postMessage({ type: 'done' } satisfies WorkerOutMessage);
     return;
   }
 
@@ -368,7 +351,7 @@ const bruteForce = (msg: WorkerStartMessage) => {
         if (!prevByType || current.score < prevByType.score) bestByType[candidateType] = current;
         if (!best || current.score < best.score) best = current;
 
-        const out: WorkerProgressMessage = {
+        self.postMessage({
           type: 'progress',
           // Refinement progress is not included in the iteration totals.
           // Keep the coarse progress fixed while still streaming updated results.
@@ -378,14 +361,12 @@ const bruteForce = (msg: WorkerStartMessage) => {
           current,
           best,
           bestByType,
-        };
-        self.postMessage(out satisfies WorkerOutMessage);
+        } satisfies WorkerOutMessage);
       },
     });
   }
 
-  const out: WorkerDoneMessage = { type: 'done', best, bestByType };
-  self.postMessage(out satisfies WorkerOutMessage);
+  self.postMessage({ type: 'done' } satisfies WorkerOutMessage);
 };
 
 self.onmessage = (evt: MessageEvent<WorkerMessage>) => {

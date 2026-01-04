@@ -15,3 +15,4 @@
 - Always use typed messages when communicating between web workers.
 - Never use the `any` type.
 - To fix linting errors use `pnpm format`
+- When using tools, proceed directly with tool calls. Save explanations for the attempt_completion summary. Both attempt_completion and plan_mode_respond display to the user as assistant messages, so include your message content within the tool call itself rather than duplicating it outside."
