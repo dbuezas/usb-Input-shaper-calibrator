@@ -62,7 +62,9 @@ export default function ShaperPlots() {
           `zeta: ${h.params.zeta.toFixed(3)}`,
           `vtol: ${h.params.vtol.toFixed(3)}`,
         ],
-        onClick: () => void setShaperParams(h.params),
+        onClick: () => {
+          if (shaperParams.type === h.params.type) setShaperParams(h.params);
+        },
       };
     })
     .filter((v): v is NonNullable<typeof v> => Boolean(v))
