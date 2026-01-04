@@ -104,12 +104,9 @@ const runRefinementLoop = (opts: {
   scoreMode: ShaperScoreMode;
   cornering: CorneringSettings;
   scoreRangeHz: [number, number];
-  bounds: { fMin: number; fMax: number };
-  maxSteps: number;
-  onStep?: (state: FineState, stepIndex: number) => void;
-}): { state: FineState; stepsUsed: number } => {
+  onStep?: (state: FineState) => void;
+}): FineState => {
   let state = opts.initialState;
-  let stepsUsed = 0;
 
   // Derivative-free coordinate descent with per-parameter adaptive step sizes.
   // Robust across non-smooth objectives.
@@ -120,7 +117,7 @@ const runRefinementLoop = (opts: {
   const tryMove = (next: ShaperParams): number =>
     scoreCandidate(opts.magnitudes, next, opts.scoreMode, opts.cornering, opts.scoreRangeHz);
 
-  for (let i = 0; i < opts.maxSteps; i++) {
+  for (;;) {
     if (!state.done) {
       let bestParams = state.params;
       let bestScore = state.score;
@@ -133,12 +130,11 @@ const runRefinementLoop = (opts: {
         step: number
       ): { step: number; improved: boolean } => {
         if (step <= 0) return { step, improved: false };
-
         const base = bestParams[axis];
         const candidates: Array<{ params: ShaperParams; score: number }> = [];
 
         const clampAxis = (v: number) => {
-          if (axis === 'fHz') return clamp(v, opts.bounds.fMin, opts.bounds.fMax);
+          if (axis === 'fHz') return clamp(v, ...SHAPER_F0_RANGE_HZ);
           if (axis === 'zeta') return clamp(v, ...SHAPER_ZETA_RANGE);
           return clamp(v, ...SHAPER_VTOL_RANGE);
         };
@@ -203,19 +199,16 @@ const runRefinementLoop = (opts: {
       };
     }
 
-    stepsUsed = i + 1;
-    opts.onStep?.(state, i);
+    opts.onStep?.(state);
     if (state.done) break;
   }
 
-  return { state, stepsUsed };
+  return state;
 };
 
 const refine = (msg: WorkerRefineMessage) => {
   const { magnitudes, scoreRangeHz } = msg;
-  const safetyCapSteps = msg.steps ?? 20_000;
   const start = msg.startParams;
-  const bounds = { fMin: SHAPER_F0_RANGE_HZ[0], fMax: SHAPER_F0_RANGE_HZ[1] };
   const initialScore = scoreCandidate(
     magnitudes,
     start,
@@ -235,24 +228,24 @@ const refine = (msg: WorkerRefineMessage) => {
     stepVtol: 0.02,
   };
 
-  const { state, stepsUsed } = runRefinementLoop({
+  const state = runRefinementLoop({
     magnitudes,
     initialState,
     scoreMode: msg.scoreMode,
     cornering: msg.cornering,
     scoreRangeHz,
-    bounds,
-    maxSteps: safetyCapSteps,
-    onStep: (s, i) => {
+    onStep: (s) => {
       if (Number.isFinite(s.score) && (!best || s.score < best.score)) {
         best = { params: s.params, score: s.score };
       }
 
       self.postMessage({
         type: 'progress',
-        percent: (100 * (i + 1)) / Math.max(1, safetyCapSteps),
-        iterationsDone: i + 1,
-        iterationsTotal: safetyCapSteps,
+        // Refinement has an unknown (data-dependent) number of iterations.
+        // Do not account it towards iteration totals.
+        percent: 0,
+        iterationsDone: 0,
+        iterationsTotal: 0,
         current: { params: s.params, score: s.score },
         best,
         bestByType: best ? ({ [start.type]: best } satisfies BestByType) : undefined,
@@ -260,12 +253,12 @@ const refine = (msg: WorkerRefineMessage) => {
     },
   });
 
-  // Ensure the UI gets a final progress update reflecting the actual number of iterations.
+  // Ensure the UI gets a final progress update reflecting the final params/score.
   self.postMessage({
     type: 'progress',
-    percent: safetyCapSteps ? (100 * stepsUsed) / safetyCapSteps : 0,
-    iterationsDone: stepsUsed,
-    iterationsTotal: safetyCapSteps,
+    percent: 0,
+    iterationsDone: 0,
+    iterationsTotal: 0,
     current: { params: state.params, score: state.score },
     best,
     bestByType: best ? ({ [start.type]: best } satisfies BestByType) : undefined,
@@ -300,8 +293,7 @@ const bruteForce = (msg: WorkerStartMessage) => {
     coarseTotal += fCount * zetas.length * vtolCount;
   }
 
-  const fineStepsPerType = 2000;
-  const iterationsTotal = coarseTotal + fineStepsPerType * types.length;
+  const iterationsTotal = coarseTotal;
   let iterationsDone = 0;
 
   let best: OptimisationResult | undefined;
@@ -349,11 +341,9 @@ const bruteForce = (msg: WorkerStartMessage) => {
   }
 
   // Phase 2: fine local optimisation from per-type coarse best (in-order)
-  const bounds = { fMin, fMax };
   for (const candidateType of types) {
     const start = bestByType[candidateType];
     if (!start) {
-      iterationsDone += fineStepsPerType;
       continue;
     }
 
@@ -366,17 +356,13 @@ const bruteForce = (msg: WorkerStartMessage) => {
       stepVtol: 0.01,
     };
 
-    const { stepsUsed } = runRefinementLoop({
+    runRefinementLoop({
       magnitudes,
       initialState,
       scoreMode,
       cornering: msg.cornering,
       scoreRangeHz,
-      bounds,
-      maxSteps: fineStepsPerType,
       onStep: (s) => {
-        iterationsDone++;
-
         const current: OptimisationResult = { params: s.params, score: s.score };
         const prevByType = bestByType[candidateType];
         if (!prevByType || current.score < prevByType.score) bestByType[candidateType] = current;
@@ -384,6 +370,8 @@ const bruteForce = (msg: WorkerStartMessage) => {
 
         const out: WorkerProgressMessage = {
           type: 'progress',
+          // Refinement progress is not included in the iteration totals.
+          // Keep the coarse progress fixed while still streaming updated results.
           percent: (100 * iterationsDone) / Math.max(1, iterationsTotal),
           iterationsDone,
           iterationsTotal,
@@ -394,9 +382,6 @@ const bruteForce = (msg: WorkerStartMessage) => {
         self.postMessage(out satisfies WorkerOutMessage);
       },
     });
-
-    // Preserve iteration accounting for consistent progress, but stop evaluating.
-    iterationsDone += fineStepsPerType - stepsUsed;
   }
 
   const out: WorkerDoneMessage = { type: 'done', best, bestByType };

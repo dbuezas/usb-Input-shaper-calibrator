@@ -121,7 +121,7 @@ export const computeMarlinShaperTaps = ({ type, fHz, zeta, vtol }: ShaperParams)
   return { a, t };
 };
 
-export const shaperMagnitudeAtHz = (params: ShaperParams, freqHz: number) => {
+const shaperMagnitudeAtHz = (params: ShaperParams, freqHz: number) => {
   const { a, t } = computeMarlinShaperTaps(params);
   const w = 2 * Math.PI * freqHz;
   let re = 0;
@@ -146,17 +146,14 @@ export const applyShaperToMagnitudeSpectrum = (params: ShaperParams, magnitudes:
   return out;
 };
 
-export const estimatePeakHz = (magnitudes: Float32Array) => {
-  const fMinHz = 0;
-  const fMaxHz = FIXED_SAMPLE_RATE / 2;
-  const freqStepHz = FIXED_SAMPLE_RATE / (2 * (magnitudes.length - 1));
-  const start = Math.max(0, Math.floor(fMinHz / freqStepHz));
-  const end = Math.min(magnitudes.length - 1, Math.floor(fMaxHz / freqStepHz));
-  if (end <= start) return 55;
-
-  let peakIdx = start;
-  for (let i = start + 1; i <= end; i++) {
-    if ((magnitudes[i] ?? 0) > (magnitudes[peakIdx] ?? 0)) peakIdx = i;
+export const shaperMagnitudeAtHzFromTaps = (a: number[], t: number[], freqHz: number) => {
+  const w = 2 * Math.PI * freqHz;
+  let re = 0;
+  let im = 0;
+  for (let i = 0; i < a.length; i++) {
+    const phase = -w * (t[i] ?? 0);
+    re += (a[i] ?? 0) * Math.cos(phase);
+    im += (a[i] ?? 0) * Math.sin(phase);
   }
-  return binToHz(peakIdx, magnitudes.length);
+  return Math.sqrt(re * re + im * im);
 };

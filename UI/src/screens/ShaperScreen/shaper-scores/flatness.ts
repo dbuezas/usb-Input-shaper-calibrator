@@ -1,6 +1,9 @@
 import { FIXED_SAMPLE_RATE } from '@/constants';
-import { computeMarlinShaperTaps, type ShaperParams } from '@/screens/ShaperScreen/input-shaper';
-import { shaperMagnitudeAtHzFromTaps } from './shaper-magnitude';
+import {
+  computeMarlinShaperTaps,
+  shaperMagnitudeAtHzFromTaps,
+  type ShaperParams,
+} from '@/screens/ShaperScreen/input-shaper';
 
 export const flatnessScoreFromMagnitudeSpectrum = (
   magnitudes: Float32Array,
