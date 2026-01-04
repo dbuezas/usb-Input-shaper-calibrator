@@ -59,18 +59,15 @@ export default function useOptimisers() {
     const computeAggregateProgress = (msg: WorkerProgressMessage): WorkerProgressMessage => {
       let iterationsDone = 0;
       let iterationsTotal = 0;
-      let { best } = msg;
       for (const p of perWorkerProgress.values()) {
         iterationsDone += p.iterationsDone;
         iterationsTotal += p.iterationsTotal;
-        if (p.best.score < best.score) best = p.best;
       }
 
       return {
         iterationsDone,
         iterationsTotal,
         current: msg.current,
-        best,
         type: 'progress',
       };
     };
@@ -110,13 +107,18 @@ export default function useOptimisers() {
                 return results;
               });
               setOptimiseProgress(computeAggregateProgress(msg));
-              const oldBestOfType =
-                bestByType[msg.current.params.type]?.score ?? Number.POSITIVE_INFINITY;
-              if (msg.current.score < oldBestOfType)
-                setBestByType((prev) => ({
-                  ...prev,
-                  [msg.current.params.type]: msg.current.params,
-                }));
+
+              setBestByType((prev) => {
+                const oldBestOfType =
+                  prev[msg.current.params.type]?.score ?? Number.POSITIVE_INFINITY;
+                if (msg.current.score < oldBestOfType) {
+                  return {
+                    ...prev,
+                    [msg.current.params.type]: msg.current,
+                  };
+                }
+                return prev;
+              });
 
               if (!finalBest || msg.current.score < finalBest.score) {
                 finalBest = msg.current;

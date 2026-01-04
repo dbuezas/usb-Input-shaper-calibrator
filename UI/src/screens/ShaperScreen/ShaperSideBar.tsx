@@ -539,24 +539,6 @@ export default function ShaperSideBar() {
                   </span>
                 </ExplainTooltip>
               </div>
-              <div className="text-muted-foreground mt-1 text-xs">
-                Best score:{' '}
-                <ExplainTooltip
-                  title="Score"
-                  accurate={
-                    scoreMode === 'flatness'
-                      ? flatnessScoreTooltip
-                      : scoreMode === 'variation'
-                        ? variationScoreTooltip
-                        : scoreTooltip
-                  }
-                  intuition={<>Best score found so far for the selected score mode.</>}
-                >
-                  <span className="font-medium underline decoration-dotted underline-offset-2">
-                    {optimiseProgress.best.score.toFixed(9)}
-                  </span>
-                </ExplainTooltip>
-              </div>
             </div>
           )}
           {!maxHoldSpectrum.length && (
