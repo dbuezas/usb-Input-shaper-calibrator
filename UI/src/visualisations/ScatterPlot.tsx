@@ -90,7 +90,7 @@ export const ScatterPlot = ({
     const left = DEFAULT_AXIS_PADDING.left;
     const top = DEFAULT_AXIS_PADDING.top;
 
-    const radius = 2.4;
+    const radius = 1;
     for (const p of points) {
       if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
       const x = left + xScale(p.x);

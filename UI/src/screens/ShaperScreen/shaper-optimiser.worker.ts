@@ -39,12 +39,10 @@ export type WorkerMessage = WorkerStartMessage | WorkerRefineMessage;
 
 export type WorkerProgressMessage = {
   type: 'progress';
-  percent: number;
   iterationsDone: number;
   iterationsTotal: number;
-  current?: OptimisationResult;
-  best?: OptimisationResult;
-  bestByType?: BestByType;
+  current: OptimisationResult;
+  best: OptimisationResult;
 };
 
 export type WorkerDoneMessage = {
@@ -233,7 +231,7 @@ const refine = (msg: WorkerRefineMessage) => {
     cornering: msg.cornering,
     scoreRangeHz,
     onStep: (s) => {
-      if (Number.isFinite(s.score) && (!best || s.score < best.score)) {
+      if (!best || s.score < best.score) {
         best = { params: s.params, score: s.score };
       }
 
@@ -241,12 +239,10 @@ const refine = (msg: WorkerRefineMessage) => {
         type: 'progress',
         // Refinement has an unknown (data-dependent) number of iterations.
         // Do not account it towards iteration totals.
-        percent: 0,
         iterationsDone: 0,
         iterationsTotal: 0,
         current: { params: s.params, score: s.score },
         best,
-        bestByType: best ? ({ [start.type]: best } satisfies BestByType) : undefined,
       } satisfies WorkerOutMessage);
     },
   });
@@ -298,20 +294,16 @@ const bruteForce = (msg: WorkerStartMessage) => {
           const score = scoreCandidate(magnitudes, params, scoreMode, msg.cornering, scoreRangeHz);
           const current: OptimisationResult = { params, score };
 
-          if (Number.isFinite(score)) {
-            const prevByType = bestByType[candidateType];
-            if (!prevByType || score < prevByType.score) bestByType[candidateType] = current;
-            if (!best || score < best.score) best = current;
-          }
+          const prevByType = bestByType[candidateType];
+          if (!prevByType || score < prevByType.score) bestByType[candidateType] = current;
+          if (!best || score < best.score) best = current;
 
           self.postMessage({
             type: 'progress',
-            percent: (100 * iterationsDone) / Math.max(1, iterationsTotal),
             iterationsDone,
             iterationsTotal,
             current,
             best,
-            bestByType,
           } satisfies WorkerOutMessage);
         }
       }
@@ -355,12 +347,10 @@ const bruteForce = (msg: WorkerStartMessage) => {
           type: 'progress',
           // Refinement progress is not included in the iteration totals.
           // Keep the coarse progress fixed while still streaming updated results.
-          percent: (100 * iterationsDone) / Math.max(1, iterationsTotal),
           iterationsDone,
           iterationsTotal,
           current,
           best,
-          bestByType,
         } satisfies WorkerOutMessage);
       },
     });

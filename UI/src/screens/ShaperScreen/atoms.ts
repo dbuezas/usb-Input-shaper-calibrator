@@ -11,6 +11,7 @@ import {
 import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
 import { flatnessScoreFromMagnitudeSpectrum } from './shaper-scores/flatness';
 import { klipperScoreFromMagnitudeSpectrum, suggestedMaxAccel } from './shaper-scores/klipper';
+import type { OptimisationResult } from './shaper-optimiser.worker';
 
 export const shaperParamsAtom = atom<ShaperParams>({
   type: 'zv',
@@ -71,12 +72,6 @@ export const delayCentroidSecondsAtom = atom((get) => {
   return computeDelayCentroidSeconds(get(shaperParamsAtom));
 });
 
-export type OptimisationHistoryEntry = {
-  params: ShaperParams;
-  score: number;
-  recordedAtMs: number;
-};
-
-export const optimisationHistoryAtom = atom<OptimisationHistoryEntry[]>([]);
+export const optimisationHistoryAtom = atom<OptimisationResult[]>([]);
 
 export const analysisRangeAtom = atom(FREQUENCY_SLIDER_RANGE_HZ);

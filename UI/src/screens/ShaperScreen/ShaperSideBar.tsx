@@ -32,6 +32,9 @@ export default function ShaperSideBar() {
   const [analysisRange, setAnalysisRange] = useAtom(analysisRangeAtom);
 
   const { runAutoOptimise, optimiseProgress, bestByType } = useOptimisers();
+  const percent = optimiseProgress
+    ? (100 * optimiseProgress.iterationsDone) / optimiseProgress.iterationsTotal
+    : 0;
 
   const scoreTooltip = (
     <>
@@ -507,13 +510,13 @@ export default function ShaperSideBar() {
                 </ExplainTooltip>
               </div>
               <div className="text-muted-foreground text-xs">
-                {optimiseProgress.percent.toFixed(0)}% ({optimiseProgress.iterationsDone}/
+                {percent.toFixed(0)}% ({optimiseProgress.iterationsDone}/
                 {optimiseProgress.iterationsTotal})
               </div>
               <div className="bg-muted mt-2 h-2 w-full rounded">
                 <div
                   className="bg-primary h-2 rounded"
-                  style={{ width: `${Math.max(0, Math.min(100, optimiseProgress.percent))}%` }}
+                  style={{ width: `${Math.max(0, Math.min(100, percent))}%` }}
                 />
               </div>
               <div className="text-muted-foreground mt-2 text-xs">
@@ -532,7 +535,7 @@ export default function ShaperSideBar() {
                   }
                 >
                   <span className="font-medium underline decoration-dotted underline-offset-2">
-                    {optimiseProgress.current ? optimiseProgress.current.score.toFixed(9) : '—'}
+                    {optimiseProgress.current.score.toFixed(9)}
                   </span>
                 </ExplainTooltip>
               </div>
@@ -550,7 +553,7 @@ export default function ShaperSideBar() {
                   intuition={<>Best score found so far for the selected score mode.</>}
                 >
                   <span className="font-medium underline decoration-dotted underline-offset-2">
-                    {optimiseProgress.best ? optimiseProgress.best.score.toFixed(9) : '—'}
+                    {optimiseProgress.best.score.toFixed(9)}
                   </span>
                 </ExplainTooltip>
               </div>

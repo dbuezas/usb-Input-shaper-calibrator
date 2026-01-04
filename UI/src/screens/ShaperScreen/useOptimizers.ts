@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { OPTIMIZER_UPDATE_EVERY_MS, WEB_WORKER_THREADS } from '@/constants';
-import { ALL_SHAPER_TYPES, type InputShaperType } from './input-shaper';
+import { ALL_SHAPER_TYPES } from './input-shaper';
 import ShaperOptimiserWorker from './shaper-optimiser.worker?worker';
 import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
 import type {
@@ -15,7 +15,6 @@ import {
   shaperScoreModeAtom,
   analysisRangeAtom,
   optimisationHistoryAtom,
-  type OptimisationHistoryEntry,
   shaperParamsAtom,
   corneringSettingsAtom,
 } from './atoms';
@@ -39,36 +38,9 @@ export default function useOptimisers() {
   const [bestByType, setBestByType] = useState<BestByType>({});
   const setOptimisationHistory = useSetAtom(optimisationHistoryAtom);
   const workersRef = useRef<Set<Worker>>(new Set());
-  const lastBestByTypeRef = useRef<BestByType>({});
-  const seenHistoryKeysRef = useRef<Set<string>>(new Set());
 
   const workerCount = Math.min(WEB_WORKER_THREADS, ALL_SHAPER_TYPES.length);
   const typeChunks = chunkRoundRobin(ALL_SHAPER_TYPES, workerCount);
-
-  const recordBestByType = (next: BestByType) => {
-    const now = performance.now();
-    const prev = lastBestByTypeRef.current;
-
-    const newEntries: OptimisationHistoryEntry[] = [];
-    for (const [typeKey, result] of Object.entries(next) as [
-      InputShaperType,
-      OptimisationResult,
-    ][]) {
-      const prevResult = prev[typeKey];
-      if (prevResult && prevResult.score === result.score) continue;
-
-      const p = result.params;
-      const key = `${p.type}:${p.fHz.toFixed(4)}:${p.zeta.toFixed(6)}:${p.vtol.toFixed(6)}:${result.score.toFixed(12)}`;
-      if (seenHistoryKeysRef.current.has(key)) continue;
-      seenHistoryKeysRef.current.add(key);
-      newEntries.push({ params: p, score: result.score, recordedAtMs: now });
-    }
-
-    if (newEntries.length) {
-      setOptimisationHistory((existing) => [...existing, ...newEntries]);
-    }
-    lastBestByTypeRef.current = next;
-  };
 
   useEffect(() => {
     for (const w of workersRef.current) {
@@ -82,48 +54,30 @@ export default function useOptimisers() {
     for (const w of workersRef.current) w.terminate();
     workersRef.current = new Set(typeChunks.map(() => new ShaperOptimiserWorker()));
     setOptimisationHistory([]);
-    lastBestByTypeRef.current = {};
-    seenHistoryKeysRef.current = new Set();
-
-    const magnitudes = maxHoldSpectrum;
-
     const perWorkerProgress = new Map<Worker, WorkerProgressMessage>();
-    const perWorkerBestByType = new Map<Worker, BestByType>();
     let lastUpdateTime = 0;
-    const computeAggregateProgress = (): WorkerProgressMessage | null => {
-      if (!perWorkerProgress.size) return null;
+    const computeAggregateProgress = (msg: WorkerProgressMessage): WorkerProgressMessage => {
       let iterationsDone = 0;
       let iterationsTotal = 0;
-      let best: OptimisationResult | undefined;
-      // "current" is inherently ambiguous across workers; take the most recent sender's current.
-      const last = Array.from(perWorkerProgress.values()).at(-1);
-      const current = last?.current;
+      let { best } = msg;
       for (const p of perWorkerProgress.values()) {
         iterationsDone += p.iterationsDone;
         iterationsTotal += p.iterationsTotal;
-        if (p.best && (!best || p.best.score < best.score)) best = p.best;
+        if (p.best.score < best.score) best = p.best;
       }
 
-      const percent = iterationsTotal ? (100 * iterationsDone) / iterationsTotal : 0;
-      return { percent, iterationsDone, iterationsTotal, current, best, type: 'progress' };
-    };
-
-    const mergeBestByType = (): BestByType => {
-      const merged: BestByType = {};
-      for (const map of perWorkerBestByType.values()) {
-        for (const [typeKey, result] of Object.entries(map) as [
-          InputShaperType,
-          OptimisationResult,
-        ][]) {
-          const prev = merged[typeKey];
-          if (!prev || result.score < prev.score) merged[typeKey] = result;
-        }
-      }
-      return merged;
+      return {
+        iterationsDone,
+        iterationsTotal,
+        current: msg.current,
+        best,
+        type: 'progress',
+      };
     };
 
     const completion = new Promise<void>((resolve) => {
       let idx = 0;
+      let finalBest: OptimisationResult | undefined;
       for (const worker of workersRef.current) {
         const candidateTypes = typeChunks[idx++];
 
@@ -132,18 +86,24 @@ export default function useOptimisers() {
           switch (msg.type) {
             case 'progress': {
               perWorkerProgress.set(worker, msg);
-              if (msg.bestByType) perWorkerBestByType.set(worker, msg.bestByType);
-              setOptimiseProgress(computeAggregateProgress());
-              const merged = mergeBestByType();
+              setOptimisationHistory((existing) => [...existing, msg.current]);
+              setOptimiseProgress(computeAggregateProgress(msg));
+              const oldBestOfType =
+                bestByType[msg.current.params.type]?.score ?? Number.POSITIVE_INFINITY;
+              if (msg.current.score < oldBestOfType)
+                setBestByType((prev) => ({
+                  ...prev,
+                  [msg.current.params.type]: msg.current.params,
+                }));
 
-              setBestByType(merged);
-              recordBestByType(merged);
+              if (!finalBest || msg.current.score < finalBest.score) {
+                finalBest = msg.current;
+              }
 
-              const previewParams = msg.current?.params;
               const now = performance.now();
-              if (previewParams && now - lastUpdateTime > OPTIMIZER_UPDATE_EVERY_MS) {
+              if (now - lastUpdateTime > OPTIMIZER_UPDATE_EVERY_MS) {
                 lastUpdateTime = now;
-                setShaperParams(previewParams);
+                setShaperParams(msg.current.params);
               }
               return;
             }
@@ -153,18 +113,8 @@ export default function useOptimisers() {
               workersRef.current.delete(worker);
 
               if (workersRef.current.size === 0) {
-                let finalBest: OptimisationResult | { score: number } = {
-                  score: Number.POSITIVE_INFINITY,
-                };
-                for (const [, bestByType] of perWorkerBestByType) {
-                  for (const result of Object.values(bestByType)) {
-                    if (result.score < finalBest.score) {
-                      finalBest = result;
-                    }
-                  }
-                }
                 // Snap UI to the final best result after optimisation finishes.
-                if ('params' in finalBest) setShaperParams(finalBest.params);
+                if (finalBest) setShaperParams(finalBest.params);
                 resolve();
               }
             }
@@ -175,7 +125,7 @@ export default function useOptimisers() {
 
         worker.postMessage({
           type: 'start',
-          magnitudes,
+          magnitudes: maxHoldSpectrum,
           scoreRangeHz,
           scoreMode,
           cornering: corneringSettings,
