@@ -5,12 +5,7 @@ import {
   type ShaperScoreMode,
   estimatePeakHz,
 } from '@/screens/ShaperScreen/input-shaper';
-import {
-  SHAPER_F0_RANGE_HZ,
-  SHAPER_VTOL_RANGE,
-  SHAPER_ZETA_RANGE,
-  OPTIMIZER_UPDATE_EVERY_MS,
-} from '@/constants';
+import { SHAPER_F0_RANGE_HZ, SHAPER_VTOL_RANGE, SHAPER_ZETA_RANGE } from '@/constants';
 
 import { variationScoreFromMagnitudeSpectrum } from '@/screens/ShaperScreen/shaper-scores/variation';
 import { flatnessScoreFromMagnitudeSpectrum } from './shaper-scores/flatness';
@@ -380,8 +375,6 @@ const refine = (msg: WorkerRefineMessage) => {
   let best: OptimisationResult | undefined;
   if (Number.isFinite(state.score)) best = { params: state.params, score: state.score };
 
-  let lastUiUpdate = performance.now();
-
   let iterationsDone = 0;
   for (let i = 0; i < safetyCapSteps; i++) {
     state = fineStep(magnitudes, state, msg.scoreMode, cornering, scoreRangeHz, bounds);
@@ -389,20 +382,16 @@ const refine = (msg: WorkerRefineMessage) => {
 
     iterationsDone = i + 1;
 
-    const now = performance.now();
-    if (now - lastUiUpdate > OPTIMIZER_UPDATE_EVERY_MS) {
-      lastUiUpdate = now;
-      const out: WorkerProgressMessage = {
-        type: 'progress',
-        percent: (100 * (i + 1)) / Math.max(1, safetyCapSteps),
-        iterationsDone: i + 1,
-        iterationsTotal: safetyCapSteps,
-        current: { params: state.params, score: state.score },
-        best,
-        bestByType: { [start.type]: best } satisfies BestByType,
-      };
-      self.postMessage(out satisfies WorkerOutMessage);
-    }
+    self.postMessage({
+      type: 'progress',
+      percent: (100 * (i + 1)) / Math.max(1, safetyCapSteps),
+      iterationsDone: i + 1,
+      iterationsTotal: safetyCapSteps,
+      current: { params: state.params, score: state.score },
+      best,
+      bestByType: { [start.type]: best },
+    } satisfies WorkerOutMessage);
+
     if (state.done) break;
   }
 
@@ -453,7 +442,6 @@ const bruteForce = (msg: WorkerStartMessage) => {
 
   let best: OptimisationResult | undefined;
   const bestByType: BestByType = {};
-  let lastUiUpdate = performance.now();
 
   // Phase 1: coarse grid search (interleaved worst->best across types)
   const peakHz = estimatePeakHz(magnitudes);
@@ -506,20 +494,16 @@ const bruteForce = (msg: WorkerStartMessage) => {
       coarseHeap.push(next.next);
     }
 
-    const now = performance.now();
-    if (now - lastUiUpdate > OPTIMIZER_UPDATE_EVERY_MS) {
-      lastUiUpdate = now;
-      const out: WorkerProgressMessage = {
-        type: 'progress',
-        percent: (100 * iterationsDone) / Math.max(1, iterationsTotal),
-        iterationsDone,
-        iterationsTotal,
-        current,
-        best,
-        bestByType,
-      };
-      self.postMessage(out satisfies WorkerOutMessage);
-    }
+    const out: WorkerProgressMessage = {
+      type: 'progress',
+      percent: (100 * iterationsDone) / Math.max(1, iterationsTotal),
+      iterationsDone,
+      iterationsTotal,
+      current,
+      best,
+      bestByType,
+    };
+    self.postMessage(out satisfies WorkerOutMessage);
   }
 
   if (skipFine) {
@@ -574,20 +558,16 @@ const bruteForce = (msg: WorkerStartMessage) => {
       heap.push(nextState);
     }
 
-    const now = performance.now();
-    if (now - lastUiUpdate > OPTIMIZER_UPDATE_EVERY_MS) {
-      lastUiUpdate = now;
-      const out: WorkerProgressMessage = {
-        type: 'progress',
-        percent: (100 * iterationsDone) / Math.max(1, iterationsTotal),
-        iterationsDone,
-        iterationsTotal,
-        current,
-        best,
-        bestByType,
-      };
-      self.postMessage(out satisfies WorkerOutMessage);
-    }
+    const out: WorkerProgressMessage = {
+      type: 'progress',
+      percent: (100 * iterationsDone) / Math.max(1, iterationsTotal),
+      iterationsDone,
+      iterationsTotal,
+      current,
+      best,
+      bestByType,
+    };
+    self.postMessage(out satisfies WorkerOutMessage);
   }
 
   const out: WorkerDoneMessage = { type: 'done', best, bestByType };
@@ -598,11 +578,9 @@ self.onmessage = (evt: MessageEvent<WorkerMessage>) => {
   const msg = evt.data;
 
   switch (msg.type) {
-    case 'refine': {
+    case 'refine':
       return refine(msg);
-    }
-    case 'start': {
+    case 'start':
       return bruteForce(msg);
-    }
   }
 };

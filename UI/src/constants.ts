@@ -107,4 +107,4 @@ export const SHAPER_VTOL_RANGE: [number, number] = [0, 0.5];
 export const CORNERING_SPEED_RANGE_MM_S: [number, number] = [0.5, 60];
 export const CORNERING_JUNCTION_DEVIATION_RANGE_MM: [number, number] = [0, 0.2];
 
-export const OPTIMIZER_UPDATE_EVERY_MS = 50;
+export const OPTIMIZER_UPDATE_EVERY_MS = 32;

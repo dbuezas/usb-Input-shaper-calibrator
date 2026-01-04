@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
-import { WEB_WORKER_THREADS } from '@/constants';
+import { OPTIMIZER_UPDATE_EVERY_MS, WEB_WORKER_THREADS } from '@/constants';
 import type { InputShaperType } from './input-shaper';
 import ShaperOptimiserWorker from './shaper-optimiser.worker?worker';
 import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
@@ -65,7 +65,7 @@ export default function useOptimisers() {
   const [bestByType, setBestByType] = useState<BestByType>({});
   const [, setOptimisationHistory] = useAtom(optimisationHistoryAtom);
   const [optimisePreviewMode, setOptimisePreviewMode] = useState<'best' | 'current'>('current');
-  const optimisePreviewModeRef = useRef<'best' | 'current'>('best');
+  const optimisePreviewModeRef = useRef<'best' | 'current'>('current');
   const optimiserWorkersRef = useRef<Worker[]>([]);
   const cancelRef = useRef(false);
   const lastBestByTypeRef = useRef<BestByType>({});
@@ -141,138 +141,133 @@ export default function useOptimisers() {
     const workers = typeChunks.map(() => new ShaperOptimiserWorker());
     optimiserWorkersRef.current = workers;
 
-    try {
-      const perWorkerProgress = new Map<Worker, WorkerProgressMessage>();
-      const perWorkerBestByType = new Map<Worker, BestByType>();
+    const perWorkerProgress = new Map<Worker, WorkerProgressMessage>();
+    const perWorkerBestByType = new Map<Worker, BestByType>();
+    let lastUpdateTime = 0;
+    const computeAggregateProgress = (): WorkerProgressMessage | null => {
+      if (!perWorkerProgress.size) return null;
+      let iterationsDone = 0;
+      let iterationsTotal = 0;
+      let best: OptimisationResult | undefined;
+      // "current" is inherently ambiguous across workers; take the most recent sender's current.
+      const last = Array.from(perWorkerProgress.values()).at(-1);
+      const current = last?.current;
+      for (const p of perWorkerProgress.values()) {
+        iterationsDone += p.iterationsDone;
+        iterationsTotal += p.iterationsTotal;
+        if (p.best && (!best || p.best.score < best.score)) best = p.best;
+      }
 
-      const computeAggregateProgress = (): WorkerProgressMessage | null => {
-        if (!perWorkerProgress.size) return null;
-        let iterationsDone = 0;
-        let iterationsTotal = 0;
-        let best: OptimisationResult | undefined;
-        // "current" is inherently ambiguous across workers; take the most recent sender's current.
-        const last = Array.from(perWorkerProgress.values()).at(-1);
-        const current = last?.current;
-        for (const p of perWorkerProgress.values()) {
-          iterationsDone += p.iterationsDone;
-          iterationsTotal += p.iterationsTotal;
-          if (p.best && (!best || p.best.score < best.score)) best = p.best;
+      const percent = iterationsTotal ? (100 * iterationsDone) / iterationsTotal : 0;
+      return { percent, iterationsDone, iterationsTotal, current, best, type: 'progress' };
+    };
+
+    const mergeBestByType = (): BestByType => {
+      const merged: BestByType = {};
+      for (const map of perWorkerBestByType.values()) {
+        for (const [typeKey, result] of Object.entries(map) as [
+          InputShaperType,
+          OptimisationResult,
+        ][]) {
+          const prev = merged[typeKey];
+          if (!prev || result.score < prev.score) merged[typeKey] = result;
         }
+      }
+      return merged;
+    };
 
-        const percent = iterationsTotal ? (100 * iterationsDone) / iterationsTotal : 0;
-        return { percent, iterationsDone, iterationsTotal, current, best, type: 'progress' };
+    const completion = new Promise<void>((resolve) => {
+      let doneCount = 0;
+      let settled = false;
+      const cleanups: Array<() => void> = [];
+
+      let finalBest: OptimisationResult | undefined;
+
+      const settle = () => {
+        if (settled) return;
+        settled = true;
+        for (const c of cleanups) c();
+
+        // Snap UI to the final best result after optimisation finishes.
+        if (finalBest && !cancelRef.current) {
+          setType(finalBest.params.type);
+          setF0(finalBest.params.fHz);
+          setZeta(finalBest.params.zeta);
+          setVtol(finalBest.params.vtol);
+        }
+        resolve();
       };
 
-      const mergeBestByType = (): BestByType => {
-        const merged: BestByType = {};
-        for (const map of perWorkerBestByType.values()) {
-          for (const [typeKey, result] of Object.entries(map) as [
-            InputShaperType,
-            OptimisationResult,
-          ][]) {
-            const prev = merged[typeKey];
-            if (!prev || result.score < prev.score) merged[typeKey] = result;
+      for (let idx = 0; idx < workers.length; idx++) {
+        const worker = workers[idx];
+        const candidateTypes = typeChunks[idx];
+
+        const handleMessage = (evt: MessageEvent<WorkerOutMessage>) => {
+          const msg = evt.data;
+          switch (msg.type) {
+            case 'progress': {
+              perWorkerProgress.set(worker, msg);
+              if (msg.bestByType) perWorkerBestByType.set(worker, msg.bestByType);
+
+              const aggregate = computeAggregateProgress();
+              if (aggregate) setOptimiseProgress(aggregate);
+              const merged = mergeBestByType();
+              setBestByType(merged);
+              recordBestByType(merged);
+
+              const previewParams =
+                optimisePreviewModeRef.current === 'current'
+                  ? msg.current?.params
+                  : aggregate?.best?.params;
+              const now = performance.now();
+              if (previewParams && now - lastUpdateTime > OPTIMIZER_UPDATE_EVERY_MS) {
+                lastUpdateTime = now;
+                setType(previewParams.type);
+                setF0(previewParams.fHz);
+                setZeta(previewParams.zeta);
+                setVtol(previewParams.vtol);
+              }
+              return;
+            }
+
+            case 'done': {
+              doneCount++;
+              if (msg.bestByType) perWorkerBestByType.set(worker, msg.bestByType);
+              const merged = mergeBestByType();
+              setBestByType(merged);
+              recordBestByType(merged);
+              if (msg.best && (!finalBest || msg.best.score < finalBest.score)) {
+                finalBest = msg.best;
+              }
+              if (doneCount >= workers.length) settle();
+            }
           }
-        }
-        return merged;
-      };
-
-      const completion = new Promise<void>((resolve) => {
-        let doneCount = 0;
-        let settled = false;
-        const cleanups: Array<() => void> = [];
-
-        let finalBest: OptimisationResult | undefined;
-
-        const settle = () => {
-          if (settled) return;
-          settled = true;
-          for (const c of cleanups) c();
-
-          // Snap UI to the final best result after optimisation finishes.
-          if (finalBest && !cancelRef.current) {
-            setType(finalBest.params.type);
-            setF0(finalBest.params.fHz);
-            setZeta(finalBest.params.zeta);
-            setVtol(finalBest.params.vtol);
-          }
-          resolve();
         };
 
-        for (let idx = 0; idx < workers.length; idx++) {
-          const worker = workers[idx];
-          const candidateTypes = typeChunks[idx];
+        worker.addEventListener('message', handleMessage);
+        cleanups.push(() => worker.removeEventListener('message', handleMessage));
 
-          const handleMessage = (evt: MessageEvent<WorkerOutMessage>) => {
-            const msg = evt.data;
-            switch (msg.type) {
-              case 'progress': {
-                perWorkerProgress.set(worker, msg);
-                if (msg.bestByType) perWorkerBestByType.set(worker, msg.bestByType);
+        worker.postMessage({
+          type: 'start',
+          magnitudes,
+          scoreRangeHz,
+          scoreMode,
+          cornering: corneringToWorker(),
+          candidateTypes,
+        } satisfies WorkerStartMessage);
+      }
 
-                const aggregate = computeAggregateProgress();
-                if (aggregate) setOptimiseProgress(aggregate);
-                const merged = mergeBestByType();
-                setBestByType(merged);
-                recordBestByType(merged);
+      const cancelPoll = window.setInterval(() => {
+        if (!cancelRef.current) return;
+        // Cancelling should not send messages around; just kill worker threads.
+        for (const w of workers) w.terminate();
+        settle();
+      }, 100);
+      cleanups.push(() => window.clearInterval(cancelPoll));
+    });
 
-                const previewParams =
-                  optimisePreviewModeRef.current === 'current'
-                    ? msg.current?.params
-                    : aggregate?.best?.params;
-                if (previewParams) {
-                  setType(previewParams.type);
-                  setF0(previewParams.fHz);
-                  setZeta(previewParams.zeta);
-                  setVtol(previewParams.vtol);
-                }
-                return;
-              }
-
-              case 'done': {
-                doneCount++;
-                if (msg.bestByType) perWorkerBestByType.set(worker, msg.bestByType);
-                const merged = mergeBestByType();
-                setBestByType(merged);
-                recordBestByType(merged);
-                if (msg.best && (!finalBest || msg.best.score < finalBest.score)) {
-                  finalBest = msg.best;
-                }
-                if (doneCount >= workers.length) settle();
-              }
-            }
-          };
-
-          worker.addEventListener('message', handleMessage);
-          cleanups.push(() => worker.removeEventListener('message', handleMessage));
-
-          worker.postMessage({
-            type: 'start',
-            magnitudes,
-            scoreRangeHz,
-            scoreMode,
-            cornering: corneringToWorker(),
-            candidateTypes,
-          } satisfies WorkerStartMessage);
-        }
-
-        const cancelPoll = window.setInterval(() => {
-          if (!cancelRef.current) return;
-          // Cancelling should not send messages around; just kill worker threads.
-          for (const w of workers) w.terminate();
-          settle();
-        }, 100);
-        cleanups.push(() => window.clearInterval(cancelPoll));
-      });
-
-      await new Promise((r) => setTimeout(r, 0));
-      await completion;
-    } finally {
-      for (const w of workers) w.terminate();
-      if (optimiserWorkersRef.current === workers) optimiserWorkersRef.current = [];
-      setIsOptimising(false);
-      setOptimiseProgress(null);
-    }
+    await new Promise((r) => setTimeout(r, 0));
+    await completion;
   };
 
   const runCoarseTuneSelected = async () => {
