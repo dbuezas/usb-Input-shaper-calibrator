@@ -5,10 +5,9 @@ import {
   SPECTROGRAM_PLOT_WIDTH,
   SPECTROGRAM_WATERFALL_HEIGHT,
 } from '@/constants';
-import { ExplainTooltip } from '@/components/ExplainTooltip';
-import { ScatterPlot } from '@/visualisations/ScatterPlot';
-import { computeMarlinShaperTaps } from './input-shaper';
+import { ScatterPlot, type ScatterPoint } from '@/visualisations/ScatterPlot';
 import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
+import { SHAPER_COLORS } from './shaper-colors';
 import {
   analysisRangeAtom,
   currentMaxAccelAtom,
@@ -21,31 +20,7 @@ import {
   shaperParamsAtom,
 } from './atoms';
 import { type InputShaperType } from './input-shaper';
-
-const maxAccelAccurate = (
-  <>
-    A projection of the highest acceleration where Klipper’s smoothing model stays under a fixed
-    threshold: <code className="font-mono">smoothing(taps, accel, cornering) ≤ 0.12</code>. It’s
-    found via bisection search.
-    <div className="mt-2">
-      <h4 className="text-sm font-semibold">Cornering model</h4>
-      <div className="mt-1">
-        The smoothing model depends on your firmware’s cornering behavior.
-        <ul className="mt-2 list-disc space-y-1 pl-5">
-          <li>
-            <b>SCV (Klipper)</b>: planner maintains a target speed through sharp corners.
-          </li>
-          <li>
-            <b>Jerk (Marlin)</b>: classic jerk limit (approx. corner speed ≈ jerk).
-          </li>
-          <li>
-            <b>Junction deviation (Marlin)</b>: corner speed derived from accel + JD.
-          </li>
-        </ul>
-      </div>
-    </div>
-  </>
-);
+import type { OptimisationResult } from './shaper-optimiser.worker';
 
 export default function ShaperPlots() {
   const width = SPECTROGRAM_PLOT_WIDTH;
@@ -62,57 +37,25 @@ export default function ShaperPlots() {
   const optimisationHistory = useAtomValue(optimisationHistoryAtom);
   const historyMode = useAtomValue(historyModeAtom);
 
-  const typeColor: Record<InputShaperType, string> = {
-    zv: `rgba(0, 220, 255, 1)`,
-    zvd: `rgba(0, 255, 120, 1)`,
-    zvdd: `rgba(255, 200, 0, 1)`,
-    zvddd: `rgba(255, 120, 0, 1)`,
-    mzv: `rgba(255, 0, 200, 1)`,
-    ei: `rgba(180, 140, 255, 1)`,
-    '2hei': `rgba(255, 90, 140, 1)`,
-    '3hei': `rgba(120, 200, 255, 1)`,
-  };
+  const typeColor: Record<InputShaperType, string> = SHAPER_COLORS;
 
-  type HistoryPoint = {
-    x: number;
-    y: number;
-    color: string;
-    radius?: number;
-    strokeColor?: string;
-    strokeWidth?: number;
-    type: InputShaperType;
-    centroidMs: number;
-    maxAccel: number;
-    score: number;
-    params: typeof shaperParams;
-    disabled: boolean;
-    onClick?: () => void;
-  };
+  type HistoryPoint = ScatterPoint<OptimisationResult>;
 
   const historyPoints = optimisationHistory
     .map((h): HistoryPoint => {
-      const centroidMs = h.delay * 1000;
-      const maxAccel = h.maxAccel;
       return {
-        x: historyMode === 'centroid_ms' ? centroidMs : maxAccel,
+        x: historyMode === 'centroid_ms' ? h.delay * 1000 : h.maxAccel,
         y: h.score,
         color: typeColor[h.params.type],
         strokeColor: shaperParams.type === h.params.type ? 'black' : '',
         strokeWidth: shaperParams.type === h.params.type ? 0.5 : 0,
         radius: shaperParams.type === h.params.type ? 2 : 0.5,
-        type: h.params.type,
-        centroidMs,
-        maxAccel,
-        score: h.score,
-        params: h.params,
+        meta: h,
         disabled: shaperParams.type !== h.params.type,
-        onClick: () => {
-          setShaperParams(h.params);
-        },
       };
     })
     .filter((v): v is NonNullable<typeof v> => Boolean(v))
-    .sort((a, _b) => (a.type === shaperParams.type ? 1 : -1));
+    .sort((a, _b) => (a.meta?.params.type === shaperParams.type ? 1 : -1));
 
   const currentPoint: HistoryPoint = {
     x:
@@ -122,37 +65,16 @@ export default function ShaperPlots() {
     radius: 3,
     strokeColor: 'rgba(0, 0, 0, 0.9)',
     strokeWidth: 1.5,
-    type: shaperParams.type,
-    centroidMs: delayCentroidSeconds * 1000,
-    maxAccel: currentMaxAccel ?? Number.NaN,
-    score: currentScore,
-    params: shaperParams,
+    meta: {
+      delay: delayCentroidSeconds,
+      maxAccel: currentMaxAccel ?? Number.NaN,
+      score: currentScore,
+      params: shaperParams,
+    },
     disabled: true,
   };
 
   const allHistoryPoints = [...historyPoints, currentPoint];
-
-  const taps = computeMarlinShaperTaps(shaperParams);
-  const tapCoefficientsText = taps.a.map((v) => v.toFixed(6)).join(', ');
-  const tapTimingsMsText = taps.t.map((t) => (t * 1000).toFixed(2)).join(', ');
-  const tapPhasePercent = taps.t.map((t) => t * shaperParams.fHz * 100);
-  const tapPhaseText = tapPhasePercent.map((v) => v.toFixed(1)).join(', ');
-
-  const delayCentroidTooltip = (
-    <div className="max-w-90 leading-snug">
-      <h3 className="text-sm font-semibold">Delay centroid</h3>
-      <div className="mt-2">
-        A rough “center of mass” of the shaper taps in time:{' '}
-        <span className="font-mono">Σ(aᵢ·tᵢ) / Σ(aᵢ)</span>.
-      </div>
-      <div className="text-muted-foreground mt-2">
-        This matters because a shaper spreads a single motion command over time. At a 90° corner
-        (finish X, then start Y), the delayed tail of X can overlap with the start of Y. That
-        overlap is one reason corners look rounded: you’re effectively moving in X and Y at the same
-        time for a short moment.
-      </div>
-    </div>
-  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -173,7 +95,7 @@ export default function ShaperPlots() {
             {
               dataAtom: shaperResponseAtom,
               mode: 'line',
-              color: 'rgba(255, 255, 255, 0.8)',
+              color: SHAPER_COLORS[shaperParams.type].replace(', 1)', ', 0.85)'),
               yAxis: 'right',
             },
           ]}
@@ -187,34 +109,6 @@ export default function ShaperPlots() {
           scaleMax={maxHoldSpectrum.length ? Math.max(...maxHoldSpectrum) : undefined}
           scaleMaxRight={shaperResponse.length ? Math.max(...shaperResponse) : undefined}
         />
-      </div>
-      <div className="border-border mt-4 rounded-lg border p-3">
-        <div className="text-muted-foreground text-sm">Score</div>
-        <div className="text-muted-foreground mt-2 text-xs">
-          Current score:{' '}
-          <span className="font-medium underline decoration-dotted underline-offset-2">
-            {currentScore.toFixed(9)}
-          </span>
-        </div>
-
-        <div className="text-muted-foreground mt-1 text-xs">
-          Suggested max accel:{' '}
-          <ExplainTooltip
-            title="Suggested max accel"
-            accurate={maxAccelAccurate}
-            intuition={
-              <>
-                If you push accel above this, the shaper tends to “round off” corners more (it’s
-                trading sharpness for reduced ringing).
-              </>
-            }
-          >
-            <span className="font-medium underline decoration-dotted underline-offset-2">
-              {(currentMaxAccel ?? 0).toFixed(2)}
-            </span>
-          </ExplainTooltip>{' '}
-          mm/s²
-        </div>
       </div>
 
       {allHistoryPoints.length > 0 && (
@@ -233,69 +127,38 @@ export default function ShaperPlots() {
             width={width}
             height={height}
             xTickFormat={(v) => `${Math.round(v)}`}
+            onPointClick={(meta) => {
+              if (!meta) return;
+              setShaperParams(meta.params);
+            }}
+            onPointHover={(meta) => {
+              if (!meta) return;
+              setShaperParams(meta.params);
+            }}
             getHover={(p) => {
-              if (p.strokeColor) {
+              const meta = p.meta;
+              if (!meta) {
                 return {
-                  title: 'Current settings',
-                  lines: [
-                    `centroid: ${p.centroidMs.toFixed(2)} ms`,
-                    `max accel: ${p.maxAccel.toFixed(0)} mm/s²`,
-                    `score: ${p.score.toFixed(9)}`,
-                    `f0: ${p.params.fHz.toFixed(2)} Hz`,
-                    `zeta: ${p.params.zeta.toFixed(3)}`,
-                    `vtol: ${p.params.vtol.toFixed(3)}`,
-                  ],
+                  title: 'Candidate',
+                  lines: [`x: ${p.x.toFixed(2)}`, `y: ${p.y.toFixed(6)}`],
                 };
               }
+
               return {
-                title: p.type.toUpperCase(),
+                title: meta.params.type.toUpperCase(),
                 lines: [
-                  `centroid: ${p.centroidMs.toFixed(2)} ms`,
-                  `max accel: ${p.maxAccel.toFixed(0)} mm/s²`,
-                  `score: ${p.score.toFixed(9)}`,
-                  `f0: ${p.params.fHz.toFixed(2)} Hz`,
-                  `zeta: ${p.params.zeta.toFixed(3)}`,
-                  `vtol: ${p.params.vtol.toFixed(3)}`,
+                  `centroid: ${(meta.delay * 1000).toFixed(2)} ms`,
+                  `max accel: ${meta.maxAccel.toFixed(0)} mm/s²`,
+                  `score: ${meta.score.toFixed(9)}`,
+                  `f0: ${meta.params.fHz.toFixed(2)} Hz`,
+                  `zeta: ${meta.params.zeta.toFixed(3)}`,
+                  `vtol: ${meta.params.vtol.toFixed(3)}`,
                 ],
               };
             }}
           />
         </div>
       )}
-
-      <div className="border-border mt-4 rounded-lg border p-3">
-        <div className="text-muted-foreground text-sm">Taps</div>
-        <div className="mt-2 text-xs">
-          Shaper: <span className="font-mono">{shaperParams.type.toUpperCase()}</span>
-        </div>
-        <div className="mt-1 text-xs">
-          Count: <span className="font-mono">{taps.t.length}</span>
-        </div>
-        <div className="mt-1 text-xs">
-          Coefficients (<span className="font-mono">a</span>):{' '}
-          <span className="font-mono">[{tapCoefficientsText}]</span>
-        </div>
-        <div className="mt-1 text-xs">
-          Timings (<span className="font-mono">t</span>, ms):{' '}
-          <span className="font-mono">[{tapTimingsMsText}]</span>
-        </div>
-        <div className="mt-1 text-xs">
-          Phases (% of one cycle at <span className="font-mono">f0</span>):{' '}
-          <span className="font-mono">[{tapPhaseText}]</span>
-        </div>
-        <div className="text-muted-foreground mt-2 text-xs">
-          Delay centroid:{' '}
-          <ExplainTooltip title="Delay centroid" accurate={delayCentroidTooltip} intuition={null}>
-            <span className="font-medium underline decoration-dotted underline-offset-2">
-              {(delayCentroidSeconds * 1000).toFixed(2)} ms
-            </span>
-          </ExplainTooltip>
-        </div>
-        <div className="text-muted-foreground mt-2 text-xs">
-          Phase = <span className="font-mono">t·f0</span>. Showing phases makes the tap pattern
-          comparable across frequencies.
-        </div>
-      </div>
     </div>
   );
 }

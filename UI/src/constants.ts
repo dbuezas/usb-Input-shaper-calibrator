@@ -102,7 +102,7 @@ export const SIMULATION_AMPLITUDE = 1000;
 // These constants define the min/max shown in the ShaperScreen sliders.
 // Keep the optimiser bounds in sync by importing these in the worker.
 
-export const SHAPER_F0_RANGE_HZ: [number, number] = [10, 200];
+export const SHAPER_F0_RANGE_HZ: [number, number] = [10, 300];
 export const SHAPER_ZETA_RANGE: [number, number] = [0.01, 0.25];
 export const SHAPER_VTOL_RANGE: [number, number] = [0.01, 1];
 

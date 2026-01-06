@@ -1,4 +1,5 @@
 import { useAtom, useAtomValue } from 'jotai';
+import type { CSSProperties } from 'react';
 import {
   CORNERING_JUNCTION_DEVIATION_RANGE_MM,
   CORNERING_JERK_RANGE_MM_S,
@@ -6,6 +7,7 @@ import {
   SHAPER_F0_RANGE_HZ,
   SHAPER_VTOL_RANGE,
   SHAPER_ZETA_RANGE,
+  FREQUENCY_SLIDER_RANGE_HZ,
 } from '@/constants';
 import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
@@ -18,10 +20,14 @@ import {
   corneringSettingsAtom,
   analysisRangeAtom,
   historyModeAtom,
+  currentMaxAccelAtom,
+  currentScoreAtom,
+  delayCentroidSecondsAtom,
 } from './atoms';
 import useOptimisers from './useOptimizers';
 import { SEARCH_TYPES } from './shaper-optimiser.worker';
 import { isEiFamily } from './input-shaper';
+import { SHAPER_COLORS } from './shaper-colors';
 
 export default function ShaperSideBar() {
   const [shaperParams, setShaperParams] = useAtom(shaperParamsAtom);
@@ -37,6 +43,9 @@ export default function ShaperSideBar() {
   const percent = optimiseProgress
     ? (100 * optimiseProgress.iterationsDone) / optimiseProgress.iterationsTotal
     : 0;
+  const currentScore = useAtomValue(currentScoreAtom);
+  const currentMaxAccel = useAtomValue(currentMaxAccelAtom);
+  const delayCentroidSeconds = useAtomValue(delayCentroidSecondsAtom);
 
   const scoreModeTooltip = {
     title: 'Score mode',
@@ -82,22 +91,6 @@ export default function ShaperSideBar() {
       <>
         It’s like choosing a “filter”: stronger filters can quiet more vibration, but they smear the
         command more.
-      </>
-    ),
-  };
-
-  const shaperTypeButton = {
-    title: 'Shaper type',
-    accurate: (
-      <>
-        Selects the impulse pattern (tap weights and spacing) used to cancel ringing near{' '}
-        <code className="font-mono">f0</code>.
-      </>
-    ),
-    intuition: (
-      <>
-        More aggressive shapers usually reduce ringing more, but increase time-spread (more corner
-        rounding / lower usable accel).
       </>
     ),
   };
@@ -218,8 +211,8 @@ export default function ShaperSideBar() {
         </label>
         <div className="mt-3">
           <Slider
-            min={SHAPER_F0_RANGE_HZ[0]}
-            max={SHAPER_F0_RANGE_HZ[1]}
+            min={FREQUENCY_SLIDER_RANGE_HZ[0]}
+            max={FREQUENCY_SLIDER_RANGE_HZ[1]}
             step={1}
             value={analysisRange}
             onValueChange={(v: [number, number]) => setAnalysisRange(v)}
@@ -478,18 +471,21 @@ export default function ShaperSideBar() {
         </ExplainTooltip>
 
         <div className="border-border mt-2 grid w-full grid-cols-4 gap-1 rounded-md border p-1">
-          {SEARCH_TYPES.map((shaper) => (
-            <ExplainTooltip
-              key={shaper}
-              title={shaperTypeButton.title}
-              accurate={shaperTypeButton.accurate}
-              intuition={shaperTypeButton.intuition}
-            >
+          {SEARCH_TYPES.map((shaper) => {
+            const active = shaperParams.type === shaper;
+            const style = { '--shaper-color': SHAPER_COLORS[shaper] } as CSSProperties;
+            return (
               <Button
                 type="button"
                 size="sm"
                 variant={shaperParams.type === shaper ? 'secondary' : 'ghost'}
-                className="h-8 w-full"
+                className={cn(
+                  'relative h-8 w-full overflow-hidden transition-[filter,transform] duration-150 hover:brightness-125 hover:saturate-150',
+                  'before:absolute before:inset-0 before:bg-(--shaper-color) before:content-[""]',
+                  active ? 'text-black before:opacity-100' : 'text-white/85 before:opacity-25',
+                  'border border-(--shaper-color)'
+                )}
+                style={style}
                 onClick={() => {
                   setShaperParams((old) => ({
                     ...old,
@@ -498,10 +494,10 @@ export default function ShaperSideBar() {
                   }));
                 }}
               >
-                {shaper.toUpperCase()}
+                <span className="relative z-10">{shaper.toUpperCase()}</span>
               </Button>
-            </ExplainTooltip>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -574,8 +570,80 @@ export default function ShaperSideBar() {
         </div>
       </div>
 
-      <div className="text-muted-foreground mt-6 text-xs leading-relaxed">
-        Uses Marlin FT_MOTION coefficients. Shaped plots apply |H(f)| to magnitude.
+      <div className="border-border mt-4 rounded-lg border p-3">
+        <div className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-2 text-sm">
+          <div className="text-muted-foreground">Score</div>
+          <div className="font-mono tabular-nums">{currentScore.toFixed(9)}</div>
+
+          <ExplainTooltip
+            title="Suggested max accel"
+            accurate={
+              <>
+                A projection of the highest acceleration where Klipper’s smoothing model stays under
+                a fixed threshold:{' '}
+                <code className="font-mono">smoothing(taps, accel, cornering) ≤ 0.12</code>. It’s
+                found via bisection search.
+                <div className="mt-2">
+                  <h4 className="text-sm font-semibold">Cornering model</h4>
+                  <div className="mt-1">
+                    The smoothing model depends on your firmware’s cornering behavior.
+                    <ul className="mt-2 list-disc space-y-1 pl-5">
+                      <li>
+                        <b>SCV (Klipper)</b>: planner maintains a target speed through sharp
+                        corners.
+                      </li>
+                      <li>
+                        <b>Jerk (Marlin)</b>: classic jerk limit (approx. corner speed ≈ jerk).
+                      </li>
+                      <li>
+                        <b>Junction deviation (Marlin)</b>: corner speed derived from accel + JD.
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </>
+            }
+            intuition={
+              <>
+                If you push accel above this, the shaper tends to “round off” corners more (it’s
+                trading sharpness for reduced ringing).
+              </>
+            }
+          >
+            <div className="text-muted-foreground underline decoration-dotted underline-offset-2">
+              Max accel
+            </div>
+          </ExplainTooltip>
+          <div className="font-mono tabular-nums">
+            {(currentMaxAccel ?? 0).toFixed(2)} <span className="text-xs">mm/s²</span>
+          </div>
+
+          <ExplainTooltip
+            title="Delay centroid"
+            accurate={
+              <div className="max-w-90 leading-snug">
+                <div className="mt-2">
+                  A rough “center of mass” of the shaper taps in time:{' '}
+                  <span className="font-mono">Σ(aᵢ·tᵢ) / Σ(aᵢ)</span>.
+                </div>
+                <div className="text-muted-foreground mt-2">
+                  This matters because a shaper spreads a single motion command over time. At a 90°
+                  corner (finish X, then start Y), the delayed tail of X can overlap with the start
+                  of Y. That overlap is one reason corners look rounded: you’re effectively moving
+                  in X and Y at the same time for a short moment.
+                </div>
+              </div>
+            }
+            intuition={null}
+          >
+            <div className="text-muted-foreground underline decoration-dotted underline-offset-2">
+              Delay centroid
+            </div>
+          </ExplainTooltip>
+          <div className="font-mono tabular-nums">
+            {(delayCentroidSeconds * 1000).toFixed(2)} ms
+          </div>
+        </div>
       </div>
     </>
   );

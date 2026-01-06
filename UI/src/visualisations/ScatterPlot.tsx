@@ -4,7 +4,7 @@ import { DEFAULT_AXIS_PADDING, getInnerSize, useD3Axes } from './axis';
 import { useRafThrottledHover } from './plot-hover';
 import { Tooltip } from './tooltip';
 
-export type ScatterPoint = {
+export type ScatterPoint<TMeta = unknown> = {
   x: number;
   y: number;
   color?: string;
@@ -12,7 +12,7 @@ export type ScatterPoint = {
   strokeColor?: string;
   strokeWidth?: number;
   disabled?: boolean;
-  onClick?: () => unknown;
+  meta?: TMeta;
 };
 
 export type ScatterPlotHover = {
@@ -49,12 +49,16 @@ export const ScatterPlot = <P extends ScatterPoint>({
   height,
   xTickFormat,
   getHover,
+  onPointHover,
+  onPointClick,
 }: {
   points: P[];
   width: number;
   height: number;
   xTickFormat?: (v: number) => string;
   getHover?: (point: P, index: number) => ScatterPlotHover;
+  onPointHover?: (meta: P['meta'], point: P, index: number) => void;
+  onPointClick?: (meta: P['meta'], point: P, index: number) => void;
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -174,8 +178,8 @@ export const ScatterPlot = <P extends ScatterPoint>({
 
         const p = points[bestIdx];
         hoveredPointIndexRef.current = bestIdx;
-        setIsHoveringPoint(Boolean(p.onClick));
-        p.onClick?.();
+        setIsHoveringPoint(Boolean(onPointClick));
+        onPointHover?.(p.meta, p, bestIdx);
 
         const hover = getHover?.(p, bestIdx) ?? defaultGetHover(p);
         setHover({
@@ -189,7 +193,8 @@ export const ScatterPlot = <P extends ScatterPoint>({
       onClick={() => {
         const idx = hoveredPointIndexRef.current;
         if (idx == null) return;
-        points[idx]?.onClick?.();
+        const p = points[idx];
+        onPointClick?.(p.meta, p, idx);
       }}
     >
       <canvas ref={canvasRef} width={width} height={height} className="block border bg-black" />
