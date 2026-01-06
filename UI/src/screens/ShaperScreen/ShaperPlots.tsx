@@ -46,7 +46,22 @@ export default function ShaperPlots() {
     '3hei': `rgba(120, 200, 255, ${shaperParams.type === '3hei' ? 1 : 0.5})`,
   };
 
-  const historyPoints = optimisationHistory
+  type HistoryPoint = {
+    x: number;
+    y: number;
+    color: string;
+    radius?: number;
+    strokeColor?: string;
+    strokeWidth?: number;
+    type: InputShaperType;
+    centroidMs: number;
+    score: number;
+    params: typeof shaperParams;
+    disabled: boolean;
+    onClick?: () => void;
+  };
+
+  const historyPoints: HistoryPoint[] = optimisationHistory
     .map((h) => {
       const centroidMs = h.delay * 1000;
       return {
@@ -65,6 +80,25 @@ export default function ShaperPlots() {
     })
     .filter((v): v is NonNullable<typeof v> => Boolean(v))
     .sort((a, _b) => (a.type === shaperParams.type ? 1 : -1));
+
+  const currentPoint: HistoryPoint | null =
+    currentScore == null
+      ? null
+      : {
+          x: delayCentroidSeconds * 1000,
+          y: currentScore,
+          color: 'rgba(255, 255, 255, 1)',
+          radius: 3,
+          strokeColor: 'rgba(0, 0, 0, 0.9)',
+          strokeWidth: 1.5,
+          type: shaperParams.type,
+          centroidMs: delayCentroidSeconds * 1000,
+          score: currentScore,
+          params: shaperParams,
+          disabled: true,
+        };
+
+  const allHistoryPoints = currentPoint ? [...historyPoints, currentPoint] : historyPoints;
 
   const scoreTooltip = (
     <>
@@ -223,7 +257,7 @@ export default function ShaperPlots() {
         </div>
       </div>
 
-      {historyPoints.length > 0 && (
+      {allHistoryPoints.length > 0 && (
         <div>
           <h4 className="mb-2 font-semibold">Optimiser Results: Delay Centroid vs Score</h4>
           <div className="text-muted-foreground mb-2 text-xs">
@@ -231,11 +265,23 @@ export default function ShaperPlots() {
             better). X axis is delay centroid (ms).
           </div>
           <ScatterPlot
-            points={historyPoints}
+            points={allHistoryPoints}
             width={width}
             height={height}
             xTickFormat={(v) => `${Math.round(v)}`}
             getHover={(p) => {
+              if (p.strokeColor) {
+                return {
+                  title: 'Current settings',
+                  lines: [
+                    `centroid: ${p.centroidMs.toFixed(2)} ms`,
+                    `score: ${p.score.toFixed(9)}`,
+                    `f0: ${p.params.fHz.toFixed(2)} Hz`,
+                    `zeta: ${p.params.zeta.toFixed(3)}`,
+                    `vtol: ${p.params.vtol.toFixed(3)}`,
+                  ],
+                };
+              }
               return {
                 title: p.type.toUpperCase(),
                 lines: [

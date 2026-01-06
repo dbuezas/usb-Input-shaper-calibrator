@@ -147,9 +147,9 @@ const bruteForce = (msg: WorkerStartMessage) => {
     const vtolCandidates = isEiFamily(candidateType) ? vtols : [0.1];
     if (!zetas.length || !vtolCandidates.length) continue;
 
-    for (const vtol of vtolCandidates) {
+    for (let fHz = fMin; fHz <= fMax; fHz += fStep) {
       for (const zeta of zetas) {
-        for (let fHz = fMin; fHz <= fMax; fHz += fStep) {
+        for (const vtol of vtolCandidates) {
           iterationsDone++;
 
           const params: ShaperParams = { type: candidateType, fHz, zeta, vtol };

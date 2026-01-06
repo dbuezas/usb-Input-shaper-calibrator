@@ -8,6 +8,9 @@ export type ScatterPoint = {
   x: number;
   y: number;
   color?: string;
+  radius?: number;
+  strokeColor?: string;
+  strokeWidth?: number;
   disabled?: boolean;
   onClick?: () => unknown;
 };
@@ -103,15 +106,21 @@ export const ScatterPlot = <P extends ScatterPoint>({
     const left = DEFAULT_AXIS_PADDING.left;
     const top = DEFAULT_AXIS_PADDING.top;
 
-    const radius = 1;
     for (const p of points) {
       if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
       const x = left + xScale(p.x);
       const y = top + yScale(p.y);
+      const radius = p.radius ?? 1;
       ctx.fillStyle = p.color ?? 'rgba(0, 220, 255, 0.8)';
       ctx.beginPath();
       ctx.arc(x, y, radius, 0, Math.PI * 2);
       ctx.fill();
+
+      if (p.strokeColor && (p.strokeWidth ?? 0) > 0) {
+        ctx.strokeStyle = p.strokeColor;
+        ctx.lineWidth = p.strokeWidth ?? 1;
+        ctx.stroke();
+      }
     }
   }, [points, width, height, xScale, yScale]);
 
