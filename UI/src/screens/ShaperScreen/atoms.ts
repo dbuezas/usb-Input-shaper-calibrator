@@ -74,7 +74,7 @@ export const delayCentroidSecondsAtom = atom((get) => {
 
 export type HistoryMode = 'centroid_ms' | 'suggested_max_accel';
 
-export const historyModeAtom = atom<HistoryMode>('centroid_ms');
+export const historyModeAtom = atom<HistoryMode>('suggested_max_accel');
 
 export const optimisationHistoryAtom = atom<OptimisationResult[]>([]);
 

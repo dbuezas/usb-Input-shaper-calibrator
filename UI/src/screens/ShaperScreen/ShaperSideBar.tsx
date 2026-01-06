@@ -32,7 +32,7 @@ export default function ShaperSideBar() {
   const maxHoldSpectrum = useAtomValue(spectrogramMaxHoldAtom);
   const [analysisRange, setAnalysisRange] = useAtom(analysisRangeAtom);
 
-  const { runAutoOptimise, optimiseProgress, bestByType } = useOptimisers();
+  const { runAutoOptimise, optimiseProgress, bestByType, stop } = useOptimisers();
   const isOptimising = !!optimiseProgress;
   const percent = optimiseProgress
     ? (100 * optimiseProgress.iterationsDone) / optimiseProgress.iterationsTotal
@@ -113,10 +113,14 @@ export default function ShaperSideBar() {
     accurate: (
       <>
         Brute-force searches shaper type + frequency + damping (+ tolerance for EI/HEI) to minimize
-        the score, using your Measure <b>max-hold</b> spectrum as input.
+        the score.
       </>
     ),
-    intuition: <>It also runs a gradient refinment at the end.</>,
+    intuition: (
+      <>
+        Uses your Measure <b>max-hold</b> spectrum as input.
+      </>
+    ),
   };
 
   const scoreModeKlipper = {
@@ -158,22 +162,6 @@ export default function ShaperSideBar() {
       <>
         Use this when you want a smoother shaped spectrum (fewer sharp wiggles), even if it’s not
         perfectly flat.
-      </>
-    ),
-  };
-
-  const previewMode = {
-    title: 'Preview',
-    accurate: (
-      <>
-        During optimisation, chooses whether the UI controls reflect the current candidate or the
-        best-so-far candidate.
-      </>
-    ),
-    intuition: (
-      <>
-        <b>Current</b> lets you watch the search explore; <b>Best</b> keeps the UI stable on the
-        best result found so far.
       </>
     ),
   };
@@ -257,7 +245,7 @@ export default function ShaperSideBar() {
         </label>
         <div className="mt-3">
           <Slider
-            min={0}
+            min={SHAPER_F0_RANGE_HZ[0]}
             max={SHAPER_F0_RANGE_HZ[1]}
             step={1}
             value={analysisRange}
@@ -498,18 +486,10 @@ export default function ShaperSideBar() {
             </ExplainTooltip>
           )}
           {optimiseProgress && isOptimising && (
-            <div className="mt-3 rounded-md border border-dashed p-3">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <ExplainTooltip
-                  title={previewMode.title}
-                  accurate={previewMode.accurate}
-                  intuition={previewMode.intuition}
-                >
-                  <div className="text-muted-foreground text-xs underline decoration-dotted underline-offset-2">
-                    Preview
-                  </div>
-                </ExplainTooltip>
-              </div>
+            <div>
+              <Button className="mb-2 w-full" onClick={stop} variant="destructive">
+                Stop
+              </Button>
               <div className="text-muted-foreground text-xs">
                 {percent.toFixed(0)}% ({optimiseProgress.iterationsDone}/
                 {optimiseProgress.iterationsTotal})
@@ -554,7 +534,6 @@ export default function ShaperSideBar() {
                 variant={shaperParams.type === shaper ? 'secondary' : 'ghost'}
                 className="h-8 w-full"
                 onClick={() => {
-                  console.log(bestByType[shaper]);
                   setShaperParams((old) => ({
                     ...old,
                     type: shaper,

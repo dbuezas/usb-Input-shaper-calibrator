@@ -2,7 +2,13 @@ import { useEffect, useMemo, useRef, type RefObject } from 'react';
 import type { Atom } from 'jotai';
 import { useAtomValue } from 'jotai';
 import { scaleLinear } from 'd3-scale';
-import { ACTUAL_RESOLUTION, MAX_FREQ, MIN_FREQ, SPECTROGRAM_MAX_TIME_SLICES } from '@/constants';
+import {
+  ACTUAL_RESOLUTION,
+  MAX_FREQ,
+  MIN_FREQ,
+  SECONDS_PER_SLICE,
+  SPECTROGRAM_WATERFALL_SECONDS,
+} from '@/constants';
 import { DEFAULT_AXIS_PADDING, getInnerSize, useD3Axes } from './axis';
 import { Tooltip } from './tooltip';
 import { useRafThrottledHover } from './plot-hover';
@@ -43,7 +49,7 @@ export const Waterfall = ({
   );
 
   const yScale = useMemo(
-    () => scaleLinear().domain([SPECTROGRAM_MAX_TIME_SLICES, 0]).range([innerHeight, 0]),
+    () => scaleLinear().domain([0, SPECTROGRAM_WATERFALL_SECONDS]).range([0, innerHeight]),
     [innerHeight]
   );
 
@@ -79,7 +85,7 @@ export const Waterfall = ({
     width,
     height,
     xDomain: [freqRange[0], freqRange[1]],
-    yDomain: [SPECTROGRAM_MAX_TIME_SLICES, 0],
+    yDomain: [SPECTROGRAM_WATERFALL_SECONDS, 0],
     xTicks: 6,
     yTicks: 4,
     xTickFormat: tickFormat,
@@ -112,7 +118,7 @@ export const Waterfall = ({
           x,
           y,
           title: 'Cursor',
-          lines: [`f: ${freq.toFixed(1)} Hz`, `slice: ${Math.round(slice)}`],
+          lines: [`f: ${freq.toFixed(1)} Hz`, `secs ago: ${slice.toFixed(1)}`],
         });
       }}
     >
@@ -165,7 +171,7 @@ const Waterfall_render = ({
   onPeakFrequency: (freqHz: number) => void;
 }) => {
   const spectrum = useAtomValue(dataAtom);
-
+  const tRef = useRef(0);
   useEffect(() => {
     if (!spectrum.length) return;
 
@@ -179,9 +185,9 @@ const Waterfall_render = ({
     const right = width - DEFAULT_AXIS_PADDING.right;
     const top = DEFAULT_AXIS_PADDING.top;
     const bottom = height - DEFAULT_AXIS_PADDING.bottom;
-    const plotWidth = Math.max(1, right - left);
-    const plotHeight = Math.max(1, bottom - top);
-    const yScale = plotHeight / SPECTROGRAM_MAX_TIME_SLICES;
+    const plotWidth = right - left + 1;
+    const plotHeight = bottom - top;
+    const secondsPerYPixel = SPECTROGRAM_WATERFALL_SECONDS / plotHeight / devicePixelRatio;
 
     const iMin = Math.max(0, Math.round((spectrum.length / (MAX_FREQ - MIN_FREQ)) * freqRange[0]));
     const iMax = Math.min(
@@ -205,18 +211,23 @@ const Waterfall_render = ({
     const freqBinWidth = plotWidth / (iMax - iMin);
     const rangeVal = max - min;
     const safeRange = rangeVal <= 0 ? 1 : rangeVal;
+    tRef.current += SECONDS_PER_SLICE;
+    if (tRef.current > secondsPerYPixel) {
+      tRef.current -= secondsPerYPixel;
 
-    ctx.drawImage(
-      canvas,
-      left,
-      top,
-      plotWidth,
-      plotHeight - 1,
-      left,
-      top + 1,
-      plotWidth,
-      plotHeight - 1
-    );
+      const deltaY = 1;
+      ctx.drawImage(
+        canvas,
+        left,
+        top,
+        plotWidth,
+        plotHeight - deltaY,
+        left,
+        top + deltaY,
+        plotWidth,
+        plotHeight - deltaY
+      );
+    }
 
     const y = top;
     for (let i = iMin; i < iMax; i++) {
@@ -228,10 +239,10 @@ const Waterfall_render = ({
       ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
 
       const x = left + (i - iMin) * freqBinWidth;
-      ctx.fillRect(x, y, freqBinWidth + 1, yScale);
+      ctx.fillRect(x, y, freqBinWidth + 1, 1);
     }
     ctx.fillStyle = `rgb(255,255,255)`;
-    ctx.fillRect(left + (peakIdx - iMin + 0.5) * freqBinWidth, y, 1, yScale);
+    ctx.fillRect(left + (peakIdx - iMin + 0.5) * freqBinWidth, y, 1, 1);
 
     onPeakFrequency(peakIdx * ACTUAL_RESOLUTION);
   }, [width, height, spectrum, freqRange, scaleMax, canvasRef, dataAtom, onPeakFrequency]);

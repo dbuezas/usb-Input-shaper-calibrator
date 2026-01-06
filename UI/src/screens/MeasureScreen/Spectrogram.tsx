@@ -4,7 +4,6 @@ import { spectrogramChannel } from '@/screens/MeasureScreen/messages';
 import { atom, useAtomValue, useSetAtom } from 'jotai';
 import {
   ACTUAL_RESOLUTION,
-  SPECTROGRAM_MAX_TIME_SLICES,
   SPECTROGRAM_PLOT_WIDTH,
   SPECTROGRAM_WATERFALL_HEIGHT,
 } from '@/constants';
@@ -90,7 +89,6 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
         width={width}
         freqRange={freqRange}
         dataAtom={spectrogramAtom}
-        scaleMax={spectrogramScaleMax}
         onPeakFrequency={(freqHz) => setPeak(freqHz)}
       />
       <>
@@ -116,7 +114,6 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
       </>
       <div className="mt-2 flex flex-wrap justify-center gap-4 text-sm">
         <span>Resolution: {(ACTUAL_RESOLUTION || 1).toFixed(2)} Hz/bin</span>
-        <span>Time Slices: {SPECTROGRAM_MAX_TIME_SLICES}</span>
       </div>
     </div>
   );

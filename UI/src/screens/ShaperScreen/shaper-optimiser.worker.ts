@@ -6,11 +6,18 @@ import {
   isEiFamily,
   computeDelayCentroidSeconds,
 } from '@/screens/ShaperScreen/input-shaper';
-import { OPTIMIZER_UPDATE_EVERY_MS, SHAPER_F0_RANGE_HZ } from '@/constants';
+import {
+  OPTIMIZER_UPDATE_EVERY_MS,
+  SEARCH_F_STEP_HZ,
+  SEARCH_VTOL_STEP,
+  SEARCH_ZETA_STEP,
+  SHAPER_F0_RANGE_HZ,
+  SHAPER_VTOL_RANGE,
+  SHAPER_ZETA_RANGE,
+} from '@/constants';
 
-import { variationScoreFromMagnitudeSpectrum } from '@/screens/ShaperScreen/shaper-scores/variation';
-import { flatnessScoreFromMagnitudeSpectrum } from './shaper-scores/flatness';
-import { klipperScoreFromMagnitudeSpectrum, suggestedMaxAccel } from './shaper-scores/klipper';
+import { suggestedMaxAccel } from './shaper-scores/klipper';
+import { scoreCandidate } from './shaper-scores';
 
 export type OptimisationResult = {
   params: ShaperParams;
@@ -54,32 +61,6 @@ export const SEARCH_TYPES: InputShaperType[] = [
   '2hei',
   '3hei',
 ];
-const SEARCH_F_STEP_HZ = 0.5;
-// const SEARCH_ZETAS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35];
-// const SEARCH_VTOLS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35];
-const SEARCH_ZETAS = Array.from({ length: 10 }).map(
-  (_, i, { length }) => (0.35 * (i + 1)) / length
-);
-const SEARCH_VTOLS = Array.from({ length: 10 }).map(
-  (_, i, { length }) => (0.35 * (i + 1)) / length
-);
-
-const scoreCandidate = (
-  magnitudes: Float32Array,
-  params: ShaperParams,
-  scoreMode: ShaperScoreMode,
-  cornering: CorneringSettings,
-  scoreRangeHz: [number, number]
-) => {
-  switch (scoreMode) {
-    case 'flatness':
-      return flatnessScoreFromMagnitudeSpectrum(magnitudes, params, scoreRangeHz);
-    case 'klipper':
-      return klipperScoreFromMagnitudeSpectrum(magnitudes, params, cornering, 5000, scoreRangeHz);
-    case 'variation':
-      return variationScoreFromMagnitudeSpectrum(magnitudes, params, scoreRangeHz);
-  }
-};
 
 const insertIntoFrontier = (
   frontier: OptimisationResult[],
@@ -120,22 +101,27 @@ const bruteForce = (msg: WorkerStartMessage) => {
   const types = (msg.candidateTypes?.length ? msg.candidateTypes : SEARCH_TYPES).filter(
     (t): t is InputShaperType => SEARCH_TYPES.includes(t)
   );
-  const fStep = SEARCH_F_STEP_HZ;
-  const zetas = SEARCH_ZETAS;
-  const vtols = SEARCH_VTOLS;
 
-  const fMin = SHAPER_F0_RANGE_HZ[0];
-  const fMax = SHAPER_F0_RANGE_HZ[1];
-
-  // Coarse iteration count
-  let coarseTotal = 0;
-  for (const t of types) {
-    const vtolCount = isEiFamily(t) ? vtols.length : 1;
-    const fCount = Math.floor((fMax - fMin) / fStep) + 1;
-    coarseTotal += fCount * zetas.length * vtolCount;
+  const candidates: ShaperParams[] = [];
+  for (const type of types) {
+    for (let fHz = SHAPER_F0_RANGE_HZ[0]; fHz <= SHAPER_F0_RANGE_HZ[1]; fHz += SEARCH_F_STEP_HZ) {
+      for (
+        let zeta = SHAPER_ZETA_RANGE[0];
+        zeta <= SHAPER_ZETA_RANGE[1];
+        zeta += SEARCH_ZETA_STEP
+      ) {
+        for (
+          let vtol = SHAPER_VTOL_RANGE[0];
+          vtol <= SHAPER_VTOL_RANGE[1];
+          vtol += SEARCH_VTOL_STEP
+        ) {
+          candidates.push({ type, fHz, zeta, vtol });
+          if (!isEiFamily(type)) break;
+        }
+      }
+    }
   }
-
-  const iterationsTotal = coarseTotal;
+  const iterationsTotal = candidates.length;
   let iterationsDone = 0;
 
   const frontierByType: Partial<Record<InputShaperType, OptimisationResult[]>> = {};
@@ -161,54 +147,23 @@ const bruteForce = (msg: WorkerStartMessage) => {
     };
     self.postMessage(msg);
   };
+  candidates.sort(() => Math.random() - 0.5);
 
-  type CandidateEval = {
-    params: ShaperParams;
-    delay: number;
-    maxAccel: number;
-  };
+  // Evaluate in that order
+  for (const params of candidates) {
+    iterationsDone++;
 
-  for (const type of types) {
-    const vtolCandidates = isEiFamily(type) ? vtols : [0.1];
-    if (!zetas.length || !vtolCandidates.length) continue;
+    const current = {
+      params,
+      delay: computeDelayCentroidSeconds(params),
+      maxAccel: suggestedMaxAccel(params, msg.cornering, 0.12),
+      score: scoreCandidate(magnitudes, params, scoreMode, msg.cornering, scoreRangeHz),
+    };
 
-    // Build + cache delays first
-    const candidates: CandidateEval[] = [];
-    for (let fHz = fMin; fHz <= fMax; fHz += fStep) {
-      for (const zeta of zetas) {
-        for (const vtol of vtolCandidates) {
-          const params: ShaperParams = { type, fHz, zeta, vtol };
-          const delay = computeDelayCentroidSeconds(params);
-          const maxAccel = suggestedMaxAccel(params, msg.cornering, 0.12);
+    const frontier = (frontierByType[params.type] ??= []);
+    insertIntoFrontier(frontier, current, msg.frontierMode);
 
-          candidates.push({ params, delay, maxAccel });
-        }
-      }
-    }
-    switch (msg.frontierMode) {
-      case 'delay_centroid':
-        candidates.sort((a, b) => a.delay - b.delay);
-        break;
-      case 'suggested_max_accel':
-        candidates.sort((b, a) => a.maxAccel - b.maxAccel);
-        break;
-    }
-    // candidates.sort(() => Math.random() - 0.5);
-
-    // Evaluate in that order
-    for (const c of candidates) {
-      iterationsDone++;
-
-      const current = {
-        ...c,
-        score: scoreCandidate(magnitudes, c.params, scoreMode, msg.cornering, scoreRangeHz),
-      };
-
-      const frontier = (frontierByType[type] ??= []);
-      insertIntoFrontier(frontier, current, msg.frontierMode);
-
-      emitUpdate(false);
-    }
+    emitUpdate(false);
   }
 
   emitUpdate(true);

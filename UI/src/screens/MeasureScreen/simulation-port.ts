@@ -196,9 +196,15 @@ export class SimulationPort {
     // Noise level is fixed relative to the configured simulation amplitude,
     // so low-amplitude parts of the sweep still have the same noise floor.
     const noiseStd = SIMULATION_AMPLITUDE * 0.12;
-    const valueX = clampInt16(Math.round(respX + randomNormal() * noiseStd));
-    const valueY = clampInt16(Math.round(respY + randomNormal() * noiseStd));
-    const valueZ = clampInt16(Math.round(respZ + randomNormal() * noiseStd));
+    const valueX = clampInt16(
+      Math.round(SIMULATION_AMPLITUDE * 0.2 + respX + randomNormal() * noiseStd)
+    );
+    const valueY = clampInt16(
+      Math.round(SIMULATION_AMPLITUDE * 0.2 + respY + randomNormal() * noiseStd)
+    );
+    const valueZ = clampInt16(
+      Math.round(SIMULATION_AMPLITUDE * 0.2 + respZ + randomNormal() * noiseStd)
+    );
 
     const simulatedData = new Int16Array([valueX, valueY, valueZ]);
 

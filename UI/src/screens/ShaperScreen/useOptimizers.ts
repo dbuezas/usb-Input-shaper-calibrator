@@ -51,13 +51,14 @@ export default function useOptimisers() {
 
   const workerCount = Math.min(WEB_WORKER_THREADS, ALL_SHAPER_TYPES.length);
   const typeChunks = chunkRoundRobin(ALL_SHAPER_TYPES, workerCount);
-
-  useEffect(() => {
+  const stop = () => {
     for (const w of workersRef.current) {
       w.terminate();
       workersRef.current.delete(w);
     }
-  }, []);
+    setOptimiseProgress(null);
+  };
+  useEffect(() => stop, []);
 
   const runAutoOptimise = async () => {
     if (!maxHoldSpectrum.length) return;
@@ -94,14 +95,11 @@ export default function useOptimisers() {
                 iterationsTotal += p.iterationsTotal;
               }
 
-              const mergedHistory: OptimisationResult[] = [];
-              for (const h of perWorkerHistory.values()) mergedHistory.push(...h);
-
               setOptimiseProgress({
                 iterationsDone,
                 iterationsTotal,
               });
-              setOptimisationHistory(mergedHistory);
+              setOptimisationHistory(Array.from(perWorkerHistory.values()).flat());
               return;
             }
 
@@ -141,5 +139,6 @@ export default function useOptimisers() {
     runAutoOptimise,
     optimiseProgress,
     bestByType,
+    stop,
   };
 }

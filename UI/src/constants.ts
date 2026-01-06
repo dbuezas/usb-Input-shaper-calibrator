@@ -49,6 +49,7 @@ export const ACTUAL_RESOLUTION = FIXED_SAMPLE_RATE / WINDOW_SIZE;
 // Step between successive FFT frames.
 // Used by `src/serial-worker.ts` to decide when to compute a new spectrogram slice.
 export const HOP_SIZE = Math.floor(WINDOW_SIZE / 256);
+export const SECONDS_PER_SLICE = HOP_SIZE / FIXED_SAMPLE_RATE;
 
 // FFT bin -> frequency mapping helpers used in `src/Spectrogram.tsx`.
 export const MIN_FREQ = FIXED_SAMPLE_RATE / WINDOW_SIZE;
@@ -59,7 +60,7 @@ export const MAX_FREQ = FIXED_SAMPLE_RATE / 2;
 // Frequency range slider bounds used in `src/Spectrogram.tsx`.
 // (Set lower than Nyquist for convenience/readability.)
 export const MAX_FREQUENCY_SLIDER = 200; // could be `FIXED_SAMPLE_RATE / 2`
-export const MIN_FREQUENCY_SLIDER = 0;
+export const MIN_FREQUENCY_SLIDER = 10;
 
 export const FREQUENCY_SLIDER_RANGE_HZ: [number, number] = [
   MIN_FREQUENCY_SLIDER,
@@ -81,7 +82,7 @@ export const SPECTROGRAM_PLOT_WIDTH = 800;
 export const SPECTROGRAM_WATERFALL_HEIGHT = 300;
 
 // Number of historic rows shown in the waterfall.
-export const SPECTROGRAM_MAX_TIME_SLICES = 100;
+export const SPECTROGRAM_WATERFALL_SECONDS = 20;
 
 // === Web workers ===
 
@@ -101,11 +102,16 @@ export const SIMULATION_AMPLITUDE = 1000;
 // These constants define the min/max shown in the ShaperScreen sliders.
 // Keep the optimiser bounds in sync by importing these in the worker.
 
-export const SHAPER_F0_RANGE_HZ: [number, number] = [10, 250];
-export const SHAPER_ZETA_RANGE: [number, number] = [0.001, 0.4];
-export const SHAPER_VTOL_RANGE: [number, number] = [0.001, 0.5];
+export const SHAPER_F0_RANGE_HZ: [number, number] = [10, 200];
+export const SHAPER_ZETA_RANGE: [number, number] = [0.01, 0.25];
+export const SHAPER_VTOL_RANGE: [number, number] = [0.01, 1];
+
+export const SEARCH_F_STEP_HZ = 0.5;
+export const SEARCH_ZETA_STEP = 0.01;
+export const SEARCH_VTOL_STEP = 0.05;
+
 export const CORNERING_SPEED_RANGE_MM_S: [number, number] = [0.5, 60];
 export const CORNERING_JUNCTION_DEVIATION_RANGE_MM: [number, number] = [0, 0.2];
 export const CORNERING_JERK_RANGE_MM_S: [number, number] = [0, 50];
 
-export const OPTIMIZER_UPDATE_EVERY_MS = 16;
+export const OPTIMIZER_UPDATE_EVERY_MS = 100;
