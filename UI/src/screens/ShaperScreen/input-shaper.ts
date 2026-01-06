@@ -19,8 +19,6 @@ export type ShaperParams = {
   vtol: number;
 };
 
-export type ShaperScoreMode = 'klipper' | 'flatness' | 'variation';
-
 export type CorneringSettings =
   | { model: 'scv'; value: number }
   | { model: 'jerk'; value: number }
@@ -128,8 +126,33 @@ export const computeMarlinShaperTaps = ({ type, fHz, zeta, vtol }: ShaperParams)
   return { a, t };
 };
 
-const shaperMagnitudeAtHz = (params: ShaperParams, freqHz: number) => {
+export const binToHz = (bin: number, bins: number) => bin * (FIXED_SAMPLE_RATE / (2 * (bins - 1)));
+
+export const applyShaperToMagnitudeSpectrum = (
+  params: ShaperParams,
+  magnitudes: Float32Array,
+  freqRangeHz?: [number, number]
+) => {
+  let start = 0;
+  let end = magnitudes.length;
+  if (freqRangeHz) {
+    const freqStepHz = FIXED_SAMPLE_RATE / (2 * (magnitudes.length - 1));
+    start = Math.floor(freqRangeHz[0] / freqStepHz);
+    end = Math.floor(freqRangeHz[1] / freqStepHz);
+  }
+
   const { a, t } = computeMarlinShaperTaps(params);
+  const i_to_f = FIXED_SAMPLE_RATE / (2 * (magnitudes.length - 1));
+  const out = new Float32Array(end - start);
+  for (let i = start; i < end; i++) {
+    const f = i * i_to_f;
+    const h = shaperMagnitudeAtHzFromTaps(a, t, f);
+    out[i - start] = magnitudes[i] * h;
+  }
+  return out;
+};
+
+const shaperMagnitudeAtHzFromTaps = (a: number[], t: number[], freqHz: number) => {
   const w = 2 * Math.PI * freqHz;
   let re = 0;
   let im = 0;
@@ -137,30 +160,6 @@ const shaperMagnitudeAtHz = (params: ShaperParams, freqHz: number) => {
     const phase = -w * t[i];
     re += a[i] * Math.cos(phase);
     im += a[i] * Math.sin(phase);
-  }
-  return Math.sqrt(re * re + im * im);
-};
-
-export const binToHz = (bin: number, bins: number) => bin * (FIXED_SAMPLE_RATE / (2 * (bins - 1)));
-
-export const applyShaperToMagnitudeSpectrum = (params: ShaperParams, magnitudes: Float32Array) => {
-  const out = new Float32Array(magnitudes.length);
-  for (let i = 0; i < magnitudes.length; i++) {
-    const f = i * (FIXED_SAMPLE_RATE / (2 * (magnitudes.length - 1)));
-    const h = shaperMagnitudeAtHz(params, f);
-    out[i] = magnitudes[i] * h;
-  }
-  return out;
-};
-
-export const shaperMagnitudeAtHzFromTaps = (a: number[], t: number[], freqHz: number) => {
-  const w = 2 * Math.PI * freqHz;
-  let re = 0;
-  let im = 0;
-  for (let i = 0; i < a.length; i++) {
-    const phase = -w * (t[i] ?? 0);
-    re += (a[i] ?? 0) * Math.cos(phase);
-    im += (a[i] ?? 0) * Math.sin(phase);
   }
   return Math.sqrt(re * re + im * im);
 };

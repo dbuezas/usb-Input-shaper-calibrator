@@ -2,7 +2,6 @@ import {
   type InputShaperType,
   type CorneringSettings,
   type ShaperParams,
-  type ShaperScoreMode,
   isEiFamily,
   computeDelayCentroidSeconds,
 } from '@/screens/ShaperScreen/input-shaper';
@@ -17,7 +16,7 @@ import {
 } from '@/constants';
 
 import { suggestedMaxAccel } from './shaper-scores/klipper';
-import { scoreCandidate } from './shaper-scores';
+import { scoreCandidate, type ShaperScoreMode } from './shaper-scores';
 
 export type OptimisationResult = {
   params: ShaperParams;

@@ -1,17 +1,15 @@
 import { atom } from 'jotai';
-import { FIXED_SAMPLE_RATE, FREQUENCY_SLIDER_RANGE_HZ } from '@/constants';
-import { frequencyRangeAtom } from '@/atoms/frequency-range';
+import { FREQUENCY_SLIDER_RANGE_HZ } from '@/constants';
 import {
   applyShaperToMagnitudeSpectrum,
   computeDelayCentroidSeconds,
   type CorneringSettings,
   type ShaperParams,
-  type ShaperScoreMode,
 } from './input-shaper';
 import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
-import { flatnessScoreFromMagnitudeSpectrum } from './shaper-scores/flatness';
-import { klipperScoreFromMagnitudeSpectrum, suggestedMaxAccel } from './shaper-scores/klipper';
+import { suggestedMaxAccel } from './shaper-scores/klipper';
 import type { OptimisationResult } from './shaper-optimiser.worker';
+import { scoreCandidate, type ShaperScoreMode } from './shaper-scores';
 
 export const shaperParamsAtom = atom<ShaperParams>({
   type: 'zv',
@@ -20,46 +18,23 @@ export const shaperParamsAtom = atom<ShaperParams>({
   vtol: 0.1,
 });
 
-export const shaperScoreModeAtom = atom<ShaperScoreMode>('klipper');
+export const shaperScoreModeAtom = atom<ShaperScoreMode>('variation');
 
 export const corneringSettingsAtom = atom<CorneringSettings>({ model: 'jerk', value: 10 });
 
-export const shapedSpectrumAtom = atom((get) => {
-  const base = get(spectrogramMaxHoldAtom);
-  if (!base.length) return new Float32Array();
-  return applyShaperToMagnitudeSpectrum(get(shaperParamsAtom), base);
-});
+export const shapedSpectrumAtom = atom((get) =>
+  applyShaperToMagnitudeSpectrum(get(shaperParamsAtom), get(spectrogramMaxHoldAtom))
+);
 
-export const currentScoreAtom = atom((get) => {
-  const base = get(spectrogramMaxHoldAtom);
-  if (!base.length) return undefined;
-  const scoreMode = get(shaperScoreModeAtom);
-  const params = get(shaperParamsAtom);
-  const cornering = get(corneringSettingsAtom);
-  const shaped = applyShaperToMagnitudeSpectrum(params, base);
-  const freqStepHz = FIXED_SAMPLE_RATE / (2 * (shaped.length - 1));
-  const [fMinHz, fMaxHz] = get(frequencyRangeAtom);
-  const minBins = Math.max(0, Math.floor(fMinHz / freqStepHz));
-  const maxBins = Math.min(shaped.length, Math.floor(fMaxHz / freqStepHz) + 1);
-
-  let score: number;
-  if (scoreMode === 'flatness') {
-    score = flatnessScoreFromMagnitudeSpectrum(base, params, [fMinHz, fMaxHz]);
-  } else if (scoreMode === 'variation') {
-    if (maxBins - minBins <= 1) return undefined;
-    let tv = 0;
-    let prev = shaped[minBins];
-    for (let i = minBins + 1; i < maxBins; i++) {
-      const next = shaped[i];
-      tv += Math.abs(next - prev);
-      prev = next;
-    }
-    score = tv;
-  } else {
-    score = klipperScoreFromMagnitudeSpectrum(base, params, cornering, 5000, [fMinHz, fMaxHz]);
-  }
-  return Number.isFinite(score) ? score : undefined;
-});
+export const currentScoreAtom = atom((get) =>
+  scoreCandidate(
+    get(spectrogramMaxHoldAtom),
+    get(shaperParamsAtom),
+    get(shaperScoreModeAtom),
+    get(corneringSettingsAtom),
+    get(analysisRangeAtom)
+  )
+);
 
 export const currentMaxAccelAtom = atom((get) => {
   const base = get(spectrogramMaxHoldAtom);

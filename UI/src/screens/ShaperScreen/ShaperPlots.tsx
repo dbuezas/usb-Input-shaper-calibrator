@@ -17,51 +17,9 @@ import {
   historyModeAtom,
   optimisationHistoryAtom,
   shapedSpectrumAtom,
-  shaperScoreModeAtom,
   shaperParamsAtom,
 } from './atoms';
 import { type InputShaperType } from './input-shaper';
-
-const scoreTooltip = (
-  <>
-    One number that trades off <i>ringing left</i> vs <i>motion blur</i>. <b>Lower is better.</b>
-    <div className="mt-2 font-mono">score = smoothing × (vibrs^1.5 + vibrs×0.2 + 0.01)</div>
-    <div className="mt-2">
-      <b>vibrs</b>
-      <div className="mt-1">
-        remaining/total vibration (after ignoring PSD below{' '}
-        <span className="font-mono">max(PSD)/20</span>), worst-case over damping ratios{' '}
-        <span className="font-mono">[0.075, 0.1, 0.15]</span>.
-      </div>
-    </div>
-    <div className="mt-2">
-      <b>smoothing</b>
-      <div className="mt-1">
-        time-spread from the shaper taps using Klipper’s cornering model (
-        <span className="font-mono">accel=5000</span>, <span className="font-mono">cornering</span>
-        from the UI). Bigger smoothing rounds corners more.
-      </div>
-    </div>
-  </>
-);
-
-const flatnessScoreTooltip = (
-  <>
-    Measures how “flat” the <b>shaped</b> spectrum is (lower is better).
-    <div className="text-muted-foreground mt-2">
-      Computed as normalized squared error from the mean over 0–200 Hz.
-    </div>
-  </>
-);
-
-const variationScoreTooltip = (
-  <>
-    Measures how “smooth” the <b>shaped</b> spectrum is (lower is better).
-    <div className="text-muted-foreground mt-2">
-      Computed as total variation over 0–200 Hz: <span className="font-mono">Σ |Δy|</span>.
-    </div>
-  </>
-);
 
 const maxAccelAccurate = (
   <>
@@ -93,7 +51,6 @@ export default function ShaperPlots() {
   const height = SPECTROGRAM_WATERFALL_HEIGHT;
 
   const [shaperParams, setShaperParams] = useAtom(shaperParamsAtom);
-  const scoreMode = useAtomValue(shaperScoreModeAtom);
 
   const maxHoldSpectrum = useAtomValue(spectrogramMaxHoldAtom);
   const analysisRange = useAtomValue(analysisRangeAtom);
@@ -138,8 +95,8 @@ export default function ShaperPlots() {
         x: historyMode === 'centroid_ms' ? centroidMs : maxAccel,
         y: h.score,
         color: typeColor[h.params.type],
-        strokeColor: shaperParams.type === h.params.type ? 'white' : '',
-        strokeWidth: shaperParams.type === h.params.type ? 0.1 : 0,
+        strokeColor: shaperParams.type === h.params.type ? 'black' : '',
+        strokeWidth: shaperParams.type === h.params.type ? 0.5 : 0,
         radius: shaperParams.type === h.params.type ? 2 : 0.5,
         type: h.params.type,
         centroidMs,
@@ -155,28 +112,23 @@ export default function ShaperPlots() {
     .filter((v): v is NonNullable<typeof v> => Boolean(v))
     .sort((a, _b) => (a.type === shaperParams.type ? 1 : -1));
 
-  const currentPoint: HistoryPoint | null =
-    currentScore == null
-      ? null
-      : {
-          x:
-            historyMode === 'centroid_ms'
-              ? delayCentroidSeconds * 1000
-              : (currentMaxAccel ?? Number.NaN),
-          y: currentScore,
-          color: 'rgba(255, 255, 255, 1)',
-          radius: 3,
-          strokeColor: 'rgba(0, 0, 0, 0.9)',
-          strokeWidth: 1.5,
-          type: shaperParams.type,
-          centroidMs: delayCentroidSeconds * 1000,
-          maxAccel: currentMaxAccel ?? Number.NaN,
-          score: currentScore,
-          params: shaperParams,
-          disabled: true,
-        };
+  const currentPoint: HistoryPoint = {
+    x:
+      historyMode === 'centroid_ms' ? delayCentroidSeconds * 1000 : (currentMaxAccel ?? Number.NaN),
+    y: currentScore,
+    color: 'rgba(255, 255, 255, 1)',
+    radius: 3,
+    strokeColor: 'rgba(0, 0, 0, 0.9)',
+    strokeWidth: 1.5,
+    type: shaperParams.type,
+    centroidMs: delayCentroidSeconds * 1000,
+    maxAccel: currentMaxAccel ?? Number.NaN,
+    score: currentScore,
+    params: shaperParams,
+    disabled: true,
+  };
 
-  const allHistoryPoints = currentPoint ? [...historyPoints, currentPoint] : historyPoints;
+  const allHistoryPoints = [...historyPoints, currentPoint];
 
   const taps = computeMarlinShaperTaps(shaperParams);
   const tapCoefficientsText = taps.a.map((v) => v.toFixed(6)).join(', ');
@@ -231,21 +183,9 @@ export default function ShaperPlots() {
         <div className="text-muted-foreground text-sm">Score</div>
         <div className="text-muted-foreground mt-2 text-xs">
           Current score:{' '}
-          <ExplainTooltip
-            title="Score"
-            accurate={
-              scoreMode === 'flatness'
-                ? flatnessScoreTooltip
-                : scoreMode === 'variation'
-                  ? variationScoreTooltip
-                  : scoreTooltip
-            }
-            intuition={<>Used by the optimiser and for quick comparisons.</>}
-          >
-            <span className="font-medium underline decoration-dotted underline-offset-2">
-              {currentScore != null ? currentScore.toFixed(9) : '—'}
-            </span>
-          </ExplainTooltip>
+          <span className="font-medium underline decoration-dotted underline-offset-2">
+            {currentScore.toFixed(9)}
+          </span>
         </div>
 
         <div className="text-muted-foreground mt-1 text-xs">

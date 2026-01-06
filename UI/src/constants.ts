@@ -88,7 +88,7 @@ export const SPECTROGRAM_WATERFALL_SECONDS = 20;
 
 // Number of parallel workers used for expensive computations (e.g. input shaper optimisation).
 // Keep this modest to avoid saturating the main thread with message handling.
-export const WEB_WORKER_THREADS = 10; //navigator.hardwareConcurrency;
+export const WEB_WORKER_THREADS = navigator.hardwareConcurrency;
 
 // === Simulation ===
 

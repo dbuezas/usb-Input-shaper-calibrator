@@ -4,6 +4,7 @@ import { spectrogramChannel } from '@/screens/MeasureScreen/messages';
 import { atom, useAtomValue, useSetAtom } from 'jotai';
 import {
   ACTUAL_RESOLUTION,
+  FREQUENCY_SLIDER_RANGE_HZ,
   SPECTROGRAM_PLOT_WIDTH,
   SPECTROGRAM_WATERFALL_HEIGHT,
 } from '@/constants';
@@ -11,7 +12,6 @@ import type { DataSource } from '@/screens/MeasureScreen/data-source';
 import { SpectrumPlot } from '@/visualisations/SpectrumPlot';
 import { Waterfall } from '@/visualisations/Waterfall';
 import { historicPeakAtom, peakAtom, spectrogramMaxHoldAtom } from './atoms';
-import { frequencyRangeAtom } from '@/atoms/frequency-range';
 
 const spectrogramAtom = atom<Float32Array>(new Float32Array());
 
@@ -55,7 +55,6 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
   const setHistoricPeak = useSetAtom(historicPeakAtom);
   const width = SPECTROGRAM_PLOT_WIDTH;
   const height = SPECTROGRAM_WATERFALL_HEIGHT;
-  const freqRange = useAtomValue(frequencyRangeAtom);
   const spectrogramScaleMax = useAtomValue(spectrogramScaleMaxAtom);
 
   useEffect(() => {
@@ -69,7 +68,7 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
       });
       setSpectrogramMaxHold((prev) => {
         const next = updateMaxHold(prev, msg.spectrum);
-        setHistoricPeak(peakFromSeries(next, freqRange));
+        setHistoricPeak(peakFromSeries(next, FREQUENCY_SLIDER_RANGE_HZ));
         return next;
       });
     };
@@ -78,7 +77,7 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
     return () => {
       spectrogramChannel.removeEventListener('message', handleMessage);
     };
-  }, [freqRange, setHistoricPeak, setSpectrogram, setSpectrogramMaxHold, setSpectrogramScaleMax]);
+  }, [setHistoricPeak, setSpectrogram, setSpectrogramMaxHold, setSpectrogramScaleMax]);
 
   return (
     <div className="text-center">
@@ -87,7 +86,7 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
       <Waterfall
         height={height}
         width={width}
-        freqRange={freqRange}
+        freqRange={FREQUENCY_SLIDER_RANGE_HZ}
         dataAtom={spectrogramAtom}
         onPeakFrequency={(freqHz) => setPeak(freqHz)}
       />
@@ -108,7 +107,7 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
           ]}
           height={height}
           width={width}
-          freqRange={freqRange}
+          freqRange={FREQUENCY_SLIDER_RANGE_HZ}
           scaleMax={spectrogramScaleMax}
         />
       </>

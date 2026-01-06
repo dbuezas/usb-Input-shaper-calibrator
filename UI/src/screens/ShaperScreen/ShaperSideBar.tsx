@@ -42,25 +42,19 @@ export default function ShaperSideBar() {
     title: 'Score mode',
     accurate: (
       <>
-        Choose what <b>Find best</b> and <b>Coarse tune</b> try to minimize.
-        <ul className="mt-2 list-disc space-y-1 pl-5">
-          <li>
-            <b>Klipper</b>: tradeoff between remaining vibration and smoothing (good general
-            default).
-          </li>
-          <li>
-            <b>Flatness</b>: minimize variation from a horizontal line in the shaped spectrum.
-          </li>
-          <li>
-            <b>Variation</b>: minimize “roughness” of the shaped spectrum (total variation).
-          </li>
-        </ul>
+        Choose what <b>Auto tune</b> try to minimize.
       </>
     ),
     intuition: (
       <>
-        Use <b>Flatness</b> when you want the shaper to “even out” the spectrum; use <b>Klipper</b>{' '}
-        when you want a more standard ringing-vs-smoothing compromise.
+        <ul className="mt-2 list-disc space-y-1 pl-5">
+          <li>
+            <b>Variation</b>: minimize “roughness” of the shaped spectrum (total variation).
+          </li>
+          <li>
+            <b>Klipper-like</b>: tradeoff between remaining vibration and smoothing.
+          </li>
+        </ul>
       </>
     ),
   };
@@ -134,36 +128,15 @@ export default function ShaperSideBar() {
     intuition: <>Good default for general “less ringing without too much blur”.</>,
   };
 
-  const scoreModeFlatness = {
-    title: 'Flatness score mode',
-    accurate: (
-      <>
-        Minimizes how much the <b>shaped</b> spectrum varies from a flat line over 0–200 Hz. Lower
-        is better.
-      </>
-    ),
-    intuition: (
-      <>
-        Use this when you want the least ringing at the cost of lower acceleration (or slightly more
-        corner rounding).
-      </>
-    ),
-  };
-
   const scoreModeVariation = {
     title: 'Variation score mode',
     accurate: (
       <>
-        Minimizes the total variation of the <b>shaped</b> spectrum over 0–200 Hz:
-        <div className="mt-2 font-mono">Σ |y[i] - y[i-1]|</div>
+        Minimizes the total variation of the <b>shaped</b> spectrum:
+        <div className="mt-2 font-mono">Σ (y[i] - y[i-10])^2</div>
       </>
     ),
-    intuition: (
-      <>
-        Use this when you want a smoother shaped spectrum (fewer sharp wiggles), even if it’s not
-        perfectly flat.
-      </>
-    ),
+    intuition: <>Use this when you want a smoother shaped spectrum (fewer sharp wiggles).</>,
   };
 
   const f0Info = {
@@ -369,38 +342,7 @@ export default function ShaperSideBar() {
             </div>
           </ExplainTooltip>
         </div>
-        <div className="border-border grid w-full grid-cols-3 gap-1 rounded-md border p-1">
-          <ExplainTooltip
-            title={scoreModeKlipper.title}
-            accurate={scoreModeKlipper.accurate}
-            intuition={scoreModeKlipper.intuition}
-          >
-            <Button
-              type="button"
-              size="sm"
-              variant={scoreMode === 'klipper' ? 'secondary' : 'ghost'}
-              className="h-8 w-full"
-              onClick={() => setScoreMode('klipper')}
-            >
-              Klipper
-            </Button>
-          </ExplainTooltip>
-          <ExplainTooltip
-            title={scoreModeFlatness.title}
-            accurate={scoreModeFlatness.accurate}
-            intuition={scoreModeFlatness.intuition}
-          >
-            <Button
-              type="button"
-              size="sm"
-              variant={scoreMode === 'flatness' ? 'secondary' : 'ghost'}
-              className="h-8 w-full"
-              onClick={() => setScoreMode('flatness')}
-            >
-              Flatness
-            </Button>
-          </ExplainTooltip>
-
+        <div className="border-border grid w-full grid-cols-2 gap-1 rounded-md border p-1">
           <ExplainTooltip
             title={scoreModeVariation.title}
             accurate={scoreModeVariation.accurate}
@@ -414,6 +356,21 @@ export default function ShaperSideBar() {
               onClick={() => setScoreMode('variation')}
             >
               Variation
+            </Button>
+          </ExplainTooltip>
+          <ExplainTooltip
+            title={scoreModeKlipper.title}
+            accurate={scoreModeKlipper.accurate}
+            intuition={scoreModeKlipper.intuition}
+          >
+            <Button
+              type="button"
+              size="sm"
+              variant={scoreMode === 'klipper' ? 'secondary' : 'ghost'}
+              className="h-8 w-full"
+              onClick={() => setScoreMode('klipper')}
+            >
+              Klipper-like
             </Button>
           </ExplainTooltip>
         </div>
@@ -447,20 +404,20 @@ export default function ShaperSideBar() {
             <Button
               type="button"
               size="sm"
-              variant={historyMode === 'centroid_ms' ? 'secondary' : 'ghost'}
-              className="h-8 w-full"
-              onClick={() => setHistoryMode('centroid_ms')}
-            >
-              Centroid
-            </Button>
-            <Button
-              type="button"
-              size="sm"
               variant={historyMode === 'suggested_max_accel' ? 'secondary' : 'ghost'}
               className="h-8 w-full"
               onClick={() => setHistoryMode('suggested_max_accel')}
             >
               Max accel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={historyMode === 'centroid_ms' ? 'secondary' : 'ghost'}
+              className="h-8 w-full"
+              onClick={() => setHistoryMode('centroid_ms')}
+            >
+              Delay centroid
             </Button>
           </div>
         </div>
