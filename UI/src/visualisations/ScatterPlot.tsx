@@ -57,8 +57,8 @@ export const ScatterPlot = <P extends ScatterPoint>({
   height: number;
   xTickFormat?: (v: number) => string;
   getHover?: (point: P, index: number) => ScatterPlotHover;
-  onPointHover?: (meta: P['meta'], point: P, index: number) => void;
-  onPointClick?: (meta: P['meta'], point: P, index: number) => void;
+  onPointHover?: (meta: P | undefined) => void;
+  onPointClick?: (meta: P) => void;
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -173,13 +173,14 @@ export const ScatterPlot = <P extends ScatterPoint>({
           hoveredPointIndexRef.current = null;
           setIsHoveringPoint(false);
           hideHover();
+          onPointHover?.(undefined);
           return;
         }
 
         const p = points[bestIdx];
         hoveredPointIndexRef.current = bestIdx;
         setIsHoveringPoint(Boolean(onPointClick));
-        onPointHover?.(p.meta, p, bestIdx);
+        onPointHover?.(p);
 
         const hover = getHover?.(p, bestIdx) ?? defaultGetHover(p);
         setHover({
@@ -194,7 +195,7 @@ export const ScatterPlot = <P extends ScatterPoint>({
         const idx = hoveredPointIndexRef.current;
         if (idx == null) return;
         const p = points[idx];
-        onPointClick?.(p.meta, p, idx);
+        onPointClick?.(p);
       }}
     >
       <canvas ref={canvasRef} width={width} height={height} className="block border bg-black" />

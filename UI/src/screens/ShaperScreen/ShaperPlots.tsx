@@ -21,6 +21,7 @@ import {
 } from './atoms';
 import { type InputShaperType } from './input-shaper';
 import type { OptimisationResult } from './shaper-optimiser.worker';
+import { useState } from 'react';
 
 export default function ShaperPlots() {
   const width = SPECTROGRAM_PLOT_WIDTH;
@@ -42,8 +43,8 @@ export default function ShaperPlots() {
   type HistoryPoint = ScatterPoint<OptimisationResult>;
 
   const historyPoints = optimisationHistory
-    .map((h): HistoryPoint => {
-      return {
+    .map(
+      (h): HistoryPoint => ({
         x: historyMode === 'centroid_ms' ? h.delay * 1000 : h.maxAccel,
         y: h.score,
         color: typeColor[h.params.type],
@@ -52,9 +53,8 @@ export default function ShaperPlots() {
         radius: shaperParams.type === h.params.type ? 2 : 0.5,
         meta: h,
         disabled: shaperParams.type !== h.params.type,
-      };
-    })
-    .filter((v): v is NonNullable<typeof v> => Boolean(v))
+      })
+    )
     .sort((a, _b) => (a.meta?.params.type === shaperParams.type ? 1 : -1));
 
   const currentPoint: HistoryPoint = {
@@ -62,7 +62,7 @@ export default function ShaperPlots() {
       historyMode === 'centroid_ms' ? delayCentroidSeconds * 1000 : (currentMaxAccel ?? Number.NaN),
     y: currentScore,
     color: 'rgba(255, 255, 255, 1)',
-    radius: 3,
+    radius: 6,
     strokeColor: 'rgba(0, 0, 0, 0.9)',
     strokeWidth: 1.5,
     meta: {
@@ -73,8 +73,13 @@ export default function ShaperPlots() {
     },
     disabled: true,
   };
+  const [oldParams, setOldParams] = useState<HistoryPoint>();
 
-  const allHistoryPoints = [...historyPoints, currentPoint];
+  const allHistoryPoints = [
+    ...historyPoints,
+    { ...currentPoint, color: 'rgba(255, 255, 255, .5)' },
+    oldParams,
+  ].filter((v): v is NonNullable<typeof v> => Boolean(v));
 
   return (
     <div className="flex flex-col gap-6">
@@ -122,41 +127,49 @@ export default function ShaperPlots() {
             better). X axis is{' '}
             {historyMode === 'centroid_ms' ? 'delay centroid (ms)' : 'suggested max accel (mm/s²)'}.
           </div>
-          <ScatterPlot
-            points={allHistoryPoints}
-            width={width}
-            height={height}
-            xTickFormat={(v) => `${Math.round(v)}`}
-            onPointClick={(meta) => {
-              if (!meta) return;
-              setShaperParams(meta.params);
-            }}
-            onPointHover={(meta) => {
-              if (!meta) return;
-              setShaperParams(meta.params);
-            }}
-            getHover={(p) => {
-              const meta = p.meta;
-              if (!meta) {
-                return {
-                  title: 'Candidate',
-                  lines: [`x: ${p.x.toFixed(2)}`, `y: ${p.y.toFixed(6)}`],
-                };
-              }
+          <div onPointerEnter={() => void setOldParams(currentPoint)}>
+            <ScatterPlot
+              points={allHistoryPoints}
+              width={width}
+              height={height}
+              xTickFormat={(v) => `${Math.round(v)}`}
+              onPointClick={(p) => {
+                if (!p.meta) return;
+                setOldParams(currentPoint);
+                setShaperParams(p.meta.params);
+              }}
+              onPointHover={(p) => {
+                if (!p?.meta) {
+                  if (oldParams?.meta?.params) {
+                    setShaperParams(oldParams.meta.params);
+                  }
+                } else {
+                  setShaperParams(p.meta.params);
+                }
+              }}
+              getHover={(p) => {
+                const meta = p.meta;
+                if (!meta) {
+                  return {
+                    title: 'Candidate',
+                    lines: [`x: ${p.x.toFixed(2)}`, `y: ${p.y.toFixed(6)}`],
+                  };
+                }
 
-              return {
-                title: meta.params.type.toUpperCase(),
-                lines: [
-                  `centroid: ${(meta.delay * 1000).toFixed(2)} ms`,
-                  `max accel: ${meta.maxAccel.toFixed(0)} mm/s²`,
-                  `score: ${meta.score.toFixed(9)}`,
-                  `f0: ${meta.params.fHz.toFixed(2)} Hz`,
-                  `zeta: ${meta.params.zeta.toFixed(3)}`,
-                  `vtol: ${meta.params.vtol.toFixed(3)}`,
-                ],
-              };
-            }}
-          />
+                return {
+                  title: meta.params.type.toUpperCase(),
+                  lines: [
+                    `centroid: ${(meta.delay * 1000).toFixed(2)} ms`,
+                    `max accel: ${meta.maxAccel.toFixed(0)} mm/s²`,
+                    `score: ${meta.score.toFixed(9)}`,
+                    `f0: ${meta.params.fHz.toFixed(2)} Hz`,
+                    `zeta: ${meta.params.zeta.toFixed(3)}`,
+                    `vtol: ${meta.params.vtol.toFixed(3)}`,
+                  ],
+                };
+              }}
+            />
+          </div>
         </div>
       )}
     </div>
