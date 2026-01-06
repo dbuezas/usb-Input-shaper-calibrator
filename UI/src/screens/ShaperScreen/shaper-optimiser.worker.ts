@@ -6,7 +6,7 @@ import {
   isEiFamily,
   computeDelayCentroidSeconds,
 } from '@/screens/ShaperScreen/input-shaper';
-import { SHAPER_F0_RANGE_HZ } from '@/constants';
+import { OPTIMIZER_UPDATE_EVERY_MS, SHAPER_F0_RANGE_HZ } from '@/constants';
 
 import { variationScoreFromMagnitudeSpectrum } from '@/screens/ShaperScreen/shaper-scores/variation';
 import { flatnessScoreFromMagnitudeSpectrum } from './shaper-scores/flatness';
@@ -43,11 +43,20 @@ export type WorkerProgressMessage = {
   current: OptimisationResult;
 };
 
+export type WorkerUpdateMessage = {
+  type: 'update';
+  iterationsDone: number;
+  iterationsTotal: number;
+  bestByType: BestByType;
+  history: OptimisationResult[];
+  bestOverall?: OptimisationResult;
+};
+
 export type WorkerDoneMessage = {
   type: 'done';
 };
 
-export type WorkerOutMessage = WorkerProgressMessage | WorkerDoneMessage;
+export type WorkerOutMessage = WorkerProgressMessage | WorkerUpdateMessage | WorkerDoneMessage;
 
 // Optimiser search space (kept local to the worker).
 export const SEARCH_TYPES: InputShaperType[] = [
@@ -87,6 +96,22 @@ const scoreCandidate = (
   }
 };
 
+const insertIntoFrontier = (frontier: OptimisationResult[], next: OptimisationResult) => {
+  for (const existing of frontier) {
+    if (existing.delay <= next.delay && existing.score <= next.score) return false;
+  }
+
+  let write = 0;
+  for (let i = 0; i < frontier.length; i++) {
+    const existing = frontier[i];
+    if (existing.delay >= next.delay && existing.score >= next.score) continue;
+    frontier[write++] = existing;
+  }
+  frontier.length = write;
+  frontier.push(next);
+  return true;
+};
+
 const bruteForce = (msg: WorkerStartMessage) => {
   const { magnitudes, scoreMode, scoreRangeHz } = msg;
   const types = (msg.candidateTypes?.length ? msg.candidateTypes : SEARCH_TYPES).filter(
@@ -111,6 +136,32 @@ const bruteForce = (msg: WorkerStartMessage) => {
   let iterationsDone = 0;
 
   const bestByType: BestByType = {};
+  const frontierByType: Partial<Record<InputShaperType, OptimisationResult[]>> = {};
+
+  let bestOverall: OptimisationResult | undefined;
+
+  let lastEmitTime = 0;
+  const emitUpdate = (force: boolean) => {
+    const now = performance.now();
+    if (!force && now - lastEmitTime < OPTIMIZER_UPDATE_EVERY_MS) return;
+    lastEmitTime = now;
+
+    const history: OptimisationResult[] = [];
+    for (const t of types) {
+      const frontier = frontierByType[t];
+      if (!frontier?.length) continue;
+      history.push(...frontier);
+    }
+
+    self.postMessage({
+      type: 'update',
+      iterationsDone,
+      iterationsTotal,
+      bestByType,
+      history,
+      bestOverall,
+    } satisfies WorkerOutMessage);
+  };
 
   // Phase 1: coarse grid search (in-order)
   for (const candidateType of types) {
@@ -130,16 +181,18 @@ const bruteForce = (msg: WorkerStartMessage) => {
           const prevByType = bestByType[candidateType];
           if (!prevByType || score < prevByType.score) bestByType[candidateType] = current;
 
-          self.postMessage({
-            type: 'progress',
-            iterationsDone,
-            iterationsTotal,
-            current,
-          } satisfies WorkerOutMessage);
+          const frontier = (frontierByType[candidateType] ??= []);
+          insertIntoFrontier(frontier, current);
+
+          if (!bestOverall || current.score < bestOverall.score) bestOverall = current;
+
+          emitUpdate(false);
         }
       }
     }
   }
+
+  emitUpdate(true);
   self.postMessage({ type: 'done' } satisfies WorkerOutMessage);
 };
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { OPTIMIZER_UPDATE_EVERY_MS, WEB_WORKER_THREADS } from '@/constants';
+import { WEB_WORKER_THREADS } from '@/constants';
 import { ALL_SHAPER_TYPES } from './input-shaper';
 import ShaperOptimiserWorker from './shaper-optimiser.worker?worker';
 import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
@@ -18,6 +18,24 @@ import {
   shaperParamsAtom,
   corneringSettingsAtom,
 } from './atoms';
+
+const safeFirst = <T>(items: readonly T[]): T | undefined => {
+  return items.length ? items[0] : undefined;
+};
+
+const mergeBestByType = (chunks: Iterable<BestByType>): BestByType => {
+  const out: BestByType = {};
+  for (const chunk of chunks) {
+    for (const [type, next] of Object.entries(chunk) as Array<
+      [keyof BestByType, BestByType[keyof BestByType]]
+    >) {
+      if (!next) continue;
+      const prev = out[type];
+      if (!prev || next.score < prev.score) out[type] = next;
+    }
+  }
+  return out;
+};
 
 const chunkRoundRobin = <T>(items: readonly T[], chunks: number): T[][] => {
   const n = Math.max(1, Math.floor(chunks));
@@ -54,23 +72,11 @@ export default function useOptimisers() {
     for (const w of workersRef.current) w.terminate();
     workersRef.current = new Set(typeChunks.map(() => new ShaperOptimiserWorker()));
     setOptimisationHistory([]);
-    const perWorkerProgress = new Map<Worker, WorkerProgressMessage>();
-    let lastUpdateTime = 0;
-    const computeAggregateProgress = (msg: WorkerProgressMessage): WorkerProgressMessage => {
-      let iterationsDone = 0;
-      let iterationsTotal = 0;
-      for (const p of perWorkerProgress.values()) {
-        iterationsDone += p.iterationsDone;
-        iterationsTotal += p.iterationsTotal;
-      }
 
-      return {
-        iterationsDone,
-        iterationsTotal,
-        current: msg.current,
-        type: 'progress',
-      };
-    };
+    const perWorkerProgress = new Map<Worker, WorkerProgressMessage>();
+    const perWorkerBestByType = new Map<Worker, BestByType>();
+    const perWorkerHistory = new Map<Worker, OptimisationResult[]>();
+    const perWorkerBestOverall = new Map<Worker, OptimisationResult | undefined>();
 
     const completion = new Promise<void>((resolve) => {
       let idx = 0;
@@ -82,53 +88,59 @@ export default function useOptimisers() {
           const msg = evt.data;
           switch (msg.type) {
             case 'progress': {
+              // Legacy worker message type; keep minimal work here.
               perWorkerProgress.set(worker, msg);
-              setOptimisationHistory((history) => {
-                const results: OptimisationResult[] = [msg.current];
-                for (const old of history) {
-                  if (
-                    old.params.type === msg.current.params.type &&
-                    old.delay <= msg.current.delay &&
-                    old.score <= msg.current.score
-                  ) {
-                    // there's already something better
-                    return history;
-                  } else if (
-                    old.params.type === msg.current.params.type &&
-                    old.delay > msg.current.delay &&
-                    old.score > msg.current.score
-                  ) {
-                    // the old needs to be replaced
-                  } else {
-                    results.push(old);
-                  }
-                }
+              setOptimiseProgress(msg);
+              return;
+            }
 
-                return results;
-              });
-              setOptimiseProgress(computeAggregateProgress(msg));
+            case 'update': {
+              perWorkerBestByType.set(worker, msg.bestByType);
+              perWorkerHistory.set(worker, msg.history);
+              perWorkerBestOverall.set(worker, msg.bestOverall);
 
-              setBestByType((prev) => {
-                const oldBestOfType =
-                  prev[msg.current.params.type]?.score ?? Number.POSITIVE_INFINITY;
-                if (msg.current.score < oldBestOfType) {
-                  return {
-                    ...prev,
-                    [msg.current.params.type]: msg.current,
-                  };
-                }
-                return prev;
-              });
-
-              if (!finalBest || msg.current.score < finalBest.score) {
-                finalBest = msg.current;
+              const workerCurrent = msg.bestOverall ?? safeFirst(msg.history) ?? finalBest;
+              if (workerCurrent) {
+                perWorkerProgress.set(worker, {
+                  type: 'progress',
+                  iterationsDone: msg.iterationsDone,
+                  iterationsTotal: msg.iterationsTotal,
+                  current: workerCurrent,
+                });
               }
 
-              const now = performance.now();
-              if (now - lastUpdateTime > OPTIMIZER_UPDATE_EVERY_MS) {
-                lastUpdateTime = now;
-                setShaperParams(msg.current.params);
+              let iterationsDone = 0;
+              let iterationsTotal = 0;
+              for (const p of perWorkerProgress.values()) {
+                iterationsDone += p.iterationsDone;
+                iterationsTotal += p.iterationsTotal;
               }
+
+              const mergedBestByType = mergeBestByType(perWorkerBestByType.values());
+              const mergedHistory: OptimisationResult[] = [];
+              for (const h of perWorkerHistory.values()) mergedHistory.push(...h);
+
+              let bestOverall: OptimisationResult | undefined;
+              for (const b of perWorkerBestOverall.values()) {
+                if (!b) continue;
+                if (!bestOverall || b.score < bestOverall.score) bestOverall = b;
+              }
+
+              const current = bestOverall ?? safeFirst(mergedHistory);
+              if (!current) return;
+
+              setOptimiseProgress({
+                type: 'progress',
+                iterationsDone,
+                iterationsTotal,
+                current,
+              });
+              setBestByType(mergedBestByType);
+              setOptimisationHistory(mergedHistory);
+              if (!finalBest || current.score < finalBest.score) {
+                finalBest = current;
+              }
+              setShaperParams(current.params);
               return;
             }
 
