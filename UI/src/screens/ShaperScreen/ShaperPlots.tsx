@@ -185,24 +185,60 @@ const HistoryPlot = () => {
   })();
 
   return (
-    <div
-      onPointerEnter={() => void setOldParams(currentPoint)}
-      onPointerLeave={() => {
-        if (oldParams?.meta) setShaperParams(oldParams.meta.params);
-      }}
-    >
+    <>
+      <div
+        onPointerEnter={() => void setOldParams(currentPoint)}
+        onPointerLeave={() => {
+          if (oldParams?.meta) setShaperParams(oldParams.meta.params);
+        }}
+      >
+        <ScatterPlot
+          points={allHistoryPoints}
+          width={width}
+          height={height}
+          xTickFormat={(v) => `${Math.round(v)}`}
+          hoverMode="x"
+          onPointClick={(p) => {
+            if (!p.meta) return;
+            setOldParams(currentPoint);
+            setShaperParams(p.meta.params);
+          }}
+          onPointHover={(p) => {
+            if (!p?.meta) {
+              if (oldParams?.meta?.params) {
+                setShaperParams(oldParams.meta.params);
+              }
+            } else {
+              setShaperParams(p.meta.params);
+            }
+          }}
+          getHover={(p) => {
+            const meta = p.meta;
+            if (!meta) {
+              return {
+                title: 'Candidate',
+                lines: [`x: ${p.x.toFixed(2)}`, `y: ${p.y.toFixed(6)}`],
+              };
+            }
+
+            return {
+              title: meta.params.type.toUpperCase(),
+              lines: [
+                `Max accel: ${meta.maxAccel.toFixed(0)} mm/s²`,
+                `Delay: ${(meta.delay * 1000).toFixed(2)} ms`,
+                `Score: ${meta.score.toFixed(9)}`,
+              ],
+            };
+          }}
+        />
+      </div>
       {dataXExtent && effectiveXRange && (
-        <div className="mb-2">
-          <div className="text-muted-foreground mb-1 flex items-center justify-between text-xs">
-            <span>X span</span>
-            <span className="tabular-nums">
-              {effectiveXRange[0].toFixed(1)} → {effectiveXRange[1].toFixed(1)}
-            </span>
-          </div>
+        <div className="mt-4">
           <Slider
+            style={{ width: SPECTROGRAM_PLOT_WIDTH }}
             min={dataXExtent[0]}
             max={dataXExtent[1]}
-            step={(dataXExtent[1] - dataXExtent[0]) / 200}
+            step={(dataXExtent[1] - dataXExtent[0]) / 10000}
             value={[effectiveXRange[0], effectiveXRange[1]]}
             onValueChange={(v) => {
               const a = v[0] ?? dataXExtent[0];
@@ -213,47 +249,6 @@ const HistoryPlot = () => {
           />
         </div>
       )}
-      <ScatterPlot
-        points={allHistoryPoints}
-        width={width}
-        height={height}
-        xTickFormat={(v) => `${Math.round(v)}`}
-        onPointClick={(p) => {
-          if (!p.meta) return;
-          setOldParams(currentPoint);
-          setShaperParams(p.meta.params);
-        }}
-        onPointHover={(p) => {
-          if (!p?.meta) {
-            if (oldParams?.meta?.params) {
-              setShaperParams(oldParams.meta.params);
-            }
-          } else {
-            setShaperParams(p.meta.params);
-          }
-        }}
-        getHover={(p) => {
-          const meta = p.meta;
-          if (!meta) {
-            return {
-              title: 'Candidate',
-              lines: [`x: ${p.x.toFixed(2)}`, `y: ${p.y.toFixed(6)}`],
-            };
-          }
-
-          return {
-            title: meta.params.type.toUpperCase(),
-            lines: [
-              `centroid: ${(meta.delay * 1000).toFixed(2)} ms`,
-              `max accel: ${meta.maxAccel.toFixed(0)} mm/s²`,
-              `score: ${meta.score.toFixed(9)}`,
-              `f0: ${meta.params.fHz.toFixed(2)} Hz`,
-              `zeta: ${meta.params.zeta.toFixed(3)}`,
-              `vtol: ${meta.params.vtol.toFixed(3)}`,
-            ],
-          };
-        }}
-      />
-    </div>
+    </>
   );
 };

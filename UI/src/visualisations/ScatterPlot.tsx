@@ -48,6 +48,7 @@ export const ScatterPlot = <P extends ScatterPoint>({
   width,
   height,
   xTickFormat,
+  hoverMode,
   getHover,
   onPointHover,
   onPointClick,
@@ -56,6 +57,7 @@ export const ScatterPlot = <P extends ScatterPoint>({
   width: number;
   height: number;
   xTickFormat?: (v: number) => string;
+  hoverMode?: 'xy' | 'x';
   getHover?: (point: P, index: number) => ScatterPlotHover;
   onPointHover?: (meta: P | undefined) => void;
   onPointClick?: (meta: P) => void;
@@ -152,6 +154,7 @@ export const ScatterPlot = <P extends ScatterPoint>({
         const px = DEFAULT_AXIS_PADDING.left + xScale(xScale.invert(plotX));
         const py = DEFAULT_AXIS_PADDING.top + yScale(yScale.invert(plotY));
 
+        const mode = hoverMode ?? 'xy';
         let bestIdx = -1;
         let bestDist2 = Number.POSITIVE_INFINITY;
         for (let i = 0; i < points.length; i++) {
@@ -161,7 +164,7 @@ export const ScatterPlot = <P extends ScatterPoint>({
           const sy = DEFAULT_AXIS_PADDING.top + yScale(p.y);
           const dx = sx - px;
           const dy = sy - py;
-          const d2 = dx * dx + dy * dy;
+          const d2 = mode === 'x' ? dx * dx : dx * dx + dy * dy;
           if (d2 < bestDist2) {
             bestDist2 = d2;
             bestIdx = i;
@@ -182,11 +185,14 @@ export const ScatterPlot = <P extends ScatterPoint>({
         setIsHoveringPoint(Boolean(onPointClick));
         onPointHover?.(p);
 
+        const hoverAnchorX = DEFAULT_AXIS_PADDING.left + xScale(p.x);
+        const hoverAnchorY = DEFAULT_AXIS_PADDING.top + yScale(p.y);
+
         const hover = getHover?.(p, bestIdx) ?? defaultGetHover(p);
         setHover({
           visible: true,
-          x,
-          y,
+          x: mode === 'x' ? hoverAnchorX : x,
+          y: mode === 'x' ? hoverAnchorY : y,
           title: hover.title,
           lines: hover.lines,
         });

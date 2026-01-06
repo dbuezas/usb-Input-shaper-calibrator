@@ -88,7 +88,7 @@ export const SPECTROGRAM_WATERFALL_SECONDS = 20;
 
 // Number of parallel workers used for expensive computations (e.g. input shaper optimisation).
 // Keep this modest to avoid saturating the main thread with message handling.
-export const WEB_WORKER_THREADS = navigator.hardwareConcurrency;
+export const WEB_WORKER_THREADS = Math.max(1, navigator.hardwareConcurrency - 1);
 
 // === Simulation ===
 
@@ -114,4 +114,4 @@ export const CORNERING_SPEED_RANGE_MM_S: [number, number] = [0.5, 60];
 export const CORNERING_JUNCTION_DEVIATION_RANGE_MM: [number, number] = [0, 0.2];
 export const CORNERING_JERK_RANGE_MM_S: [number, number] = [0, 50];
 
-export const OPTIMIZER_UPDATE_EVERY_MS = 100;
+export const OPTIMIZER_UPDATE_EVERY_MS = 200;
