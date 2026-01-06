@@ -21,6 +21,72 @@ import {
 } from './atoms';
 import { type InputShaperType } from './input-shaper';
 
+const scoreTooltip = (
+  <>
+    One number that trades off <i>ringing left</i> vs <i>motion blur</i>. <b>Lower is better.</b>
+    <div className="mt-2 font-mono">score = smoothing × (vibrs^1.5 + vibrs×0.2 + 0.01)</div>
+    <div className="mt-2">
+      <b>vibrs</b>
+      <div className="mt-1">
+        remaining/total vibration (after ignoring PSD below{' '}
+        <span className="font-mono">max(PSD)/20</span>), worst-case over damping ratios{' '}
+        <span className="font-mono">[0.075, 0.1, 0.15]</span>.
+      </div>
+    </div>
+    <div className="mt-2">
+      <b>smoothing</b>
+      <div className="mt-1">
+        time-spread from the shaper taps using Klipper’s cornering model (
+        <span className="font-mono">accel=5000</span>, <span className="font-mono">cornering</span>
+        from the UI). Bigger smoothing rounds corners more.
+      </div>
+    </div>
+  </>
+);
+
+const flatnessScoreTooltip = (
+  <>
+    Measures how “flat” the <b>shaped</b> spectrum is (lower is better).
+    <div className="text-muted-foreground mt-2">
+      Computed as normalized squared error from the mean over 0–200 Hz.
+    </div>
+  </>
+);
+
+const variationScoreTooltip = (
+  <>
+    Measures how “smooth” the <b>shaped</b> spectrum is (lower is better).
+    <div className="text-muted-foreground mt-2">
+      Computed as total variation over 0–200 Hz: <span className="font-mono">Σ |Δy|</span>.
+    </div>
+  </>
+);
+
+const maxAccelAccurate = (
+  <>
+    A projection of the highest acceleration where Klipper’s smoothing model stays under a fixed
+    threshold: <code className="font-mono">smoothing(taps, accel, cornering) ≤ 0.12</code>. It’s
+    found via bisection search.
+    <div className="mt-2">
+      <h4 className="text-sm font-semibold">Cornering model</h4>
+      <div className="mt-1">
+        The smoothing model depends on your firmware’s cornering behavior.
+        <ul className="mt-2 list-disc space-y-1 pl-5">
+          <li>
+            <b>SCV (Klipper)</b>: planner maintains a target speed through sharp corners.
+          </li>
+          <li>
+            <b>Jerk (Marlin)</b>: classic jerk limit (approx. corner speed ≈ jerk).
+          </li>
+          <li>
+            <b>Junction deviation (Marlin)</b>: corner speed derived from accel + JD.
+          </li>
+        </ul>
+      </div>
+    </div>
+  </>
+);
+
 export default function ShaperPlots() {
   const width = SPECTROGRAM_PLOT_WIDTH;
   const height = SPECTROGRAM_WATERFALL_HEIGHT;
@@ -99,73 +165,6 @@ export default function ShaperPlots() {
         };
 
   const allHistoryPoints = currentPoint ? [...historyPoints, currentPoint] : historyPoints;
-
-  const scoreTooltip = (
-    <>
-      One number that trades off <i>ringing left</i> vs <i>motion blur</i>. <b>Lower is better.</b>
-      <div className="mt-2 font-mono">score = smoothing × (vibrs^1.5 + vibrs×0.2 + 0.01)</div>
-      <div className="mt-2">
-        <b>vibrs</b>
-        <div className="mt-1">
-          remaining/total vibration (after ignoring PSD below{' '}
-          <span className="font-mono">max(PSD)/20</span>), worst-case over damping ratios{' '}
-          <span className="font-mono">[0.075, 0.1, 0.15]</span>.
-        </div>
-      </div>
-      <div className="mt-2">
-        <b>smoothing</b>
-        <div className="mt-1">
-          time-spread from the shaper taps using Klipper’s cornering model (
-          <span className="font-mono">accel=5000</span>,{' '}
-          <span className="font-mono">cornering</span>
-          from the UI). Bigger smoothing rounds corners more.
-        </div>
-      </div>
-    </>
-  );
-
-  const flatnessScoreTooltip = (
-    <>
-      Measures how “flat” the <b>shaped</b> spectrum is (lower is better).
-      <div className="text-muted-foreground mt-2">
-        Computed as normalized squared error from the mean over 0–200 Hz.
-      </div>
-    </>
-  );
-
-  const variationScoreTooltip = (
-    <>
-      Measures how “smooth” the <b>shaped</b> spectrum is (lower is better).
-      <div className="text-muted-foreground mt-2">
-        Computed as total variation over 0–200 Hz: <span className="font-mono">Σ |Δy|</span>.
-      </div>
-    </>
-  );
-
-  const maxAccelAccurate = (
-    <>
-      A projection of the highest acceleration where Klipper’s smoothing model stays under a fixed
-      threshold: <code className="font-mono">smoothing(taps, accel, cornering) ≤ 0.12</code>. It’s
-      found via bisection search.
-      <div className="mt-2">
-        <h4 className="text-sm font-semibold">Cornering model</h4>
-        <div className="mt-1">
-          The smoothing model depends on your firmware’s cornering behavior.
-          <ul className="mt-2 list-disc space-y-1 pl-5">
-            <li>
-              <b>SCV (Klipper)</b>: planner maintains a target speed through sharp corners.
-            </li>
-            <li>
-              <b>Jerk (Marlin)</b>: classic jerk limit (approx. corner speed ≈ jerk).
-            </li>
-            <li>
-              <b>Junction deviation (Marlin)</b>: corner speed derived from accel + JD.
-            </li>
-          </ul>
-        </div>
-      </div>
-    </>
-  );
 
   const taps = computeMarlinShaperTaps(shaperParams);
   const tapCoefficientsText = taps.a.map((v) => v.toFixed(6)).join(', ');
@@ -250,7 +249,7 @@ export default function ShaperPlots() {
             }
           >
             <span className="font-medium underline decoration-dotted underline-offset-2">
-              {currentMaxAccel != null ? Math.round(currentMaxAccel / 100) * 100 : '—'}
+              {(currentMaxAccel ?? 0).toFixed(2)}
             </span>
           </ExplainTooltip>{' '}
           mm/s²
