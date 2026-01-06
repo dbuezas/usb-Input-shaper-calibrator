@@ -27,11 +27,69 @@ export default function ShaperPlots() {
   const width = SPECTROGRAM_PLOT_WIDTH;
   const height = SPECTROGRAM_WATERFALL_HEIGHT;
 
-  const [shaperParams, setShaperParams] = useAtom(shaperParamsAtom);
+  const shaperParams = useAtomValue(shaperParamsAtom);
 
   const maxHoldSpectrum = useAtomValue(spectrogramMaxHoldAtom);
   const shaperResponse = useAtomValue(shaperResponseAtom);
   const analysisRange = useAtomValue(analysisRangeAtom);
+  const historyMode = useAtomValue(historyModeAtom);
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div>
+        <h4 className="mb-2 font-semibold">Spectrum Max-Hold → Shaped</h4>
+        <SpectrumPlot
+          traces={[
+            {
+              dataAtom: spectrogramMaxHoldAtom,
+              mode: 'line',
+              color: 'rgba(0, 220, 255, 0.55)',
+            },
+            {
+              dataAtom: shapedSpectrumAtom,
+              mode: 'line',
+              color: 'rgba(0, 255, 120, 0.9)',
+            },
+            {
+              dataAtom: shaperResponseAtom,
+              mode: 'line',
+              color: SHAPER_COLORS[shaperParams.type].replace(', 1)', ', 0.85)'),
+              yAxis: 'right',
+            },
+          ]}
+          height={height}
+          width={width}
+          freqRange={FREQUENCY_SLIDER_RANGE_HZ}
+          markers={[
+            { freqHz: analysisRange[0], color: 'rgba(255,255,255,0.75)' },
+            { freqHz: analysisRange[1], color: 'rgba(255,255,255,0.75)' },
+          ]}
+          scaleMax={maxHoldSpectrum.length ? Math.max(...maxHoldSpectrum) : undefined}
+          scaleMaxRight={shaperResponse.length ? Math.max(...shaperResponse) : undefined}
+        />
+      </div>
+
+      <div>
+        <h4 className="mb-2 font-semibold">
+          Optimiser Results:{' '}
+          {historyMode === 'centroid_ms' ? 'Delay Centroid' : 'Suggested Max Accel'} vs Score
+        </h4>
+        <div className="text-muted-foreground mb-2 text-xs">
+          Each dot is a new best-so-far candidate found during the optimiser run (lower score is
+          better). X axis is{' '}
+          {historyMode === 'centroid_ms' ? 'delay centroid (ms)' : 'suggested max accel (mm/s²)'}.
+        </div>
+        <HistoryPlot />
+      </div>
+    </div>
+  );
+}
+const HistoryPlot = () => {
+  const width = SPECTROGRAM_PLOT_WIDTH;
+  const height = SPECTROGRAM_WATERFALL_HEIGHT;
+
+  const [shaperParams, setShaperParams] = useAtom(shaperParamsAtom);
+
   const currentScore = useAtomValue(currentScoreAtom);
   const currentMaxAccel = useAtomValue(currentMaxAccelAtom);
   const delayCentroidSeconds = useAtomValue(delayCentroidSecondsAtom);
@@ -82,96 +140,48 @@ export default function ShaperPlots() {
   ].filter((v): v is NonNullable<typeof v> => Boolean(v));
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h4 className="mb-2 font-semibold">Spectrum Max-Hold → Shaped</h4>
-        <SpectrumPlot
-          traces={[
-            {
-              dataAtom: spectrogramMaxHoldAtom,
-              mode: 'line',
-              color: 'rgba(0, 220, 255, 0.55)',
-            },
-            {
-              dataAtom: shapedSpectrumAtom,
-              mode: 'line',
-              color: 'rgba(0, 255, 120, 0.9)',
-            },
-            {
-              dataAtom: shaperResponseAtom,
-              mode: 'line',
-              color: SHAPER_COLORS[shaperParams.type].replace(', 1)', ', 0.85)'),
-              yAxis: 'right',
-            },
-          ]}
-          height={height}
-          width={width}
-          freqRange={FREQUENCY_SLIDER_RANGE_HZ}
-          markers={[
-            { freqHz: analysisRange[0], color: 'rgba(255,255,255,0.75)' },
-            { freqHz: analysisRange[1], color: 'rgba(255,255,255,0.75)' },
-          ]}
-          scaleMax={maxHoldSpectrum.length ? Math.max(...maxHoldSpectrum) : undefined}
-          scaleMaxRight={shaperResponse.length ? Math.max(...shaperResponse) : undefined}
-        />
-      </div>
+    <div onPointerEnter={() => void setOldParams(currentPoint)}>
+      <ScatterPlot
+        points={allHistoryPoints}
+        width={width}
+        height={height}
+        xTickFormat={(v) => `${Math.round(v)}`}
+        onPointClick={(p) => {
+          if (!p.meta) return;
+          setOldParams(currentPoint);
+          setShaperParams(p.meta.params);
+        }}
+        onPointHover={(p) => {
+          if (!p?.meta) {
+            if (oldParams?.meta?.params) {
+              setShaperParams(oldParams.meta.params);
+            }
+          } else {
+            setShaperParams(p.meta.params);
+          }
+        }}
+        getHover={(p) => {
+          const meta = p.meta;
+          if (!meta) {
+            return {
+              title: 'Candidate',
+              lines: [`x: ${p.x.toFixed(2)}`, `y: ${p.y.toFixed(6)}`],
+            };
+          }
 
-      {allHistoryPoints.length > 0 && (
-        <div>
-          <h4 className="mb-2 font-semibold">
-            Optimiser Results:{' '}
-            {historyMode === 'centroid_ms' ? 'Delay Centroid' : 'Suggested Max Accel'} vs Score
-          </h4>
-          <div className="text-muted-foreground mb-2 text-xs">
-            Each dot is a new best-so-far candidate found during the optimiser run (lower score is
-            better). X axis is{' '}
-            {historyMode === 'centroid_ms' ? 'delay centroid (ms)' : 'suggested max accel (mm/s²)'}.
-          </div>
-          <div onPointerEnter={() => void setOldParams(currentPoint)}>
-            <ScatterPlot
-              points={allHistoryPoints}
-              width={width}
-              height={height}
-              xTickFormat={(v) => `${Math.round(v)}`}
-              onPointClick={(p) => {
-                if (!p.meta) return;
-                setOldParams(currentPoint);
-                setShaperParams(p.meta.params);
-              }}
-              onPointHover={(p) => {
-                if (!p?.meta) {
-                  if (oldParams?.meta?.params) {
-                    setShaperParams(oldParams.meta.params);
-                  }
-                } else {
-                  setShaperParams(p.meta.params);
-                }
-              }}
-              getHover={(p) => {
-                const meta = p.meta;
-                if (!meta) {
-                  return {
-                    title: 'Candidate',
-                    lines: [`x: ${p.x.toFixed(2)}`, `y: ${p.y.toFixed(6)}`],
-                  };
-                }
-
-                return {
-                  title: meta.params.type.toUpperCase(),
-                  lines: [
-                    `centroid: ${(meta.delay * 1000).toFixed(2)} ms`,
-                    `max accel: ${meta.maxAccel.toFixed(0)} mm/s²`,
-                    `score: ${meta.score.toFixed(9)}`,
-                    `f0: ${meta.params.fHz.toFixed(2)} Hz`,
-                    `zeta: ${meta.params.zeta.toFixed(3)}`,
-                    `vtol: ${meta.params.vtol.toFixed(3)}`,
-                  ],
-                };
-              }}
-            />
-          </div>
-        </div>
-      )}
+          return {
+            title: meta.params.type.toUpperCase(),
+            lines: [
+              `centroid: ${(meta.delay * 1000).toFixed(2)} ms`,
+              `max accel: ${meta.maxAccel.toFixed(0)} mm/s²`,
+              `score: ${meta.score.toFixed(9)}`,
+              `f0: ${meta.params.fHz.toFixed(2)} Hz`,
+              `zeta: ${meta.params.zeta.toFixed(3)}`,
+              `vtol: ${meta.params.vtol.toFixed(3)}`,
+            ],
+          };
+        }}
+      />
     </div>
   );
-}
+};

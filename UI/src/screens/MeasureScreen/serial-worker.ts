@@ -146,7 +146,6 @@ class DataProcessor {
       const bmarker = this.buffer.getByte(0);
       if (bmarker != 255) {
         this.buffer.consume(1);
-        console.log('discard');
         continue;
       }
       const b0 = this.buffer.getByte(1);
@@ -238,7 +237,6 @@ self.onmessage = function (e: MessageEvent<WorkerMessage>) {
     dataProcessor.reset();
   }
   if (type === 'setSelectedAxis') {
-    console.log('selectaxis');
     dataProcessor.selectedAxis = e.data.axis!;
     dataProcessor.resetSpectralProcessor();
   }

@@ -478,6 +478,7 @@ export default function ShaperSideBar() {
               <Button
                 type="button"
                 size="sm"
+                key={shaper}
                 variant={shaperParams.type === shaper ? 'secondary' : 'ghost'}
                 className={cn(
                   'relative h-8 w-full overflow-hidden transition-[filter,transform] duration-150 hover:brightness-125 hover:saturate-150',
