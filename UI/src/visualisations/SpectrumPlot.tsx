@@ -14,6 +14,7 @@ export type SpectrumPlotTrace = {
   dataAtom: Atom<Float32Array>;
   mode: SpectrumPlotMode;
   color: string;
+  yAxis?: 'left' | 'right';
 };
 
 export type SpectrumPlotMarker = {
@@ -28,6 +29,7 @@ const SpectrumPlot_render = ({
   height,
   freqRange,
   scaleMax,
+  scaleMaxRight,
 }: {
   canvasRef: RefObject<HTMLCanvasElement | null>;
   traces: SpectrumPlotTrace[];
@@ -35,6 +37,7 @@ const SpectrumPlot_render = ({
   height: number;
   freqRange: [number, number];
   scaleMax?: number;
+  scaleMaxRight?: number;
 }) => {
   // eslint-disable-next-line react-hooks/rules-of-hooks
   const datasets = traces.map(({ dataAtom }) => useAtomValue(dataAtom));
@@ -59,22 +62,40 @@ const SpectrumPlot_render = ({
     );
     if (iMax <= iMin) return;
 
-    let min = Number.POSITIVE_INFINITY;
-    let max = Number.NEGATIVE_INFINITY;
+    let minLeft = Number.POSITIVE_INFINITY;
+    let maxLeft = Number.NEGATIVE_INFINITY;
+    let minRight = Number.POSITIVE_INFINITY;
+    let maxRight = Number.NEGATIVE_INFINITY;
 
-    for (const series of datasets) {
+    for (let t = 0; t < traces.length; t++) {
+      const series = datasets[t];
+      const axis = traces[t]?.yAxis ?? 'left';
       if (!series.length) continue;
       if (series.length !== data.length) continue;
 
       for (let i = iMin; i < iMax; i++) {
-        min = Math.min(min, series[i]);
-        max = Math.max(max, series[i]);
+        const v = series[i];
+        if (!Number.isFinite(v)) continue;
+        if (axis === 'right') {
+          minRight = Math.min(minRight, v);
+          maxRight = Math.max(maxRight, v);
+        } else {
+          minLeft = Math.min(minLeft, v);
+          maxLeft = Math.max(maxLeft, v);
+        }
       }
     }
-    if (scaleMax != null) max = Math.max(max, scaleMax);
 
-    const rangeVal = max - min;
-    const safeRange = rangeVal <= 0 ? 1 : rangeVal;
+    if (scaleMax != null) maxLeft = Math.max(maxLeft, scaleMax);
+    if (scaleMaxRight != null) maxRight = Math.max(maxRight, scaleMaxRight);
+
+    if (!Number.isFinite(minLeft)) minLeft = 0;
+    if (!Number.isFinite(maxLeft)) maxLeft = 1;
+    if (!Number.isFinite(minRight)) minRight = 0;
+    if (!Number.isFinite(maxRight)) maxRight = 1;
+
+    const safeRangeLeft = maxLeft - minLeft <= 0 ? 1 : maxLeft - minLeft;
+    const safeRangeRight = maxRight - minRight <= 0 ? 1 : maxRight - minRight;
 
     ctx.clearRect(0, 0, width, height);
 
@@ -92,6 +113,7 @@ const SpectrumPlot_render = ({
       const trace = traces[t];
 
       const series = datasets[t];
+      const axis = trace.yAxis ?? 'left';
 
       ctx.strokeStyle = trace.color;
       ctx.fillStyle = trace.color;
@@ -100,7 +122,10 @@ const SpectrumPlot_render = ({
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         for (let i = iMin; i < iMax; i++) {
-          const norm = (series[i] - min) / safeRange;
+          const v = series[i];
+          if (!Number.isFinite(v)) continue;
+          const norm =
+            axis === 'right' ? (v - minRight) / safeRangeRight : (v - minLeft) / safeRangeLeft;
           const x = left + (i - iMin) * xScale;
           const y = bottom - norm * innerHeight;
           if (i === iMin) ctx.moveTo(x, y);
@@ -112,7 +137,10 @@ const SpectrumPlot_render = ({
 
       const pointRadius = 1.2;
       for (let i = iMin; i < iMax; i++) {
-        const norm = (series[i] - min) / safeRange;
+        const v = series[i];
+        if (!Number.isFinite(v)) continue;
+        const norm =
+          axis === 'right' ? (v - minRight) / safeRangeRight : (v - minLeft) / safeRangeLeft;
         const x = left + (i - iMin) * xScale;
         const y = bottom - norm * innerHeight;
         ctx.beginPath();
@@ -120,7 +148,7 @@ const SpectrumPlot_render = ({
         ctx.fill();
       }
     }
-  }, [width, height, datasets, freqRange, traces, scaleMax, canvasRef]);
+  }, [width, height, datasets, freqRange, traces, scaleMax, scaleMaxRight, canvasRef]);
 
   return null;
 };
@@ -132,6 +160,7 @@ export const SpectrumPlot = ({
   height,
   freqRange,
   scaleMax,
+  scaleMaxRight,
   markers,
 }: {
   traces: SpectrumPlotTrace[];
@@ -139,6 +168,7 @@ export const SpectrumPlot = ({
   height: number;
   freqRange: [number, number];
   scaleMax?: number;
+  scaleMaxRight?: number;
   markers?: SpectrumPlotMarker[];
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -158,10 +188,19 @@ export const SpectrumPlot = ({
   );
 
   const yDomain = useMemo(() => [0, scaleMax ?? 1] as [number, number], [scaleMax]);
+  const y2Domain = useMemo(
+    () => (scaleMaxRight != null ? ([0, scaleMaxRight] as [number, number]) : undefined),
+    [scaleMaxRight]
+  );
 
   const yScale = useMemo(
     () => scaleLinear().domain(yDomain).range([innerHeight, 0]),
     [yDomain, innerHeight]
+  );
+
+  const y2Scale = useMemo(
+    () => (y2Domain ? scaleLinear().domain(y2Domain).range([innerHeight, 0]) : null),
+    [y2Domain, innerHeight]
   );
 
   const markerLines = useMemo(() => {
@@ -197,6 +236,7 @@ export const SpectrumPlot = ({
     height,
     xDomain: freqRange,
     yDomain,
+    y2Domain,
     xTicks: 6,
     yTicks: 4,
     xTickFormat: tickFormat,
@@ -223,12 +263,18 @@ export const SpectrumPlot = ({
         }
 
         const freq = xScale.invert(plotX);
+        const leftVal = yScale.invert(plotY);
+        const rightVal = y2Scale ? y2Scale.invert(plotY) : null;
         setHover({
           visible: true,
           x,
           y,
           title: 'Cursor',
-          lines: [`f: ${freq.toFixed(1)} Hz`, `y: ${yScale.invert(plotY).toFixed(2)}`],
+          lines: [
+            `f: ${freq.toFixed(1)} Hz`,
+            `y(left): ${leftVal.toFixed(2)}`,
+            ...(rightVal != null ? [`y(right): ${rightVal.toFixed(2)}`] : []),
+          ],
         });
       }}
     >
@@ -251,6 +297,7 @@ export const SpectrumPlot = ({
         height={height}
         freqRange={freqRange}
         scaleMax={scaleMax}
+        scaleMaxRight={scaleMaxRight}
       />
       <Tooltip hover={hover} />
     </div>

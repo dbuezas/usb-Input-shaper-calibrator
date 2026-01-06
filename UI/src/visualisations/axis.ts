@@ -1,6 +1,6 @@
 import { useEffect, type RefObject } from 'react';
 import { select } from 'd3-selection';
-import { axisBottom, axisLeft } from 'd3-axis';
+import { axisBottom, axisLeft, axisRight } from 'd3-axis';
 import { scaleLinear } from 'd3-scale';
 import { format } from 'd3-format';
 import { VIS_AXIS_PADDING } from '@/constants';
@@ -30,10 +30,13 @@ export const useD3Axes = ({
   height,
   xDomain,
   yDomain,
+  y2Domain,
   xTicks,
   yTicks,
+  y2Ticks,
   xTickFormat,
   yTickFormat,
+  y2TickFormat,
   padding = DEFAULT_AXIS_PADDING,
 }: {
   svgRef: RefObject<SVGSVGElement | null>;
@@ -41,10 +44,13 @@ export const useD3Axes = ({
   height: number;
   xDomain: [number, number];
   yDomain: [number, number];
+  y2Domain?: [number, number];
   xTicks: number;
   yTicks: number;
+  y2Ticks?: number;
   xTickFormat?: (v: number) => string;
   yTickFormat?: (v: number) => string;
+  y2TickFormat?: (v: number) => string;
   padding?: AxisPadding;
 }) => {
   useEffect(() => {
@@ -55,6 +61,7 @@ export const useD3Axes = ({
 
     const xScale = scaleLinear().domain(xDomain).range([0, innerWidth]);
     const yScale = scaleLinear().domain(yDomain).range([innerHeight, 0]);
+    const y2Scale = y2Domain ? scaleLinear().domain(y2Domain).range([innerHeight, 0]) : null;
 
     const svg = select(svgEl);
     svg.selectAll('*').remove();
@@ -76,6 +83,14 @@ export const useD3Axes = ({
         yTickFormat ? yTickFormat(Number(d)) : format('~g')(Number(d))
       );
 
+    const y2Axis =
+      y2Scale &&
+      axisRight(y2Scale)
+        .ticks(y2Ticks ?? yTicks)
+        .tickFormat((d: number | { valueOf(): number }) =>
+          y2TickFormat ? y2TickFormat(Number(d)) : format('~g')(Number(d))
+        );
+
     g.append('g')
       .attr('class', 'x-axis')
       .attr('transform', `translate(0,${innerHeight})`)
@@ -83,7 +98,28 @@ export const useD3Axes = ({
 
     g.append('g').attr('class', 'y-axis').call(yAxis);
 
+    if (y2Axis) {
+      g.append('g')
+        .attr('class', 'y2-axis')
+        .attr('transform', `translate(${innerWidth},0)`)
+        .call(y2Axis);
+    }
+
     g.selectAll('path, line').attr('stroke', 'rgba(255,255,255,0.25)');
     g.selectAll('text').attr('fill', 'rgba(255,255,255,0.7)').style('font-size', '10px');
-  }, [svgRef, width, height, xTicks, yTicks, padding, xDomain, yDomain, xTickFormat, yTickFormat]);
+  }, [
+    svgRef,
+    width,
+    height,
+    xTicks,
+    yTicks,
+    y2Ticks,
+    padding,
+    xDomain,
+    yDomain,
+    y2Domain,
+    xTickFormat,
+    yTickFormat,
+    y2TickFormat,
+  ]);
 };

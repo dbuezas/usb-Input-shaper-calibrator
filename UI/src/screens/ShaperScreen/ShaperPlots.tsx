@@ -16,6 +16,7 @@ import {
   delayCentroidSecondsAtom,
   historyModeAtom,
   optimisationHistoryAtom,
+  shaperResponseAtom,
   shapedSpectrumAtom,
   shaperParamsAtom,
 } from './atoms';
@@ -53,6 +54,7 @@ export default function ShaperPlots() {
   const [shaperParams, setShaperParams] = useAtom(shaperParamsAtom);
 
   const maxHoldSpectrum = useAtomValue(spectrogramMaxHoldAtom);
+  const shaperResponse = useAtomValue(shaperResponseAtom);
   const analysisRange = useAtomValue(analysisRangeAtom);
   const currentScore = useAtomValue(currentScoreAtom);
   const currentMaxAccel = useAtomValue(currentMaxAccelAtom);
@@ -61,14 +63,14 @@ export default function ShaperPlots() {
   const historyMode = useAtomValue(historyModeAtom);
 
   const typeColor: Record<InputShaperType, string> = {
-    zv: `rgba(0, 220, 255, ${shaperParams.type === 'zv' ? 1 : 1})`,
-    zvd: `rgba(0, 255, 120, ${shaperParams.type === 'zvd' ? 1 : 1})`,
-    zvdd: `rgba(255, 200, 0, ${shaperParams.type === 'zvdd' ? 1 : 1})`,
-    zvddd: `rgba(255, 120, 0, ${shaperParams.type === 'zvddd' ? 1 : 1})`,
-    mzv: `rgba(255, 0, 200, ${shaperParams.type === 'mzv' ? 1 : 1})`,
-    ei: `rgba(180, 140, 255, ${shaperParams.type === 'ei' ? 1 : 1})`,
-    '2hei': `rgba(255, 90, 140, ${shaperParams.type === '2hei' ? 1 : 1})`,
-    '3hei': `rgba(120, 200, 255, ${shaperParams.type === '3hei' ? 1 : 1})`,
+    zv: `rgba(0, 220, 255, 1)`,
+    zvd: `rgba(0, 255, 120, 1)`,
+    zvdd: `rgba(255, 200, 0, 1)`,
+    zvddd: `rgba(255, 120, 0, 1)`,
+    mzv: `rgba(255, 0, 200, 1)`,
+    ei: `rgba(180, 140, 255, 1)`,
+    '2hei': `rgba(255, 90, 140, 1)`,
+    '3hei': `rgba(120, 200, 255, 1)`,
   };
 
   type HistoryPoint = {
@@ -168,6 +170,12 @@ export default function ShaperPlots() {
               mode: 'line',
               color: 'rgba(0, 255, 120, 0.9)',
             },
+            {
+              dataAtom: shaperResponseAtom,
+              mode: 'line',
+              color: 'rgba(255, 255, 255, 0.8)',
+              yAxis: 'right',
+            },
           ]}
           height={height}
           width={width}
@@ -177,6 +185,7 @@ export default function ShaperPlots() {
             { freqHz: analysisRange[1], color: 'rgba(255,255,255,0.75)' },
           ]}
           scaleMax={maxHoldSpectrum.length ? Math.max(...maxHoldSpectrum) : undefined}
+          scaleMaxRight={shaperResponse.length ? Math.max(...shaperResponse) : undefined}
         />
       </div>
       <div className="border-border mt-4 rounded-lg border p-3">

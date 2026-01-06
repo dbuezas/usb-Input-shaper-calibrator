@@ -2,6 +2,7 @@ import { atom } from 'jotai';
 import { FREQUENCY_SLIDER_RANGE_HZ } from '@/constants';
 import {
   applyShaperToMagnitudeSpectrum,
+  computeShaperResponse,
   computeDelayCentroidSeconds,
   type CorneringSettings,
   type ShaperParams,
@@ -24,6 +25,10 @@ export const corneringSettingsAtom = atom<CorneringSettings>({ model: 'jerk', va
 
 export const shapedSpectrumAtom = atom((get) =>
   applyShaperToMagnitudeSpectrum(get(shaperParamsAtom), get(spectrogramMaxHoldAtom))
+);
+
+export const shaperResponseAtom = atom((get) =>
+  computeShaperResponse(get(shaperParamsAtom), FREQUENCY_SLIDER_RANGE_HZ)
 );
 
 export const currentScoreAtom = atom((get) =>

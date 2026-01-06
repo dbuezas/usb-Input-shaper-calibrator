@@ -72,7 +72,7 @@ export const FREQUENCY_SLIDER_RANGE_HZ: [number, number] = [
 // Shared plot padding used by canvas renders and D3 axis overlays.
 export const VIS_AXIS_PADDING = {
   left: 44,
-  right: 12,
+  right: 44,
   top: 10,
   bottom: 28,
 } as const;

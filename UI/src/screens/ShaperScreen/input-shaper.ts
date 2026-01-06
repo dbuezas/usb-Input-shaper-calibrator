@@ -1,4 +1,4 @@
-import { FIXED_SAMPLE_RATE } from '@/constants';
+import { FIXED_SAMPLE_RATE, WINDOW_SIZE } from '@/constants';
 
 export const ALL_SHAPER_TYPES = [
   '3hei',
@@ -148,6 +148,27 @@ export const applyShaperToMagnitudeSpectrum = (
     const f = i * i_to_f;
     const h = shaperMagnitudeAtHzFromTaps(a, t, f);
     out[i - start] = magnitudes[i] * h;
+  }
+  return out;
+};
+
+export const computeShaperResponse = (params: ShaperParams, freqRangeHz: [number, number]) => {
+  // Match the FFT binning used by the DSP pipeline (see `WINDOW_SIZE` in `src/constants.ts`).
+  // For an N-point real FFT, the magnitude spectrum has N/2+1 bins from 0..Nyquist.
+  const bins = WINDOW_SIZE / 2 + 1;
+  const freqStepHz = FIXED_SAMPLE_RATE / WINDOW_SIZE;
+
+  const start = Math.max(0, Math.floor(freqRangeHz[0] / freqStepHz));
+  const end = Math.min(bins, Math.ceil(freqRangeHz[1] / freqStepHz));
+
+  const { a, t } = computeMarlinShaperTaps(params);
+
+  // Return a full-length response so it can be plotted/combined with spectra directly.
+  // Values outside the requested range are set to 0.
+  const out = new Float32Array(bins);
+  for (let i = start; i < end; i++) {
+    const f = i * freqStepHz;
+    out[i] = shaperMagnitudeAtHzFromTaps(a, t, f);
   }
   return out;
 };
