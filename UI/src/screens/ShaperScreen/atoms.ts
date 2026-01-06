@@ -72,6 +72,10 @@ export const delayCentroidSecondsAtom = atom((get) => {
   return computeDelayCentroidSeconds(get(shaperParamsAtom));
 });
 
+export type HistoryMode = 'centroid_ms' | 'suggested_max_accel';
+
+export const historyModeAtom = atom<HistoryMode>('centroid_ms');
+
 export const optimisationHistoryAtom = atom<OptimisationResult[]>([]);
 
 export const analysisRangeAtom = atom(FREQUENCY_SLIDER_RANGE_HZ);

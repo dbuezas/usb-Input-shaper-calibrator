@@ -231,7 +231,7 @@ const Waterfall_render = ({
       ctx.fillRect(x, y, freqBinWidth + 1, yScale);
     }
     ctx.fillStyle = `rgb(255,255,255)`;
-    ctx.fillRect(left + (peakIdx - iMin) * freqBinWidth, y, freqBinWidth + 1, yScale);
+    ctx.fillRect(left + (peakIdx - iMin + 0.5) * freqBinWidth, y, 1, yScale);
 
     onPeakFrequency(peakIdx * ACTUAL_RESOLUTION);
   }, [width, height, spectrum, freqRange, scaleMax, canvasRef, dataAtom, onPeakFrequency]);

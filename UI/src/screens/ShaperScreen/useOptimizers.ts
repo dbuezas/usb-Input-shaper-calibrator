@@ -13,8 +13,8 @@ import {
   shaperScoreModeAtom,
   analysisRangeAtom,
   optimisationHistoryAtom,
-  shaperParamsAtom,
   corneringSettingsAtom,
+  historyModeAtom,
 } from './atoms';
 
 const computeBestByType = (results: readonly OptimisationResult[]) => {
@@ -34,9 +34,9 @@ const chunkRoundRobin = <T>(items: readonly T[], length: number): T[][] => {
 };
 
 export default function useOptimisers() {
-  const setShaperParams = useSetAtom(shaperParamsAtom);
   const scoreMode = useAtomValue(shaperScoreModeAtom);
   const corneringSettings = useAtomValue(corneringSettingsAtom);
+  const historyMode = useAtomValue(historyModeAtom);
 
   const maxHoldSpectrum = useAtomValue(spectrogramMaxHoldAtom);
   const scoreRangeHz = useAtomValue(analysisRangeAtom);
@@ -44,7 +44,6 @@ export default function useOptimisers() {
   const [optimiseProgress, setOptimiseProgress] = useState<{
     iterationsDone: number;
     iterationsTotal: number;
-    current: OptimisationResult;
   } | null>(null);
   const [bestByType, setBestByType] = useState(() => computeBestByType([]));
   const setOptimisationHistory = useSetAtom(optimisationHistoryAtom);
@@ -74,7 +73,6 @@ export default function useOptimisers() {
 
     const completion = new Promise<void>((resolve) => {
       let idx = 0;
-      let finalBest: OptimisationResult | undefined;
       for (const worker of workersRef.current) {
         const candidateTypes = typeChunks[idx++];
 
@@ -102,13 +100,8 @@ export default function useOptimisers() {
               setOptimiseProgress({
                 iterationsDone,
                 iterationsTotal,
-                current: msg.current,
               });
               setOptimisationHistory(mergedHistory);
-              if (!finalBest || msg.current.score < finalBest.score) {
-                finalBest = msg.current;
-              }
-              // setShaperParams(msg.current.params);
               return;
             }
 
@@ -117,8 +110,6 @@ export default function useOptimisers() {
               workersRef.current.delete(worker);
 
               if (workersRef.current.size === 0) {
-                // Snap UI to the final best result after optimisation finishes.
-                if (finalBest) setShaperParams(finalBest.params);
                 resolve();
               }
             }
@@ -134,6 +125,7 @@ export default function useOptimisers() {
           scoreMode,
           cornering: corneringSettings,
           candidateTypes,
+          frontierMode: historyMode === 'centroid_ms' ? 'delay_centroid' : 'suggested_max_accel',
         } satisfies WorkerStartMessage);
       }
     });

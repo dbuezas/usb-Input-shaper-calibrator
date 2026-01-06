@@ -1,6 +1,7 @@
 import { useAtom, useAtomValue } from 'jotai';
 import {
   CORNERING_JUNCTION_DEVIATION_RANGE_MM,
+  CORNERING_JERK_RANGE_MM_S,
   CORNERING_SPEED_RANGE_MM_S,
   SHAPER_F0_RANGE_HZ,
   SHAPER_VTOL_RANGE,
@@ -16,6 +17,7 @@ import {
   shaperScoreModeAtom,
   corneringSettingsAtom,
   analysisRangeAtom,
+  historyModeAtom,
 } from './atoms';
 import useOptimisers from './useOptimizers';
 import { SEARCH_TYPES } from './shaper-optimiser.worker';
@@ -25,6 +27,7 @@ export default function ShaperSideBar() {
   const [shaperParams, setShaperParams] = useAtom(shaperParamsAtom);
   const [scoreMode, setScoreMode] = useAtom(shaperScoreModeAtom);
   const [corneringSettings, setCorneringSettings] = useAtom(corneringSettingsAtom);
+  const [historyMode, setHistoryMode] = useAtom(historyModeAtom);
 
   const maxHoldSpectrum = useAtomValue(spectrogramMaxHoldAtom);
   const [analysisRange, setAnalysisRange] = useAtom(analysisRangeAtom);
@@ -34,48 +37,6 @@ export default function ShaperSideBar() {
   const percent = optimiseProgress
     ? (100 * optimiseProgress.iterationsDone) / optimiseProgress.iterationsTotal
     : 0;
-
-  const scoreTooltip = (
-    <>
-      One number that trades off <i>ringing left</i> vs <i>motion blur</i>. <b>Lower is better.</b>
-      <div className="mt-2 font-mono">score = smoothing × (vibrs^1.5 + vibrs×0.2 + 0.01)</div>
-      <div className="mt-2">
-        <b>vibrs</b>
-        <div className="mt-1">
-          remaining/total vibration (after ignoring PSD below{' '}
-          <span className="font-mono">max(PSD)/20</span>), worst-case over damping ratios{' '}
-          <span className="font-mono">[0.075, 0.1, 0.15]</span>.
-        </div>
-      </div>
-      <div className="mt-2">
-        <b>smoothing</b>
-        <div className="mt-1">
-          time-spread from the shaper taps using Klipper’s cornering model (
-          <span className="font-mono">accel=5000</span>,{' '}
-          <span className="font-mono">cornering</span>
-          from the UI). Bigger smoothing rounds corners more.
-        </div>
-      </div>
-    </>
-  );
-
-  const flatnessScoreTooltip = (
-    <>
-      Measures how “flat” the <b>shaped</b> spectrum is (lower is better).
-      <div className="text-muted-foreground mt-2">
-        Computed as normalized squared error from the mean over 0–200 Hz.
-      </div>
-    </>
-  );
-
-  const variationScoreTooltip = (
-    <>
-      Measures how “smooth” the <b>shaped</b> spectrum is (lower is better).
-      <div className="text-muted-foreground mt-2">
-        Computed as total variation over 0–200 Hz: <span className="font-mono">Σ |Δy|</span>.
-      </div>
-    </>
-  );
 
   const scoreModeTooltip = {
     title: 'Score mode',
@@ -375,8 +336,8 @@ export default function ShaperSideBar() {
               </label>
               <div className="mt-3">
                 <Slider
-                  min={CORNERING_SPEED_RANGE_MM_S[0]}
-                  max={CORNERING_SPEED_RANGE_MM_S[1]}
+                  min={CORNERING_JERK_RANGE_MM_S[0]}
+                  max={CORNERING_JERK_RANGE_MM_S[1]}
                   step={0.5}
                   value={[corneringSettings.value]}
                   onValueChange={([value]) => setCorneringSettings({ model: 'jerk', value })}
@@ -468,6 +429,54 @@ export default function ShaperSideBar() {
             </Button>
           </ExplainTooltip>
         </div>
+
+        <div className="mt-3">
+          <div className="mb-2">
+            <ExplainTooltip
+              title="Optimiser view"
+              accurate={
+                <>
+                  Controls both what the optimiser considers a “better tradeoff” when keeping
+                  best-so-far candidates, and what the optimiser history chart shows on its X axis.
+                </>
+              }
+              intuition={
+                <>
+                  <b>Centroid</b> emphasizes lower delay / less corner overlap; <b>Max accel</b>
+                  emphasizes higher usable acceleration.
+                </>
+              }
+              side="right"
+              sideOffset={8}
+            >
+              <div className="text-muted-foreground underline decoration-dotted underline-offset-2">
+                Optimiser view
+              </div>
+            </ExplainTooltip>
+          </div>
+
+          <div className="border-border grid w-full grid-cols-2 gap-1 rounded-md border p-1">
+            <Button
+              type="button"
+              size="sm"
+              variant={historyMode === 'centroid_ms' ? 'secondary' : 'ghost'}
+              className="h-8 w-full"
+              onClick={() => setHistoryMode('centroid_ms')}
+            >
+              Centroid
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={historyMode === 'suggested_max_accel' ? 'secondary' : 'ghost'}
+              className="h-8 w-full"
+              onClick={() => setHistoryMode('suggested_max_accel')}
+            >
+              Max accel
+            </Button>
+          </div>
+        </div>
+
         <div className="mt-4">
           {!isOptimising && (
             <ExplainTooltip
@@ -511,26 +520,6 @@ export default function ShaperSideBar() {
                   style={{ width: `${Math.max(0, Math.min(100, percent))}%` }}
                 />
               </div>
-              <div className="text-muted-foreground mt-2 text-xs">
-                Current score:{' '}
-                <ExplainTooltip
-                  title="Score"
-                  accurate={
-                    scoreMode === 'flatness'
-                      ? flatnessScoreTooltip
-                      : scoreMode === 'variation'
-                        ? variationScoreTooltip
-                        : scoreTooltip
-                  }
-                  intuition={
-                    <>Shows the optimiser’s current candidate for the selected score mode.</>
-                  }
-                >
-                  <span className="font-medium underline decoration-dotted underline-offset-2">
-                    {optimiseProgress.current.score.toFixed(9)}
-                  </span>
-                </ExplainTooltip>
-              </div>
             </div>
           )}
           {!maxHoldSpectrum.length && (
@@ -565,10 +554,11 @@ export default function ShaperSideBar() {
                 variant={shaperParams.type === shaper ? 'secondary' : 'ghost'}
                 className="h-8 w-full"
                 onClick={() => {
+                  console.log(bestByType[shaper]);
                   setShaperParams((old) => ({
                     ...old,
                     type: shaper,
-                    ...(bestByType[shaper] ?? {}),
+                    ...(bestByType[shaper]?.params ?? {}),
                   }));
                 }}
               >

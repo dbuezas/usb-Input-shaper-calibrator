@@ -14,6 +14,7 @@ import {
   currentMaxAccelAtom,
   currentScoreAtom,
   delayCentroidSecondsAtom,
+  historyModeAtom,
   optimisationHistoryAtom,
   shapedSpectrumAtom,
   shaperScoreModeAtom,
@@ -100,16 +101,17 @@ export default function ShaperPlots() {
   const currentMaxAccel = useAtomValue(currentMaxAccelAtom);
   const delayCentroidSeconds = useAtomValue(delayCentroidSecondsAtom);
   const optimisationHistory = useAtomValue(optimisationHistoryAtom);
+  const historyMode = useAtomValue(historyModeAtom);
 
   const typeColor: Record<InputShaperType, string> = {
-    zv: `rgba(0, 220, 255, ${shaperParams.type === 'zv' ? 1 : 0.5})`,
-    zvd: `rgba(0, 255, 120, ${shaperParams.type === 'zvd' ? 1 : 0.5})`,
-    zvdd: `rgba(255, 200, 0, ${shaperParams.type === 'zvdd' ? 1 : 0.5})`,
-    zvddd: `rgba(255, 120, 0, ${shaperParams.type === 'zvddd' ? 1 : 0.5})`,
-    mzv: `rgba(255, 0, 200, ${shaperParams.type === 'mzv' ? 1 : 0.5})`,
-    ei: `rgba(180, 140, 255, ${shaperParams.type === 'ei' ? 1 : 0.5})`,
-    '2hei': `rgba(255, 90, 140, ${shaperParams.type === '2hei' ? 1 : 0.5})`,
-    '3hei': `rgba(120, 200, 255, ${shaperParams.type === '3hei' ? 1 : 0.5})`,
+    zv: `rgba(0, 220, 255, ${shaperParams.type === 'zv' ? 1 : 1})`,
+    zvd: `rgba(0, 255, 120, ${shaperParams.type === 'zvd' ? 1 : 1})`,
+    zvdd: `rgba(255, 200, 0, ${shaperParams.type === 'zvdd' ? 1 : 1})`,
+    zvddd: `rgba(255, 120, 0, ${shaperParams.type === 'zvddd' ? 1 : 1})`,
+    mzv: `rgba(255, 0, 200, ${shaperParams.type === 'mzv' ? 1 : 1})`,
+    ei: `rgba(180, 140, 255, ${shaperParams.type === 'ei' ? 1 : 1})`,
+    '2hei': `rgba(255, 90, 140, ${shaperParams.type === '2hei' ? 1 : 1})`,
+    '3hei': `rgba(120, 200, 255, ${shaperParams.type === '3hei' ? 1 : 1})`,
   };
 
   type HistoryPoint = {
@@ -121,21 +123,27 @@ export default function ShaperPlots() {
     strokeWidth?: number;
     type: InputShaperType;
     centroidMs: number;
+    maxAccel: number;
     score: number;
     params: typeof shaperParams;
     disabled: boolean;
     onClick?: () => void;
   };
 
-  const historyPoints: HistoryPoint[] = optimisationHistory
-    .map((h) => {
+  const historyPoints = optimisationHistory
+    .map((h): HistoryPoint => {
       const centroidMs = h.delay * 1000;
+      const maxAccel = h.maxAccel;
       return {
-        x: centroidMs,
+        x: historyMode === 'centroid_ms' ? centroidMs : maxAccel,
         y: h.score,
         color: typeColor[h.params.type],
+        strokeColor: shaperParams.type === h.params.type ? 'white' : '',
+        strokeWidth: shaperParams.type === h.params.type ? 0.1 : 0,
+        radius: shaperParams.type === h.params.type ? 2 : 0.5,
         type: h.params.type,
         centroidMs,
+        maxAccel,
         score: h.score,
         params: h.params,
         disabled: shaperParams.type !== h.params.type,
@@ -151,7 +159,10 @@ export default function ShaperPlots() {
     currentScore == null
       ? null
       : {
-          x: delayCentroidSeconds * 1000,
+          x:
+            historyMode === 'centroid_ms'
+              ? delayCentroidSeconds * 1000
+              : (currentMaxAccel ?? Number.NaN),
           y: currentScore,
           color: 'rgba(255, 255, 255, 1)',
           radius: 3,
@@ -159,6 +170,7 @@ export default function ShaperPlots() {
           strokeWidth: 1.5,
           type: shaperParams.type,
           centroidMs: delayCentroidSeconds * 1000,
+          maxAccel: currentMaxAccel ?? Number.NaN,
           score: currentScore,
           params: shaperParams,
           disabled: true,
@@ -258,10 +270,14 @@ export default function ShaperPlots() {
 
       {allHistoryPoints.length > 0 && (
         <div>
-          <h4 className="mb-2 font-semibold">Optimiser Results: Delay Centroid vs Score</h4>
+          <h4 className="mb-2 font-semibold">
+            Optimiser Results:{' '}
+            {historyMode === 'centroid_ms' ? 'Delay Centroid' : 'Suggested Max Accel'} vs Score
+          </h4>
           <div className="text-muted-foreground mb-2 text-xs">
             Each dot is a new best-so-far candidate found during the optimiser run (lower score is
-            better). X axis is delay centroid (ms).
+            better). X axis is{' '}
+            {historyMode === 'centroid_ms' ? 'delay centroid (ms)' : 'suggested max accel (mm/s²)'}.
           </div>
           <ScatterPlot
             points={allHistoryPoints}
@@ -274,6 +290,7 @@ export default function ShaperPlots() {
                   title: 'Current settings',
                   lines: [
                     `centroid: ${p.centroidMs.toFixed(2)} ms`,
+                    `max accel: ${p.maxAccel.toFixed(0)} mm/s²`,
                     `score: ${p.score.toFixed(9)}`,
                     `f0: ${p.params.fHz.toFixed(2)} Hz`,
                     `zeta: ${p.params.zeta.toFixed(3)}`,
@@ -285,6 +302,7 @@ export default function ShaperPlots() {
                 title: p.type.toUpperCase(),
                 lines: [
                   `centroid: ${p.centroidMs.toFixed(2)} ms`,
+                  `max accel: ${p.maxAccel.toFixed(0)} mm/s²`,
                   `score: ${p.score.toFixed(9)}`,
                   `f0: ${p.params.fHz.toFixed(2)} Hz`,
                   `zeta: ${p.params.zeta.toFixed(3)}`,

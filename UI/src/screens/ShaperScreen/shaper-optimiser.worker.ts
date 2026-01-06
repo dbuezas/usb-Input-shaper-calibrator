@@ -10,9 +10,14 @@ import { OPTIMIZER_UPDATE_EVERY_MS, SHAPER_F0_RANGE_HZ } from '@/constants';
 
 import { variationScoreFromMagnitudeSpectrum } from '@/screens/ShaperScreen/shaper-scores/variation';
 import { flatnessScoreFromMagnitudeSpectrum } from './shaper-scores/flatness';
-import { klipperScoreFromMagnitudeSpectrum } from './shaper-scores/klipper';
+import { klipperScoreFromMagnitudeSpectrum, suggestedMaxAccel } from './shaper-scores/klipper';
 
-export type OptimisationResult = { params: ShaperParams; score: number; delay: number };
+export type OptimisationResult = {
+  params: ShaperParams;
+  score: number;
+  delay: number;
+  maxAccel: number;
+};
 export type WorkerStartMessage = {
   type: 'start';
   magnitudes: Float32Array;
@@ -20,6 +25,7 @@ export type WorkerStartMessage = {
   scoreMode: ShaperScoreMode;
   cornering: CorneringSettings;
   candidateTypes?: InputShaperType[];
+  frontierMode?: 'delay_centroid' | 'suggested_max_accel';
 };
 
 export type WorkerMessage = WorkerStartMessage;
@@ -28,7 +34,6 @@ export type WorkerUpdateMessage = {
   type: 'update';
   iterationsDone: number;
   iterationsTotal: number;
-  current: OptimisationResult;
   history: OptimisationResult[];
 };
 
@@ -76,15 +81,33 @@ const scoreCandidate = (
   }
 };
 
-const insertIntoFrontier = (frontier: OptimisationResult[], next: OptimisationResult) => {
+const insertIntoFrontier = (
+  frontier: OptimisationResult[],
+  next: OptimisationResult,
+  frontierMode: WorkerStartMessage['frontierMode']
+) => {
+  const mode = frontierMode ?? 'delay_centroid';
   for (const existing of frontier) {
-    if (existing.delay <= next.delay && existing.score <= next.score) return false;
+    if (mode === 'suggested_max_accel') {
+      // Keep a Pareto frontier where we prefer higher maxAccel and lower score.
+      // If an existing point is at least as good on both axes, it dominates `next`.
+      if (existing.maxAccel >= next.maxAccel && existing.score <= next.score) return false;
+    } else {
+      // Keep a Pareto frontier where we prefer lower delay and lower score.
+      if (existing.delay <= next.delay && existing.score <= next.score) return false;
+    }
   }
 
   let write = 0;
   for (let i = 0; i < frontier.length; i++) {
     const existing = frontier[i];
-    if (existing.delay >= next.delay && existing.score >= next.score) continue;
+    if (mode === 'suggested_max_accel') {
+      // Drop any points dominated by `next`.
+      if (existing.maxAccel <= next.maxAccel && existing.score >= next.score) continue;
+    } else {
+      // Drop any points dominated by `next`.
+      if (existing.delay >= next.delay && existing.score >= next.score) continue;
+    }
     frontier[write++] = existing;
   }
   frontier.length = write;
@@ -115,8 +138,6 @@ const bruteForce = (msg: WorkerStartMessage) => {
   const iterationsTotal = coarseTotal;
   let iterationsDone = 0;
 
-  let current: OptimisationResult | undefined;
-
   const frontierByType: Partial<Record<InputShaperType, OptimisationResult[]>> = {};
 
   let lastEmitTime = 0;
@@ -136,33 +157,57 @@ const bruteForce = (msg: WorkerStartMessage) => {
       type: 'update',
       iterationsDone,
       iterationsTotal,
-      current: current ?? history[0],
       history,
     };
     self.postMessage(msg);
   };
 
-  // Phase 1: coarse grid search (in-order)
-  for (const candidateType of types) {
-    const vtolCandidates = isEiFamily(candidateType) ? vtols : [0.1];
+  type CandidateEval = {
+    params: ShaperParams;
+    delay: number;
+    maxAccel: number;
+  };
+
+  for (const type of types) {
+    const vtolCandidates = isEiFamily(type) ? vtols : [0.1];
     if (!zetas.length || !vtolCandidates.length) continue;
 
+    // Build + cache delays first
+    const candidates: CandidateEval[] = [];
     for (let fHz = fMin; fHz <= fMax; fHz += fStep) {
       for (const zeta of zetas) {
         for (const vtol of vtolCandidates) {
-          iterationsDone++;
-
-          const params: ShaperParams = { type: candidateType, fHz, zeta, vtol };
-          const score = scoreCandidate(magnitudes, params, scoreMode, msg.cornering, scoreRangeHz);
+          const params: ShaperParams = { type, fHz, zeta, vtol };
           const delay = computeDelayCentroidSeconds(params);
-          current = { params, score, delay };
+          const maxAccel = suggestedMaxAccel(params, msg.cornering, 0.12);
 
-          const frontier = (frontierByType[candidateType] ??= []);
-          insertIntoFrontier(frontier, current);
-
-          emitUpdate(false);
+          candidates.push({ params, delay, maxAccel });
         }
       }
+    }
+    switch (msg.frontierMode) {
+      case 'delay_centroid':
+        candidates.sort((a, b) => a.delay - b.delay);
+        break;
+      case 'suggested_max_accel':
+        candidates.sort((b, a) => a.maxAccel - b.maxAccel);
+        break;
+    }
+    // candidates.sort(() => Math.random() - 0.5);
+
+    // Evaluate in that order
+    for (const c of candidates) {
+      iterationsDone++;
+
+      const current = {
+        ...c,
+        score: scoreCandidate(magnitudes, c.params, scoreMode, msg.cornering, scoreRangeHz),
+      };
+
+      const frontier = (frontierByType[type] ??= []);
+      insertIntoFrontier(frontier, current, msg.frontierMode);
+
+      emitUpdate(false);
     }
   }
 

@@ -87,7 +87,7 @@ export const SPECTROGRAM_MAX_TIME_SLICES = 100;
 
 // Number of parallel workers used for expensive computations (e.g. input shaper optimisation).
 // Keep this modest to avoid saturating the main thread with message handling.
-export const WEB_WORKER_THREADS = navigator.hardwareConcurrency;
+export const WEB_WORKER_THREADS = 10; //navigator.hardwareConcurrency;
 
 // === Simulation ===
 
@@ -101,10 +101,11 @@ export const SIMULATION_AMPLITUDE = 1000;
 // These constants define the min/max shown in the ShaperScreen sliders.
 // Keep the optimiser bounds in sync by importing these in the worker.
 
-export const SHAPER_F0_RANGE_HZ: [number, number] = [10, 200];
-export const SHAPER_ZETA_RANGE: [number, number] = [0, 0.4];
-export const SHAPER_VTOL_RANGE: [number, number] = [0, 0.5];
+export const SHAPER_F0_RANGE_HZ: [number, number] = [10, 250];
+export const SHAPER_ZETA_RANGE: [number, number] = [0.001, 0.4];
+export const SHAPER_VTOL_RANGE: [number, number] = [0.001, 0.5];
 export const CORNERING_SPEED_RANGE_MM_S: [number, number] = [0.5, 60];
 export const CORNERING_JUNCTION_DEVIATION_RANGE_MM: [number, number] = [0, 0.2];
+export const CORNERING_JERK_RANGE_MM_S: [number, number] = [0, 50];
 
 export const OPTIMIZER_UPDATE_EVERY_MS = 16;
