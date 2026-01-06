@@ -36,14 +36,14 @@ export default function ShaperPlots() {
   const optimisationHistory = useAtomValue(optimisationHistoryAtom);
 
   const typeColor: Record<InputShaperType, string> = {
-    zv: `rgba(0, 220, 255, ${shaperParams.type === 'zv' ? 1 : 0.3})`,
-    zvd: `rgba(0, 255, 120, ${shaperParams.type === 'zvd' ? 1 : 0.3})`,
-    zvdd: `rgba(255, 200, 0, ${shaperParams.type === 'zvdd' ? 1 : 0.3})`,
-    zvddd: `rgba(255, 120, 0, ${shaperParams.type === 'zvddd' ? 1 : 0.3})`,
-    mzv: `rgba(255, 0, 200, ${shaperParams.type === 'mzv' ? 1 : 0.3})`,
-    ei: `rgba(180, 140, 255, ${shaperParams.type === 'ei' ? 1 : 0.3})`,
-    '2hei': `rgba(255, 90, 140, ${shaperParams.type === '2hei' ? 1 : 0.3})`,
-    '3hei': `rgba(120, 200, 255, ${shaperParams.type === '3hei' ? 1 : 0.3})`,
+    zv: `rgba(0, 220, 255, ${shaperParams.type === 'zv' ? 1 : 0.5})`,
+    zvd: `rgba(0, 255, 120, ${shaperParams.type === 'zvd' ? 1 : 0.5})`,
+    zvdd: `rgba(255, 200, 0, ${shaperParams.type === 'zvdd' ? 1 : 0.5})`,
+    zvddd: `rgba(255, 120, 0, ${shaperParams.type === 'zvddd' ? 1 : 0.5})`,
+    mzv: `rgba(255, 0, 200, ${shaperParams.type === 'mzv' ? 1 : 0.5})`,
+    ei: `rgba(180, 140, 255, ${shaperParams.type === 'ei' ? 1 : 0.5})`,
+    '2hei': `rgba(255, 90, 140, ${shaperParams.type === '2hei' ? 1 : 0.5})`,
+    '3hei': `rgba(120, 200, 255, ${shaperParams.type === '3hei' ? 1 : 0.5})`,
   };
 
   const historyPoints = optimisationHistory

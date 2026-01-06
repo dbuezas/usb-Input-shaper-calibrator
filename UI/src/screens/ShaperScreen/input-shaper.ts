@@ -5,10 +5,10 @@ export const ALL_SHAPER_TYPES = [
   'zvddd',
   '2hei',
   'zvdd',
-  'ei',
-  'zvd',
-  'mzv',
   'zv',
+  'mzv',
+  'zvd',
+  'ei',
 ] as const;
 export type InputShaperType = (typeof ALL_SHAPER_TYPES)[number];
 

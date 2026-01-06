@@ -19,11 +19,9 @@ import {
 } from './atoms';
 import useOptimisers from './useOptimizers';
 import { SEARCH_TYPES } from './shaper-optimiser.worker';
-import { useState } from 'react';
 import { isEiFamily } from './input-shaper';
 
 export default function ShaperSideBar() {
-  const [isOptimising, setIsOptimizing] = useState(false);
   const [shaperParams, setShaperParams] = useAtom(shaperParamsAtom);
   const [scoreMode, setScoreMode] = useAtom(shaperScoreModeAtom);
   const [corneringSettings, setCorneringSettings] = useAtom(corneringSettingsAtom);
@@ -32,6 +30,7 @@ export default function ShaperSideBar() {
   const [analysisRange, setAnalysisRange] = useAtom(analysisRangeAtom);
 
   const { runAutoOptimise, optimiseProgress, bestByType } = useOptimisers();
+  const isOptimising = !!optimiseProgress;
   const percent = optimiseProgress
     ? (100 * optimiseProgress.iterationsDone) / optimiseProgress.iterationsTotal
     : 0;
@@ -335,7 +334,6 @@ export default function ShaperSideBar() {
             size="sm"
             variant={corneringSettings.model === 'jerk' ? 'secondary' : 'ghost'}
             className="h-8 w-full"
-            aria-pressed={corneringSettings.model === 'jerk'}
             onClick={() => setCorneringSettings({ model: 'jerk', value: 10 })}
           >
             Jerk
@@ -345,7 +343,6 @@ export default function ShaperSideBar() {
             size="sm"
             variant={corneringSettings.model === 'junction_deviation' ? 'secondary' : 'ghost'}
             className="h-8 w-full"
-            aria-pressed={corneringSettings.model === 'junction_deviation'}
             onClick={() => setCorneringSettings({ model: 'junction_deviation', value: 0.013 })}
           >
             Junction dev
@@ -434,7 +431,6 @@ export default function ShaperSideBar() {
               size="sm"
               variant={scoreMode === 'klipper' ? 'secondary' : 'ghost'}
               className="h-8 w-full"
-              aria-pressed={scoreMode === 'klipper'}
               onClick={() => setScoreMode('klipper')}
             >
               Klipper
@@ -450,7 +446,6 @@ export default function ShaperSideBar() {
               size="sm"
               variant={scoreMode === 'flatness' ? 'secondary' : 'ghost'}
               className="h-8 w-full"
-              aria-pressed={scoreMode === 'flatness'}
               onClick={() => setScoreMode('flatness')}
             >
               Flatness
@@ -467,7 +462,6 @@ export default function ShaperSideBar() {
               size="sm"
               variant={scoreMode === 'variation' ? 'secondary' : 'ghost'}
               className="h-8 w-full"
-              aria-pressed={scoreMode === 'variation'}
               onClick={() => setScoreMode('variation')}
             >
               Variation
@@ -486,9 +480,7 @@ export default function ShaperSideBar() {
                 className="w-full"
                 variant="destructive"
                 onClick={async () => {
-                  setIsOptimizing(true);
                   await runAutoOptimise();
-                  setIsOptimizing(false);
                 }}
                 disabled={!maxHoldSpectrum.length || isOptimising}
               >
@@ -572,7 +564,6 @@ export default function ShaperSideBar() {
                 size="sm"
                 variant={shaperParams.type === shaper ? 'secondary' : 'ghost'}
                 className="h-8 w-full"
-                aria-pressed={shaper === shaper}
                 onClick={() => {
                   setShaperParams((old) => ({
                     ...old,

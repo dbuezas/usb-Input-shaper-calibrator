@@ -13,8 +13,6 @@ import { flatnessScoreFromMagnitudeSpectrum } from './shaper-scores/flatness';
 import { klipperScoreFromMagnitudeSpectrum } from './shaper-scores/klipper';
 
 export type OptimisationResult = { params: ShaperParams; score: number; delay: number };
-export type BestByType = Partial<Record<InputShaperType, OptimisationResult>>;
-
 export type WorkerStartMessage = {
   type: 'start';
   magnitudes: Float32Array;
@@ -24,39 +22,21 @@ export type WorkerStartMessage = {
   candidateTypes?: InputShaperType[];
 };
 
-export type WorkerRefineMessage = {
-  type: 'refine';
-  magnitudes: Float32Array;
-  scoreRangeHz: [number, number];
-  scoreMode: ShaperScoreMode;
-  cornering: CorneringSettings;
-  startParams: ShaperParams;
-  steps?: number;
-};
-
-export type WorkerMessage = WorkerStartMessage | WorkerRefineMessage;
-
-export type WorkerProgressMessage = {
-  type: 'progress';
-  iterationsDone: number;
-  iterationsTotal: number;
-  current: OptimisationResult;
-};
+export type WorkerMessage = WorkerStartMessage;
 
 export type WorkerUpdateMessage = {
   type: 'update';
   iterationsDone: number;
   iterationsTotal: number;
-  bestByType: BestByType;
+  current: OptimisationResult;
   history: OptimisationResult[];
-  bestOverall?: OptimisationResult;
 };
 
 export type WorkerDoneMessage = {
   type: 'done';
 };
 
-export type WorkerOutMessage = WorkerProgressMessage | WorkerUpdateMessage | WorkerDoneMessage;
+export type WorkerOutMessage = WorkerUpdateMessage | WorkerDoneMessage;
 
 // Optimiser search space (kept local to the worker).
 export const SEARCH_TYPES: InputShaperType[] = [
@@ -135,10 +115,9 @@ const bruteForce = (msg: WorkerStartMessage) => {
   const iterationsTotal = coarseTotal;
   let iterationsDone = 0;
 
-  const bestByType: BestByType = {};
-  const frontierByType: Partial<Record<InputShaperType, OptimisationResult[]>> = {};
+  let current: OptimisationResult | undefined;
 
-  let bestOverall: OptimisationResult | undefined;
+  const frontierByType: Partial<Record<InputShaperType, OptimisationResult[]>> = {};
 
   let lastEmitTime = 0;
   const emitUpdate = (force: boolean) => {
@@ -153,14 +132,14 @@ const bruteForce = (msg: WorkerStartMessage) => {
       history.push(...frontier);
     }
 
-    self.postMessage({
+    const msg: WorkerUpdateMessage = {
       type: 'update',
       iterationsDone,
       iterationsTotal,
-      bestByType,
+      current: current ?? history[0],
       history,
-      bestOverall,
-    } satisfies WorkerOutMessage);
+    };
+    self.postMessage(msg);
   };
 
   // Phase 1: coarse grid search (in-order)
@@ -168,23 +147,18 @@ const bruteForce = (msg: WorkerStartMessage) => {
     const vtolCandidates = isEiFamily(candidateType) ? vtols : [0.1];
     if (!zetas.length || !vtolCandidates.length) continue;
 
-    for (let fHz = fMin; fHz <= fMax; fHz += fStep) {
+    for (const vtol of vtolCandidates) {
       for (const zeta of zetas) {
-        for (const vtol of vtolCandidates) {
+        for (let fHz = fMin; fHz <= fMax; fHz += fStep) {
           iterationsDone++;
 
           const params: ShaperParams = { type: candidateType, fHz, zeta, vtol };
           const score = scoreCandidate(magnitudes, params, scoreMode, msg.cornering, scoreRangeHz);
           const delay = computeDelayCentroidSeconds(params);
-          const current: OptimisationResult = { params, score, delay };
-
-          const prevByType = bestByType[candidateType];
-          if (!prevByType || score < prevByType.score) bestByType[candidateType] = current;
+          current = { params, score, delay };
 
           const frontier = (frontierByType[candidateType] ??= []);
           insertIntoFrontier(frontier, current);
-
-          if (!bestOverall || current.score < bestOverall.score) bestOverall = current;
 
           emitUpdate(false);
         }
@@ -193,13 +167,14 @@ const bruteForce = (msg: WorkerStartMessage) => {
   }
 
   emitUpdate(true);
-  self.postMessage({ type: 'done' } satisfies WorkerOutMessage);
+  const done: WorkerDoneMessage = { type: 'done' };
+  self.postMessage(done);
 };
 
 self.onmessage = (evt: MessageEvent<WorkerMessage>) => {
   const msg = evt.data;
 
-  switch (msg.type) {
+  switch (msg.type as string) {
     case 'start':
       return bruteForce(msg);
   }
