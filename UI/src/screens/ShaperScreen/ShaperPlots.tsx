@@ -21,7 +21,8 @@ import {
 } from './atoms';
 import { type InputShaperType } from './input-shaper';
 import type { OptimisationResult } from './shaper-optimiser.worker';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { Slider } from '@/components/ui/slider';
 
 export default function ShaperPlots() {
   const width = SPECTROGRAM_PLOT_WIDTH;
@@ -115,32 +116,103 @@ const HistoryPlot = () => {
     )
     .sort((a, _b) => (a.meta?.params.type === shaperParams.type ? 1 : -1));
 
-  const currentPoint: HistoryPoint = {
-    x:
-      historyMode === 'centroid_ms' ? delayCentroidSeconds * 1000 : (currentMaxAccel ?? Number.NaN),
-    y: currentScore,
-    color: 'rgba(255, 255, 255, 1)',
-    radius: 6,
-    strokeColor: 'rgba(0, 0, 0, 0.9)',
-    strokeWidth: 1.5,
-    meta: {
-      delay: delayCentroidSeconds,
-      maxAccel: currentMaxAccel ?? Number.NaN,
-      score: currentScore,
-      params: shaperParams,
-    },
-    disabled: true,
-  };
+  const currentPoint: HistoryPoint = useMemo(() => {
+    return {
+      x:
+        historyMode === 'centroid_ms'
+          ? delayCentroidSeconds * 1000
+          : (currentMaxAccel ?? Number.NaN),
+      y: currentScore,
+      color: 'rgba(255, 255, 255, 1)',
+      radius: 6,
+      strokeColor: 'rgba(0, 0, 0, 0.9)',
+      strokeWidth: 1.5,
+      meta: {
+        delay: delayCentroidSeconds,
+        maxAccel: currentMaxAccel ?? Number.NaN,
+        score: currentScore,
+        params: shaperParams,
+      },
+      disabled: true,
+    };
+  }, [delayCentroidSeconds, currentMaxAccel, currentScore, shaperParams, historyMode]);
   const [oldParams, setOldParams] = useState<HistoryPoint>();
 
-  const allHistoryPoints = [
+  const dataXExtent = useMemo(() => {
+    let min = Number.POSITIVE_INFINITY;
+    let max = Number.NEGATIVE_INFINITY;
+    for (const p of [...historyPoints, currentPoint]) {
+      if (!Number.isFinite(p.x)) continue;
+      min = Math.min(min, p.x);
+      max = Math.max(max, p.x);
+    }
+    if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+    if (min === max) return [min - 1, max + 1] as const;
+    return [min, max] as const;
+  }, [historyPoints, currentPoint]);
+
+  const [xRange, setXRange] = useState<[number, number] | null>(null);
+
+  const effectiveXRange = useMemo(() => {
+    if (!dataXExtent) return null;
+    if (!xRange) return [dataXExtent[0], dataXExtent[1]] as const;
+    const nextMin = Math.max(dataXExtent[0], Math.min(xRange[0], dataXExtent[1]));
+    const nextMax = Math.max(nextMin, Math.min(xRange[1], dataXExtent[1]));
+    return [nextMin, nextMax] as const;
+  }, [dataXExtent, xRange]);
+
+  const basePoints = [
     ...historyPoints,
     { ...currentPoint, color: 'rgba(255, 255, 255, .5)' },
     oldParams,
   ].filter((v): v is NonNullable<typeof v> => Boolean(v));
 
+  const allHistoryPoints = (() => {
+    const range = effectiveXRange;
+    if (!range) return basePoints;
+
+    const [minX, maxX] = range;
+    const visible = basePoints.filter((p) => Number.isFinite(p.x) && p.x >= minX && p.x <= maxX);
+
+    // Sentinel points: enforce x-axis bounds without affecting y-domain.
+    // (ScatterPlot ignores non-finite y values both for domains and drawing.)
+    const sentinels: HistoryPoint[] = [
+      { x: minX, y: Number.NaN, disabled: true, radius: 0 },
+      { x: maxX, y: Number.NaN, disabled: true, radius: 0 },
+    ];
+
+    return [...visible, ...sentinels];
+  })();
+
   return (
-    <div onPointerEnter={() => void setOldParams(currentPoint)}>
+    <div
+      onPointerEnter={() => void setOldParams(currentPoint)}
+      onPointerLeave={() => {
+        if (oldParams?.meta) setShaperParams(oldParams.meta.params);
+      }}
+    >
+      {dataXExtent && effectiveXRange && (
+        <div className="mb-2">
+          <div className="text-muted-foreground mb-1 flex items-center justify-between text-xs">
+            <span>X span</span>
+            <span className="tabular-nums">
+              {effectiveXRange[0].toFixed(1)} → {effectiveXRange[1].toFixed(1)}
+            </span>
+          </div>
+          <Slider
+            min={dataXExtent[0]}
+            max={dataXExtent[1]}
+            step={(dataXExtent[1] - dataXExtent[0]) / 200}
+            value={[effectiveXRange[0], effectiveXRange[1]]}
+            onValueChange={(v) => {
+              const a = v[0] ?? dataXExtent[0];
+              const b = v[1] ?? dataXExtent[1];
+              setXRange([Math.min(a, b), Math.max(a, b)]);
+            }}
+            className="w-full"
+          />
+        </div>
+      )}
       <ScatterPlot
         points={allHistoryPoints}
         width={width}
