@@ -53,17 +53,13 @@ export default function ShaperPlots() {
         x: centroidMs,
         y: h.score,
         color: typeColor[h.params.type],
-        title: h.params.type.toUpperCase(),
         type: h.params.type,
-        lines: [
-          `centroid: ${centroidMs.toFixed(2)} ms`,
-          `score: ${h.score.toFixed(9)}`,
-          `f0: ${h.params.fHz.toFixed(2)} Hz`,
-          `zeta: ${h.params.zeta.toFixed(3)}`,
-          `vtol: ${h.params.vtol.toFixed(3)}`,
-        ],
+        centroidMs,
+        score: h.score,
+        params: h.params,
+        disabled: shaperParams.type !== h.params.type,
         onClick: () => {
-          if (shaperParams.type === h.params.type) setShaperParams(h.params);
+          setShaperParams(h.params);
         },
       };
     })
@@ -239,6 +235,18 @@ export default function ShaperPlots() {
             width={width}
             height={height}
             xTickFormat={(v) => `${Math.round(v)}`}
+            getHover={(p) => {
+              return {
+                title: p.type.toUpperCase(),
+                lines: [
+                  `centroid: ${p.centroidMs.toFixed(2)} ms`,
+                  `score: ${p.score.toFixed(9)}`,
+                  `f0: ${p.params.fHz.toFixed(2)} Hz`,
+                  `zeta: ${p.params.zeta.toFixed(3)}`,
+                  `vtol: ${p.params.vtol.toFixed(3)}`,
+                ],
+              };
+            }}
           />
         </div>
       )}

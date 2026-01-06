@@ -8,9 +8,20 @@ export type ScatterPoint = {
   x: number;
   y: number;
   color?: string;
-  title?: string;
-  lines?: string[];
+  disabled?: boolean;
   onClick?: () => unknown;
+};
+
+export type ScatterPlotHover = {
+  title?: string;
+  lines: string[];
+};
+
+const defaultGetHover = (point: ScatterPoint): ScatterPlotHover => {
+  return {
+    title: 'Candidate',
+    lines: [`x: ${point.x.toFixed(2)}`, `y: ${point.y.toFixed(6)}`],
+  };
 };
 
 const computeDomain = (values: number[]) => {
@@ -29,16 +40,18 @@ const computeDomain = (values: number[]) => {
 
 const tickFormat = (v: number) => `${Math.round(v)}`;
 
-export const ScatterPlot = ({
+export const ScatterPlot = <P extends ScatterPoint>({
   points,
   width,
   height,
   xTickFormat,
+  getHover,
 }: {
-  points: ScatterPoint[];
+  points: P[];
   width: number;
   height: number;
   xTickFormat?: (v: number) => string;
+  getHover?: (point: P, index: number) => ScatterPlotHover;
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -130,7 +143,7 @@ export const ScatterPlot = ({
         let bestDist2 = Number.POSITIVE_INFINITY;
         for (let i = 0; i < points.length; i++) {
           const p = points[i];
-          if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+          if (p.disabled || !Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
           const sx = DEFAULT_AXIS_PADDING.left + xScale(p.x);
           const sy = DEFAULT_AXIS_PADDING.top + yScale(p.y);
           const dx = sx - px;
@@ -154,12 +167,14 @@ export const ScatterPlot = ({
         hoveredPointIndexRef.current = bestIdx;
         setIsHoveringPoint(Boolean(p.onClick));
         p.onClick?.();
+
+        const hover = getHover?.(p, bestIdx) ?? defaultGetHover(p);
         setHover({
           visible: true,
           x,
           y,
-          title: p.title ?? 'Candidate',
-          lines: p.lines ?? [`x: ${p.x.toFixed(2)}`, `y: ${p.y.toFixed(6)}`],
+          title: hover.title,
+          lines: hover.lines,
         });
       }}
       onClick={() => {
