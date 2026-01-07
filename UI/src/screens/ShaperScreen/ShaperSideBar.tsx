@@ -20,9 +20,6 @@ import {
   corneringSettingsAtom,
   analysisRangeAtom,
   historyModeAtom,
-  currentMaxAccelAtom,
-  currentScoreAtom,
-  delayCentroidSecondsAtom,
 } from './atoms';
 import useOptimisers from './useOptimizers';
 import { SEARCH_TYPES } from './shaper-optimiser.worker';
@@ -43,10 +40,6 @@ export default function ShaperSideBar() {
   const percent = optimiseProgress
     ? (100 * optimiseProgress.iterationsDone) / optimiseProgress.iterationsTotal
     : 0;
-  const currentScore = useAtomValue(currentScoreAtom);
-  const currentMaxAccel = useAtomValue(currentMaxAccelAtom);
-  const delayCentroidSeconds = useAtomValue(delayCentroidSecondsAtom);
-
   const scoreModeTooltip = {
     title: 'Score mode',
     accurate: (
@@ -181,14 +174,9 @@ export default function ShaperSideBar() {
   };
 
   return (
-    <>
-      <div className="text-left">
-        <h3 className="text-lg font-semibold">Input Shaper Simulator</h3>
-        <div className="text-muted-foreground text-sm">Works from Measure max-hold data.</div>
-      </div>
-
-      <div className="mt-5">
-        <div className="mb-2">
+    <div className="flex flex-col gap-y-5">
+      <div className="flex flex-col gap-y-4">
+        <div className="flex flex-col gap-y-2">
           <ExplainTooltip
             title="Analysis range"
             accurate={
@@ -205,11 +193,11 @@ export default function ShaperSideBar() {
               Analysis range
             </div>
           </ExplainTooltip>
-        </div>
-        <label className="text-muted-foreground text-sm">
-          {analysisRange[0].toFixed(0)}–{analysisRange[1].toFixed(0)} Hz
-        </label>
-        <div className="mt-3">
+
+          <label className="text-muted-foreground text-sm">
+            {analysisRange[0].toFixed(0)}–{analysisRange[1].toFixed(0)} Hz
+          </label>
+
           <Slider
             min={FREQUENCY_SLIDER_RANGE_HZ[0]}
             max={FREQUENCY_SLIDER_RANGE_HZ[1]}
@@ -220,7 +208,7 @@ export default function ShaperSideBar() {
           />
         </div>
 
-        <div className="mb-2">
+        <div className="flex flex-col gap-y-2">
           <ExplainTooltip
             title={corneringModelInfo.title}
             accurate={corneringModelInfo.accurate}
@@ -232,45 +220,43 @@ export default function ShaperSideBar() {
               Cornering model
             </div>
           </ExplainTooltip>
-        </div>
 
-        <div className="border-border grid w-full grid-cols-3 gap-1 rounded-md border p-1">
-          <Button
-            type="button"
-            size="sm"
-            variant={corneringSettings.model === 'scv' ? 'secondary' : 'ghost'}
-            className="h-8 w-full"
-            onClick={() => setCorneringSettings({ model: 'scv', value: 5 })}
-          >
-            SCV
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant={corneringSettings.model === 'jerk' ? 'secondary' : 'ghost'}
-            className="h-8 w-full"
-            onClick={() => setCorneringSettings({ model: 'jerk', value: 10 })}
-          >
-            Jerk
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant={corneringSettings.model === 'junction_deviation' ? 'secondary' : 'ghost'}
-            className="h-8 w-full"
-            onClick={() => setCorneringSettings({ model: 'junction_deviation', value: 0.013 })}
-          >
-            Junction dev
-          </Button>
-        </div>
+          <div className="border-border grid w-full grid-cols-3 gap-1 rounded-md border p-1">
+            <Button
+              type="button"
+              size="sm"
+              variant={corneringSettings.model === 'scv' ? 'secondary' : 'ghost'}
+              className="h-8 w-full"
+              onClick={() => setCorneringSettings({ model: 'scv', value: 5 })}
+            >
+              SCV
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={corneringSettings.model === 'jerk' ? 'secondary' : 'ghost'}
+              className="h-8 w-full"
+              onClick={() => setCorneringSettings({ model: 'jerk', value: 10 })}
+            >
+              Jerk
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={corneringSettings.model === 'junction_deviation' ? 'secondary' : 'ghost'}
+              className="h-8 w-full"
+              onClick={() => setCorneringSettings({ model: 'junction_deviation', value: 0.013 })}
+            >
+              Junction dev
+            </Button>
+          </div>
 
-        <div className="mt-4 grid gap-4">
-          {corneringSettings.model === 'scv' && (
-            <div>
-              <label className="text-muted-foreground text-sm">
-                SCV: {corneringSettings.value.toFixed(1)} mm/s
-              </label>
-              <div className="mt-3">
+          <div className="grid gap-4">
+            {corneringSettings.model === 'scv' && (
+              <div className="flex flex-col gap-y-2">
+                <label className="text-muted-foreground text-sm">
+                  SCV: {corneringSettings.value.toFixed(1)} mm/s
+                </label>
                 <Slider
                   min={CORNERING_SPEED_RANGE_MM_S[0]}
                   max={CORNERING_SPEED_RANGE_MM_S[1]}
@@ -280,15 +266,13 @@ export default function ShaperSideBar() {
                   className="w-full"
                 />
               </div>
-            </div>
-          )}
+            )}
 
-          {corneringSettings.model === 'jerk' && (
-            <div>
-              <label className="text-muted-foreground text-sm">
-                Jerk: {corneringSettings.value.toFixed(1)} mm/s
-              </label>
-              <div className="mt-3">
+            {corneringSettings.model === 'jerk' && (
+              <div className="flex flex-col gap-y-2">
+                <label className="text-muted-foreground text-sm">
+                  Jerk: {corneringSettings.value.toFixed(1)} mm/s
+                </label>
                 <Slider
                   min={CORNERING_JERK_RANGE_MM_S[0]}
                   max={CORNERING_JERK_RANGE_MM_S[1]}
@@ -298,14 +282,12 @@ export default function ShaperSideBar() {
                   className="w-full"
                 />
               </div>
-            </div>
-          )}
-          {corneringSettings.model === 'junction_deviation' && (
-            <div>
-              <label className="text-muted-foreground text-sm">
-                Junction deviation: {corneringSettings.value.toFixed(3)} mm
-              </label>
-              <div className="mt-3">
+            )}
+            {corneringSettings.model === 'junction_deviation' && (
+              <div className="flex flex-col gap-y-2">
+                <label className="text-muted-foreground text-sm">
+                  Junction deviation: {corneringSettings.value.toFixed(3)} mm
+                </label>
                 <Slider
                   min={CORNERING_JUNCTION_DEVIATION_RANGE_MM[0]}
                   max={CORNERING_JUNCTION_DEVIATION_RANGE_MM[1]}
@@ -317,12 +299,13 @@ export default function ShaperSideBar() {
                   className="w-full"
                 />
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
-      <div className="mt-5">
-        <div className="mb-2">
+
+      <div className="flex flex-col gap-y-4">
+        <div className="flex flex-col gap-y-2">
           <ExplainTooltip
             title={scoreModeTooltip.title}
             accurate={scoreModeTooltip.accurate}
@@ -334,64 +317,63 @@ export default function ShaperSideBar() {
               Score mode
             </div>
           </ExplainTooltip>
-        </div>
-        <div className="border-border grid w-full grid-cols-2 gap-1 rounded-md border p-1">
-          <ExplainTooltip
-            title={scoreModeVariation.title}
-            accurate={scoreModeVariation.accurate}
-            intuition={scoreModeVariation.intuition}
-          >
-            <Button
-              type="button"
-              size="sm"
-              variant={scoreMode === 'variation' ? 'secondary' : 'ghost'}
-              className="h-8 w-full"
-              onClick={() => setScoreMode('variation')}
-            >
-              Variation
-            </Button>
-          </ExplainTooltip>
-          <ExplainTooltip
-            title={scoreModeKlipper.title}
-            accurate={scoreModeKlipper.accurate}
-            intuition={scoreModeKlipper.intuition}
-          >
-            <Button
-              type="button"
-              size="sm"
-              variant={scoreMode === 'klipper' ? 'secondary' : 'ghost'}
-              className="h-8 w-full"
-              onClick={() => setScoreMode('klipper')}
-            >
-              Klipper-like
-            </Button>
-          </ExplainTooltip>
-        </div>
 
-        <div className="mt-3">
-          <div className="mb-2">
+          <div className="border-border grid w-full grid-cols-2 gap-1 rounded-md border p-1">
             <ExplainTooltip
-              title="Optimiser view"
-              accurate={
-                <>
-                  Controls both what the optimiser considers a “better tradeoff” when keeping
-                  best-so-far candidates, and what the optimiser history chart shows on its X axis.
-                </>
-              }
-              intuition={
-                <>
-                  <b>Centroid</b> emphasizes lower delay / less corner overlap; <b>Max accel</b>
-                  emphasizes higher usable acceleration.
-                </>
-              }
-              side="right"
-              sideOffset={8}
+              title={scoreModeVariation.title}
+              accurate={scoreModeVariation.accurate}
+              intuition={scoreModeVariation.intuition}
             >
-              <div className="text-muted-foreground underline decoration-dotted underline-offset-2">
-                Optimiser view
-              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant={scoreMode === 'variation' ? 'secondary' : 'ghost'}
+                className="h-8 w-full"
+                onClick={() => setScoreMode('variation')}
+              >
+                Variation
+              </Button>
+            </ExplainTooltip>
+            <ExplainTooltip
+              title={scoreModeKlipper.title}
+              accurate={scoreModeKlipper.accurate}
+              intuition={scoreModeKlipper.intuition}
+            >
+              <Button
+                type="button"
+                size="sm"
+                variant={scoreMode === 'klipper' ? 'secondary' : 'ghost'}
+                className="h-8 w-full"
+                onClick={() => setScoreMode('klipper')}
+              >
+                Klipper-like
+              </Button>
             </ExplainTooltip>
           </div>
+        </div>
+
+        <div className="flex flex-col gap-y-2">
+          <ExplainTooltip
+            title="Optimiser view"
+            accurate={
+              <>
+                Controls both what the optimiser considers a “better tradeoff” when keeping
+                best-so-far candidates, and what the optimiser history chart shows on its X axis.
+              </>
+            }
+            intuition={
+              <>
+                <b>Centroid</b> emphasizes lower delay / less corner overlap; <b>Max accel</b>
+                emphasizes higher usable acceleration.
+              </>
+            }
+            side="right"
+            sideOffset={8}
+          >
+            <div className="text-muted-foreground underline decoration-dotted underline-offset-2">
+              Optimiser view
+            </div>
+          </ExplainTooltip>
 
           <div className="border-border grid w-full grid-cols-2 gap-1 rounded-md border p-1">
             <Button
@@ -415,7 +397,7 @@ export default function ShaperSideBar() {
           </div>
         </div>
 
-        <div className="mt-4">
+        <div className="flex flex-col gap-y-2">
           {!isOptimising && (
             <ExplainTooltip
               title={findBest.title}
@@ -436,15 +418,15 @@ export default function ShaperSideBar() {
             </ExplainTooltip>
           )}
           {optimiseProgress && isOptimising && (
-            <div>
-              <Button className="mb-2 w-full" onClick={stop} variant="destructive">
+            <div className="flex flex-col gap-y-2">
+              <Button className="w-full" onClick={stop} variant="destructive">
                 Stop
               </Button>
               <div className="text-muted-foreground text-xs">
                 {percent.toFixed(0)}% ({optimiseProgress.iterationsDone}/
                 {optimiseProgress.iterationsTotal})
               </div>
-              <div className="bg-muted mt-2 h-2 w-full rounded">
+              <div className="bg-muted h-2 w-full rounded">
                 <div
                   className="bg-primary h-2 rounded"
                   style={{ width: `${Math.max(0, Math.min(100, percent))}%` }}
@@ -453,13 +435,14 @@ export default function ShaperSideBar() {
             </div>
           )}
           {!maxHoldSpectrum.length && (
-            <div className="text-muted-foreground mt-2 text-xs">
+            <div className="text-muted-foreground text-xs">
               Collect max-hold data in Measure first.
             </div>
           )}
         </div>
       </div>
-      <div className="mt-5">
+
+      <div className="flex flex-col gap-y-2">
         <ExplainTooltip
           title={shaperFamily.title}
           accurate={shaperFamily.accurate}
@@ -470,7 +453,7 @@ export default function ShaperSideBar() {
           </div>
         </ExplainTooltip>
 
-        <div className="border-border mt-2 grid w-full grid-cols-4 gap-1 rounded-md border p-1">
+        <div className="border-border grid w-full grid-cols-4 gap-1 rounded-md border p-1">
           {SEARCH_TYPES.map((shaper) => {
             const active = shaperParams.type === shaper;
             const style = { '--shaper-color': SHAPER_COLORS[shaper] } as CSSProperties;
@@ -502,8 +485,8 @@ export default function ShaperSideBar() {
         </div>
       </div>
 
-      <div className="mt-5 grid gap-4">
-        <div>
+      <div className="grid gap-4">
+        <div className="flex flex-col gap-y-2">
           <ExplainTooltip
             title={f0Info.title}
             accurate={f0Info.accurate}
@@ -513,19 +496,17 @@ export default function ShaperSideBar() {
               Resonance f0: {shaperParams.fHz.toFixed(1)} Hz
             </label>
           </ExplainTooltip>
-          <div className="mt-3">
-            <Slider
-              min={SHAPER_F0_RANGE_HZ[0]}
-              max={SHAPER_F0_RANGE_HZ[1]}
-              step={0.5}
-              value={[shaperParams.fHz]}
-              onValueChange={([fHz]) => setShaperParams((old) => ({ ...old, fHz }))}
-              className="w-full"
-            />
-          </div>
+          <Slider
+            min={SHAPER_F0_RANGE_HZ[0]}
+            max={SHAPER_F0_RANGE_HZ[1]}
+            step={0.5}
+            value={[shaperParams.fHz]}
+            onValueChange={([fHz]) => setShaperParams((old) => ({ ...old, fHz }))}
+            className="w-full"
+          />
         </div>
 
-        <div>
+        <div className="flex flex-col gap-y-2">
           <ExplainTooltip
             title={zetaInfo.title}
             accurate={zetaInfo.accurate}
@@ -535,19 +516,19 @@ export default function ShaperSideBar() {
               Damping (ζ): {shaperParams.zeta.toFixed(3)}
             </label>
           </ExplainTooltip>
-          <div className="mt-3">
-            <Slider
-              min={SHAPER_ZETA_RANGE[0]}
-              max={SHAPER_ZETA_RANGE[1]}
-              step={0.005}
-              value={[shaperParams.zeta]}
-              onValueChange={([zeta]) => setShaperParams((old) => ({ ...old, zeta }))}
-              className="w-full"
-            />
-          </div>
+          <Slider
+            min={SHAPER_ZETA_RANGE[0]}
+            max={SHAPER_ZETA_RANGE[1]}
+            step={0.005}
+            value={[shaperParams.zeta]}
+            onValueChange={([zeta]) => setShaperParams((old) => ({ ...old, zeta }))}
+            className="w-full"
+          />
         </div>
 
-        <div className={cn({ 'opacity-60': !isEiFamily(shaperParams.type) })}>
+        <div
+          className={cn('flex flex-col gap-y-2', { 'opacity-60': !isEiFamily(shaperParams.type) })}
+        >
           <ExplainTooltip
             title={vtolInfo.title}
             accurate={vtolInfo.accurate}
@@ -557,95 +538,17 @@ export default function ShaperSideBar() {
               Tolerance (vtol): {shaperParams.vtol.toFixed(3)}
             </label>
           </ExplainTooltip>
-          <div className="mt-3">
-            <Slider
-              min={SHAPER_VTOL_RANGE[0]}
-              max={SHAPER_VTOL_RANGE[1]}
-              step={0.005}
-              value={[shaperParams.vtol]}
-              onValueChange={([vtol]) => setShaperParams((old) => ({ ...old, vtol }))}
-              className="w-full"
-              disabled={!isEiFamily(shaperParams.type)}
-            />
-          </div>
+          <Slider
+            min={SHAPER_VTOL_RANGE[0]}
+            max={SHAPER_VTOL_RANGE[1]}
+            step={0.005}
+            value={[shaperParams.vtol]}
+            onValueChange={([vtol]) => setShaperParams((old) => ({ ...old, vtol }))}
+            className="w-full"
+            disabled={!isEiFamily(shaperParams.type)}
+          />
         </div>
       </div>
-
-      <div className="border-border mt-4 rounded-lg border p-3">
-        <div className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-2 text-sm">
-          <div className="text-muted-foreground">Score</div>
-          <div className="font-mono tabular-nums">{currentScore.toFixed(9)}</div>
-
-          <ExplainTooltip
-            title="Suggested max accel"
-            accurate={
-              <>
-                A projection of the highest acceleration where Klipper’s smoothing model stays under
-                a fixed threshold:{' '}
-                <code className="font-mono">smoothing(taps, accel, cornering) ≤ 0.12</code>. It’s
-                found via bisection search.
-                <div className="mt-2">
-                  <h4 className="text-sm font-semibold">Cornering model</h4>
-                  <div className="mt-1">
-                    The smoothing model depends on your firmware’s cornering behavior.
-                    <ul className="mt-2 list-disc space-y-1 pl-5">
-                      <li>
-                        <b>SCV (Klipper)</b>: planner maintains a target speed through sharp
-                        corners.
-                      </li>
-                      <li>
-                        <b>Jerk (Marlin)</b>: classic jerk limit (approx. corner speed ≈ jerk).
-                      </li>
-                      <li>
-                        <b>Junction deviation (Marlin)</b>: corner speed derived from accel + JD.
-                      </li>
-                    </ul>
-                  </div>
-                </div>
-              </>
-            }
-            intuition={
-              <>
-                If you push accel above this, the shaper tends to “round off” corners more (it’s
-                trading sharpness for reduced ringing).
-              </>
-            }
-          >
-            <div className="text-muted-foreground underline decoration-dotted underline-offset-2">
-              Max accel
-            </div>
-          </ExplainTooltip>
-          <div className="font-mono tabular-nums">
-            {(currentMaxAccel ?? 0).toFixed(2)} <span className="text-xs">mm/s²</span>
-          </div>
-
-          <ExplainTooltip
-            title="Delay centroid"
-            accurate={
-              <div className="max-w-90 leading-snug">
-                <div className="mt-2">
-                  A rough “center of mass” of the shaper taps in time:{' '}
-                  <span className="font-mono">Σ(aᵢ·tᵢ) / Σ(aᵢ)</span>.
-                </div>
-                <div className="text-muted-foreground mt-2">
-                  This matters because a shaper spreads a single motion command over time. At a 90°
-                  corner (finish X, then start Y), the delayed tail of X can overlap with the start
-                  of Y. That overlap is one reason corners look rounded: you’re effectively moving
-                  in X and Y at the same time for a short moment.
-                </div>
-              </div>
-            }
-            intuition={null}
-          >
-            <div className="text-muted-foreground underline decoration-dotted underline-offset-2">
-              Delay centroid
-            </div>
-          </ExplainTooltip>
-          <div className="font-mono tabular-nums">
-            {(delayCentroidSeconds * 1000).toFixed(2)} ms
-          </div>
-        </div>
-      </div>
-    </>
+    </div>
   );
 }

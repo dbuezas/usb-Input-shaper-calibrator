@@ -135,17 +135,17 @@ export const applyShaperToMagnitudeSpectrum = (
 ) => {
   let start = 0;
   let end = magnitudes.length;
+  const freqStepHz = FIXED_SAMPLE_RATE / WINDOW_SIZE;
+
   if (freqRangeHz) {
-    const freqStepHz = FIXED_SAMPLE_RATE / (2 * (magnitudes.length - 1));
     start = Math.floor(freqRangeHz[0] / freqStepHz);
     end = Math.floor(freqRangeHz[1] / freqStepHz);
   }
 
   const { a, t } = computeMarlinShaperTaps(params);
-  const i_to_f = FIXED_SAMPLE_RATE / (2 * (magnitudes.length - 1));
   const out = new Float32Array(end - start);
   for (let i = start; i < end; i++) {
-    const f = i * i_to_f;
+    const f = i * freqStepHz;
     const h = shaperMagnitudeAtHzFromTaps(a, t, f);
     out[i - start] = magnitudes[i] * h;
   }

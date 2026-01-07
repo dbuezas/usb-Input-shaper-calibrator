@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { atom, useAtomValue, useSetAtom, type Atom } from 'jotai';
-import { atomFamily } from 'jotai/utils';
+import { atomFamily } from 'jotai-family';
 import Spectrogram, { SpectrogramControls } from './Spectrogram';
 import type { DataSource } from '@/screens/MeasureScreen/data-source';
 import { SerialDataSource } from '@/screens/MeasureScreen/data-source';
@@ -102,59 +102,34 @@ export default function MeasureScreen() {
   const topTiles = (
     [
       {
-        key: 'x',
-        title: 'X Axis',
+        key: 'axes',
+        title: 'Axes',
         tooltip: {
-          title: 'X Axis',
+          title: 'Axes',
           accurate: (
             <>
-              Latest raw accelerometer sample on the <b>X</b> axis from the connected sensor (e.g.
+              Latest raw accelerometer sample on each axis from the connected sensor (e.g.
               <code className="font-mono">ADXL345</code>).
             </>
           ),
-          intuition: (
-            <>
-              Think of it as the “instant snapshot” of vibration on that axis; the spectrogram shows
-              the frequency content over time.
-            </>
-          ),
+          intuition: <>A quick sanity check that the sensor is alive and oriented as expected.</>,
         },
-        value: <AtomValue atom={formattedAxisValueAtom(0)} />,
-      },
-      {
-        key: 'y',
-        title: 'Y Axis',
-        tooltip: {
-          title: 'Y Axis',
-          accurate: (
-            <>
-              Latest raw accelerometer sample on the <b>Y</b> axis from the connected sensor.
-            </>
-          ),
-          intuition: (
-            <>A quick sanity check that the sensor is alive and you’re reading the right axis.</>
-          ),
-        },
-        value: <AtomValue atom={formattedAxisValueAtom(1)} />,
-      },
-      {
-        key: 'z',
-        title: 'Z Axis',
-        tooltip: {
-          title: 'Z Axis',
-          accurate: (
-            <>
-              Latest raw accelerometer sample on the <b>Z</b> axis from the connected sensor.
-            </>
-          ),
-          intuition: (
-            <>
-              Useful to detect mounting/orientation issues (<b>Z</b> often behaves differently from
-              <b>X/Y</b> on a bed-slinger).
-            </>
-          ),
-        },
-        value: <AtomValue atom={formattedAxisValueAtom(2)} />,
+        value: (
+          <div className="space-y-1 text-left font-mono text-xs tabular-nums">
+            <div>
+              <span className="text-muted-foreground">X:</span>{' '}
+              <AtomValue atom={formattedAxisValueAtom(0)} />
+            </div>
+            <div>
+              <span className="text-muted-foreground">Y:</span>{' '}
+              <AtomValue atom={formattedAxisValueAtom(1)} />
+            </div>
+            <div>
+              <span className="text-muted-foreground">Z:</span>{' '}
+              <AtomValue atom={formattedAxisValueAtom(2)} />
+            </div>
+          </div>
+        ),
       },
       {
         key: 'peak',
@@ -216,7 +191,7 @@ export default function MeasureScreen() {
     ] satisfies TopTile[]
   ).map((tile) => (
     <Card key={tile.key} className="w-full flex-1 text-center sm:min-w-0">
-      <CardHeader className="pb-3">
+      <CardHeader className="p-3">
         <ExplainTooltip
           title={tile.tooltip.title}
           accurate={tile.tooltip.accurate}
@@ -227,7 +202,7 @@ export default function MeasureScreen() {
           </CardTitle>
         </ExplainTooltip>
       </CardHeader>
-      <CardContent>
+      <CardContent className="px-6 pb-2">
         <div>{tile.value}</div>
       </CardContent>
     </Card>
@@ -235,7 +210,7 @@ export default function MeasureScreen() {
 
   return (
     <div className="flex flex-col gap-6 md:flex-row">
-      <aside className="border-border bg-card w-full rounded-xl border p-5 shadow-sm md:sticky md:top-6 md:h-[calc(100vh-7.5rem)] md:w-80 md:overflow-auto">
+      <aside className="border-border bg-card w-full rounded-xl border p-5 shadow-sm md:w-80 md:overflow-auto">
         <div className="text-left">
           <h3 className="text-lg font-semibold">Measure Axis</h3>
           <div className="text-muted-foreground text-sm">

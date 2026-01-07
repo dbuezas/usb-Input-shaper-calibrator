@@ -44,55 +44,61 @@ function App() {
   const currentStep = stepFromScreen(screen);
 
   return (
-    <div className="mx-auto max-w-7xl p-6 font-sans">
-      <header className="mb-6 flex items-center justify-between gap-6">
-        <div className="min-w-0">
-          <h1 className="text-xl font-bold">Marlin USB Resonance Tester</h1>
-          <a
-            className="text-muted-foreground mt-1 inline-flex text-xs underline decoration-dotted underline-offset-2"
-            href={REPO_URL}
-            target="_blank"
-            rel="noreferrer"
-          >
-            GitHub repository
-          </a>
+    <div className="bg-background flex h-screen flex-col">
+      <header className="border-border shrink-0 border-b">
+        <div className="px-6 py-2">
+          <div className="flex items-center gap-6">
+            <span className="min-w-0 truncate text-xl font-bold">Marlin USB Resonance Tester</span>
+            <a
+              className="text-muted-foreground ml-auto inline-flex shrink-0 text-xs underline decoration-dotted underline-offset-2"
+              href={REPO_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              GitHub repository
+            </a>
+          </div>
+
+          <div className="mt-2 flex justify-end">
+            <Stepper
+              value={currentStep}
+              onValueChange={(next) => setScreen(screenFromStep(next))}
+              indicators={{
+                completed: <Check className="size-4" />,
+                loading: <LoaderCircleIcon className="size-4 animate-spin" />,
+              }}
+              className="min-w-90"
+            >
+              <StepperNav className="items-center gap-2">
+                {steps.map((step, index) => (
+                  <StepperItem key={step.screen} step={index + 1} className="items-center">
+                    <StepperTrigger className="flex items-center gap-2 px-2">
+                      <StepperIndicator>{index + 1}</StepperIndicator>
+                      <div className="hidden min-w-0 sm:block">
+                        <StepperTitle className="truncate">{step.title}</StepperTitle>
+                      </div>
+                    </StepperTrigger>
+
+                    {steps.length > index + 1 && (
+                      <StepperSeparator className="group-data-[state=completed]/step:bg-primary" />
+                    )}
+                  </StepperItem>
+                ))}
+              </StepperNav>
+            </Stepper>
+          </div>
         </div>
-
-        <Stepper
-          value={currentStep}
-          onValueChange={(next) => setScreen(screenFromStep(next))}
-          indicators={{
-            completed: <Check className="size-4" />,
-            loading: <LoaderCircleIcon className="size-4 animate-spin" />,
-          }}
-          className="min-w-90"
-        >
-          <StepperNav className="items-center gap-2">
-            {steps.map((step, index) => (
-              <StepperItem key={step.screen} step={index + 1} className="items-center">
-                <StepperTrigger className="flex items-center gap-2 px-2">
-                  <StepperIndicator>{index + 1}</StepperIndicator>
-                  <div className="hidden min-w-0 sm:block">
-                    <StepperTitle className="truncate">{step.title}</StepperTitle>
-                  </div>
-                </StepperTrigger>
-
-                {steps.length > index + 1 && (
-                  <StepperSeparator className="group-data-[state=completed]/step:bg-primary" />
-                )}
-              </StepperItem>
-            ))}
-          </StepperNav>
-        </Stepper>
       </header>
 
-      {screen === 'install' ? (
-        <InstallFirmwareScreen />
-      ) : screen === 'measure' ? (
-        <MeasureScreen />
-      ) : (
-        <ShaperScreen />
-      )}
+      <div className="min-h-0 flex-1 overflow-auto px-6 py-6">
+        {screen === 'install' ? (
+          <InstallFirmwareScreen />
+        ) : screen === 'measure' ? (
+          <MeasureScreen />
+        ) : (
+          <ShaperScreen />
+        )}
+      </div>
     </div>
   );
 }

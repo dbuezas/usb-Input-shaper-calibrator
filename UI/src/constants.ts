@@ -58,14 +58,7 @@ export const MAX_FREQ = FIXED_SAMPLE_RATE / 2;
 // === UI ranges ===
 
 // Frequency range slider bounds used in `src/Spectrogram.tsx`.
-// (Set lower than Nyquist for convenience/readability.)
-export const MAX_FREQUENCY_SLIDER = 200; // could be `FIXED_SAMPLE_RATE / 2`
-export const MIN_FREQUENCY_SLIDER = 10;
-
-export const FREQUENCY_SLIDER_RANGE_HZ: [number, number] = [
-  MIN_FREQUENCY_SLIDER,
-  MAX_FREQUENCY_SLIDER,
-];
+export const FREQUENCY_SLIDER_RANGE_HZ: [number, number] = [10, 200];
 
 // === Visualisations ===
 
@@ -78,8 +71,7 @@ export const VIS_AXIS_PADDING = {
 } as const;
 
 // Default spectrogram plot dimensions.
-export const SPECTROGRAM_PLOT_WIDTH = 800;
-export const SPECTROGRAM_WATERFALL_HEIGHT = 300;
+export const SPECTROGRAM_WATERFALL_HEIGHT = 250;
 
 // Number of historic rows shown in the waterfall.
 export const SPECTROGRAM_WATERFALL_SECONDS = 20;

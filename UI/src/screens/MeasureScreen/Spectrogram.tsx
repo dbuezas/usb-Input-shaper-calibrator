@@ -5,13 +5,13 @@ import { atom, useAtomValue, useSetAtom } from 'jotai';
 import {
   ACTUAL_RESOLUTION,
   FREQUENCY_SLIDER_RANGE_HZ,
-  SPECTROGRAM_PLOT_WIDTH,
   SPECTROGRAM_WATERFALL_HEIGHT,
 } from '@/constants';
 import type { DataSource } from '@/screens/MeasureScreen/data-source';
 import { SpectrumPlot } from '@/visualisations/SpectrumPlot';
 import { Waterfall } from '@/visualisations/Waterfall';
 import { historicPeakAtom, peakAtom, spectrogramMaxHoldAtom } from './atoms';
+import { useMeasure } from '@uidotdev/usehooks';
 
 const spectrogramAtom = atom<Float32Array>(new Float32Array());
 
@@ -53,8 +53,9 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
   const setSpectrogramScaleMax = useSetAtom(spectrogramScaleMaxAtom);
   const setPeak = useSetAtom(peakAtom);
   const setHistoricPeak = useSetAtom(historicPeakAtom);
-  const width = SPECTROGRAM_PLOT_WIDTH;
   const height = SPECTROGRAM_WATERFALL_HEIGHT;
+  const [plotRef, plotBounds] = useMeasure<HTMLDivElement>();
+  const width = Math.max(0, Math.floor(plotBounds.width ?? 0));
   const spectrogramScaleMax = useAtomValue(spectrogramScaleMaxAtom);
 
   useEffect(() => {
@@ -83,34 +84,39 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
     <div className="text-center">
       <h3 className="mb-2 font-semibold">Live Waterfall Spectrogram</h3>
 
-      <Waterfall
-        height={height}
-        width={width}
-        freqRange={FREQUENCY_SLIDER_RANGE_HZ}
-        dataAtom={spectrogramAtom}
-        onPeakFrequency={(freqHz) => setPeak(freqHz)}
-      />
-      <>
-        <h3 className="mt-4 mb-2 font-semibold">Last Spectrum and Max Hold</h3>
-        <SpectrumPlot
-          traces={[
-            {
-              dataAtom: spectrogramAtom,
-              mode: 'points',
-              color: 'rgba(0, 220, 255, 0.9)',
-            },
-            {
-              dataAtom: spectrogramMaxHoldAtom,
-              mode: 'line',
-              color: 'rgba(0, 220, 255, 0.55)',
-            },
-          ]}
-          height={height}
-          width={width}
-          freqRange={FREQUENCY_SLIDER_RANGE_HZ}
-          scaleMax={spectrogramScaleMax}
-        />
-      </>
+      <div ref={plotRef} className="w-full">
+        {width > 0 && (
+          <>
+            <Waterfall
+              height={height}
+              width={width}
+              freqRange={FREQUENCY_SLIDER_RANGE_HZ}
+              dataAtom={spectrogramAtom}
+              onPeakFrequency={(freqHz) => setPeak(freqHz)}
+            />
+
+            <h3 className="mt-4 mb-2 font-semibold">Last Spectrum and Max Hold</h3>
+            <SpectrumPlot
+              traces={[
+                {
+                  dataAtom: spectrogramAtom,
+                  mode: 'points',
+                  color: 'rgba(0, 220, 255, 0.9)',
+                },
+                {
+                  dataAtom: spectrogramMaxHoldAtom,
+                  mode: 'line',
+                  color: 'rgba(0, 220, 255, 0.55)',
+                },
+              ]}
+              height={height}
+              width={width}
+              freqRange={FREQUENCY_SLIDER_RANGE_HZ}
+              scaleMax={spectrogramScaleMax}
+            />
+          </>
+        )}
+      </div>
       <div className="mt-2 flex flex-wrap justify-center gap-4 text-sm">
         <span>Resolution: {(ACTUAL_RESOLUTION || 1).toFixed(2)} Hz/bin</span>
       </div>
