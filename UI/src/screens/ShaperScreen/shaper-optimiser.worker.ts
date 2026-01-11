@@ -3,9 +3,14 @@ import {
   type CorneringSettings,
   type ShaperParams,
   isEiFamily,
-  computeDelayCentroidSeconds,
+  peakFromSeries,
+  computeMarlinShaperTaps,
+  shaperMagnitudeAtHzFromTaps,
+  computeDelayCentroidSecondsFromTaps,
 } from '@/screens/ShaperScreen/input-shaper';
 import {
+  FREQUENCY_SLIDER_RANGE_HZ,
+  MIN_RESONANCE_REDUCTION_AT_SPECTROGRAM_PEAK,
   OPTIMIZER_UPDATE_EVERY_MS,
   SEARCH_F_STEP_HZ,
   SEARCH_VTOL_STEP,
@@ -15,8 +20,8 @@ import {
   SHAPER_ZETA_RANGE,
 } from '@/constants';
 
-import { suggestedMaxAccel } from './shaper-scores/klipper';
-import { scoreCandidate, type ShaperScoreMode } from './shaper-scores';
+import { suggestedMaxAccelFromTaps } from './shaper-scores/klipper';
+import { scoreCandidateFromTaps, type ShaperScoreMode } from './shaper-scores';
 
 export type OptimisationResult = {
   params: ShaperParams;
@@ -95,31 +100,39 @@ const insertIntoFrontier = (
   return true;
 };
 
+function shuffle<T>(array: T[]) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = array[i];
+    array[i] = array[j];
+    array[j] = tmp;
+  }
+}
+
 const bruteForce = (msg: WorkerStartMessage) => {
   const { magnitudes, scoreMode, scoreRangeHz } = msg;
   const types = (msg.candidateTypes?.length ? msg.candidateTypes : SEARCH_TYPES).filter(
     (t): t is InputShaperType => SEARCH_TYPES.includes(t)
   );
-
   const candidates: ShaperParams[] = [];
   for (const type of types) {
-    for (let fHz = SHAPER_F0_RANGE_HZ[0]; fHz <= SHAPER_F0_RANGE_HZ[1]; fHz += SEARCH_F_STEP_HZ) {
-      for (
-        let zeta = SHAPER_ZETA_RANGE[0];
-        zeta <= SHAPER_ZETA_RANGE[1];
-        zeta += SEARCH_ZETA_STEP
-      ) {
-        for (
-          let vtol = SHAPER_VTOL_RANGE[0];
-          vtol <= SHAPER_VTOL_RANGE[1];
-          vtol += SEARCH_VTOL_STEP
-        ) {
+    const isEi = isEiFamily(type);
+    for (let fHz = SHAPER_F0_RANGE_HZ[0]; ; fHz += SEARCH_F_STEP_HZ) {
+      fHz = Math.min(fHz, SHAPER_F0_RANGE_HZ[1]);
+      for (let zeta = SHAPER_ZETA_RANGE[0]; ; zeta += SEARCH_ZETA_STEP) {
+        zeta = Math.min(zeta, SHAPER_ZETA_RANGE[1]);
+        for (let vtol = SHAPER_VTOL_RANGE[0]; ; vtol += SEARCH_VTOL_STEP) {
+          vtol = Math.min(vtol, SHAPER_VTOL_RANGE[1]);
           candidates.push({ type, fHz, zeta, vtol });
-          if (!isEiFamily(type)) break;
+          if (!isEi) break;
+          if (vtol === SHAPER_VTOL_RANGE[1]) break;
         }
+        if (zeta === SHAPER_ZETA_RANGE[1]) break;
       }
+      if (fHz === SHAPER_F0_RANGE_HZ[1]) break;
     }
   }
+
   const iterationsTotal = candidates.length;
   let iterationsDone = 0;
 
@@ -146,22 +159,26 @@ const bruteForce = (msg: WorkerStartMessage) => {
     };
     self.postMessage(msg);
   };
-  candidates.sort(() => Math.random() - 0.5);
+
+  shuffle(candidates);
+  const peakHz = peakFromSeries(magnitudes, FREQUENCY_SLIDER_RANGE_HZ);
 
   // Evaluate in that order
   for (const params of candidates) {
     iterationsDone++;
+    const taps = computeMarlinShaperTaps(params);
+    const peakResponse = shaperMagnitudeAtHzFromTaps(taps.a, taps.t, peakHz);
+    if (peakResponse < MIN_RESONANCE_REDUCTION_AT_SPECTROGRAM_PEAK) {
+      const current = {
+        params,
+        delay: computeDelayCentroidSecondsFromTaps(taps),
+        maxAccel: suggestedMaxAccelFromTaps(taps, msg.cornering, 0.12),
+        score: scoreCandidateFromTaps(magnitudes, taps, scoreMode, msg.cornering, scoreRangeHz),
+      };
 
-    const current = {
-      params,
-      delay: computeDelayCentroidSeconds(params),
-      maxAccel: suggestedMaxAccel(params, msg.cornering, 0.12),
-      score: scoreCandidate(magnitudes, params, scoreMode, msg.cornering, scoreRangeHz),
-    };
-
-    const frontier = (frontierByType[params.type] ??= []);
-    insertIntoFrontier(frontier, current, msg.frontierMode);
-
+      const frontier = (frontierByType[params.type] ??= []);
+      insertIntoFrontier(frontier, current, msg.frontierMode);
+    }
     emitUpdate(false);
   }
 

@@ -3,14 +3,32 @@ import {
   computeMarlinShaperTaps,
   type CorneringSettings,
   type ShaperParams,
+  type ShaperTaps,
 } from '@/screens/ShaperScreen/input-shaper';
 
 export const klipperScoreFromMagnitudeSpectrum = (
   magnitudes: Float32Array,
   params: ShaperParams,
-  cornering: CorneringSettings = { model: 'scv', value: 5 },
-  smoothingAccel = 5000,
-  freqRangeHz: [number, number] = [0, 200]
+  cornering: CorneringSettings,
+  freqRangeHz: [number, number],
+  smoothingAccel = 5000
+) => {
+  const taps = computeMarlinShaperTaps(params);
+  return klipperScoreFromMagnitudeSpectrumFromTaps(
+    magnitudes,
+    taps,
+    cornering,
+    freqRangeHz,
+    smoothingAccel
+  );
+};
+
+export const klipperScoreFromMagnitudeSpectrumFromTaps = (
+  magnitudes: Float32Array,
+  taps: ShaperTaps,
+  cornering: CorneringSettings,
+  freqRangeHz: [number, number],
+  smoothingAccel = 5000
 ) => {
   if (!magnitudes.length) return Number.POSITIVE_INFINITY;
 
@@ -28,7 +46,6 @@ export const klipperScoreFromMagnitudeSpectrum = (
     psd.push(m * m);
   }
 
-  const taps = computeMarlinShaperTaps(params);
   const vibrs = estimateRemainingVibrations(freqsHz, psd, taps.a, taps.t);
   if (!Number.isFinite(vibrs)) return Number.POSITIVE_INFINITY;
 
@@ -126,12 +143,11 @@ const klipperSmoothing = (
   return Math.max(offset90, offset180);
 };
 
-export const suggestedMaxAccel = (
-  params: ShaperParams,
+export const suggestedMaxAccelFromTaps = (
+  taps: ShaperTaps,
   cornering: CorneringSettings,
   targetSmoothing = 0.12
 ) => {
-  const taps = computeMarlinShaperTaps(params);
   if (!taps.a.length) return 0;
 
   const maxAccel = bisectMaxTrue(
@@ -140,22 +156,19 @@ export const suggestedMaxAccel = (
   return Number.isFinite(maxAccel) ? maxAccel : 0;
 };
 
-const clampPositive = (v: number, fallback: number) => (Number.isFinite(v) && v > 0 ? v : fallback);
-
 const scvEquivalentAtAccel = ({ model, value }: CorneringSettings, accel: number) => {
   switch (model) {
     case 'scv':
-      return clampPositive(value, 5);
+      return value;
     case 'jerk':
       // Approximation: classic jerk is a velocity delta allowance at corners.
-      return clampPositive(value, 10);
+      return value;
     case 'junction_deviation': {
       // Marlin-style junction deviation: approximate the 90° cornering speed.
       // For θ=90°, sin(θ/2)=sin(45°)=√2/2, giving factor sin/(1-sin) = 1+√2.
       // v ≈ sqrt(a * jd * (1+√2))
-      const jd = clampPositive(value, 0.02);
-      const a = Math.max(0, accel);
-      return Math.sqrt(a * jd * (1 + Math.SQRT2));
+      const jd = value;
+      return Math.sqrt(accel * jd * (1 + Math.SQRT2));
     }
   }
 };

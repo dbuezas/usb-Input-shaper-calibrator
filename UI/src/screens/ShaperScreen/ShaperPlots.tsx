@@ -1,4 +1,4 @@
-import { useAtom, useAtomValue } from 'jotai';
+import { atom, useAtomValue, useSetAtom } from 'jotai';
 import { SpectrumPlot } from '@/visualisations/SpectrumPlot';
 import { FREQUENCY_SLIDER_RANGE_HZ, SPECTROGRAM_WATERFALL_HEIGHT } from '@/constants';
 import { ScatterPlot, type ScatterPoint } from '@/visualisations/ScatterPlot';
@@ -6,22 +6,83 @@ import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
 import { SHAPER_COLORS } from './shaper-colors';
 import {
   analysisRangeAtom,
-  currentMaxAccelAtom,
-  currentScoreAtom,
-  delayCentroidSecondsAtom,
   historyModeAtom,
   optimisationHistoryAtom,
   shaperResponseAtom,
   shapedSpectrumAtom,
   shaperParamsAtom,
   shaperScoreModeAtom,
+  shaperStatsAtom,
+  previewStatsAtom,
+  shaperPreviewParamsAtom,
+  selectedParamsStatsAtom,
 } from './atoms';
-import { type InputShaperType } from './input-shaper';
 import type { OptimisationResult } from './shaper-optimiser.worker';
-import { useEffect, useMemo, useState } from 'react';
-import { Slider } from '@/components/ui/slider';
 import { useMeasure } from '@uidotdev/usehooks';
 import { ExplainTooltip } from '@/components/ExplainTooltip';
+
+const historyPointsAtom = atom((get) => {
+  const { type } = get(shaperParamsAtom);
+  const historyMode = get(historyModeAtom);
+  type HistoryPoint = ScatterPoint<OptimisationResult>;
+  const historyPoints = get(optimisationHistoryAtom)
+    .map(
+      (h): HistoryPoint => ({
+        x: historyMode === 'centroid_ms' ? h.delay * 1000 : h.maxAccel,
+        y: h.score,
+        color: SHAPER_COLORS[h.params.type],
+        strokeColor: type === h.params.type ? 'black' : '',
+        strokeWidth: type === h.params.type ? 0.5 : 0,
+        radius: type === h.params.type ? 2 : 0.5,
+        meta: h,
+        disabled: type !== h.params.type,
+      })
+    )
+    .sort((a, _b) => (a.meta?.params.type === type ? 1 : -1));
+
+  return historyPoints;
+});
+
+const allPointsAtom = atom((get) => {
+  const historyPoints = get(historyPointsAtom);
+  const historyMode = get(historyModeAtom);
+  const finalStats = get(selectedParamsStatsAtom);
+  const shaperParams = get(shaperParamsAtom);
+
+  const currentPoint = {
+    x: historyMode === 'centroid_ms' ? finalStats.delay * 1000 : finalStats.maxAccel,
+    y: finalStats.score,
+    color: 'rgba(255, 255, 255, 1)',
+    radius: 6,
+    strokeColor: 'rgba(0, 0, 0, 0.9)',
+    strokeWidth: 1.5,
+    meta: {
+      ...finalStats,
+      params: shaperParams,
+    },
+    disabled: true,
+  };
+  const all = [...historyPoints, currentPoint];
+
+  const previewStats = get(previewStatsAtom);
+  const previewParams = get(shaperPreviewParamsAtom);
+  if (previewStats && previewParams) {
+    all.push({
+      x: historyMode === 'centroid_ms' ? previewStats.delay * 1000 : previewStats.maxAccel,
+      y: previewStats.score,
+      color: 'rgba(255, 255, 255, .5)',
+      radius: 6,
+      strokeColor: 'rgba(0, 0, 0, 0.9)',
+      strokeWidth: 1.5,
+      meta: {
+        ...previewStats,
+        params: previewParams,
+      },
+      disabled: true,
+    });
+  }
+  return all;
+});
 
 export default function ShaperPlots() {
   const height = SPECTROGRAM_WATERFALL_HEIGHT;
@@ -40,37 +101,38 @@ export default function ShaperPlots() {
       <div>
         <h4 className="mb-2 font-semibold">Spectrum Max-Hold → Shaped</h4>
         <div ref={plotRef} className="w-full">
-          {width > 0 && (
-            <SpectrumPlot
-              traces={[
-                {
-                  dataAtom: spectrogramMaxHoldAtom,
-                  mode: 'line',
-                  color: 'rgba(0, 220, 255, 0.55)',
-                },
-                {
-                  dataAtom: shapedSpectrumAtom,
-                  mode: 'line',
-                  color: 'rgba(0, 255, 120, 0.9)',
-                },
-                {
-                  dataAtom: shaperResponseAtom,
-                  mode: 'line',
-                  color: SHAPER_COLORS[shaperParams.type].replace(', 1)', ', 0.85)'),
-                  yAxis: 'right',
-                },
-              ]}
-              height={height}
-              width={width}
-              freqRange={FREQUENCY_SLIDER_RANGE_HZ}
-              markers={[
-                { freqHz: analysisRange[0], color: 'rgba(255,255,255,0.75)' },
-                { freqHz: analysisRange[1], color: 'rgba(255,255,255,0.75)' },
-              ]}
-              scaleMax={maxHoldSpectrum.length ? Math.max(...maxHoldSpectrum) : undefined}
-              scaleMaxRight={shaperResponse.length ? Math.max(...shaperResponse) : undefined}
-            />
-          )}
+          <SpectrumPlot
+            traces={[
+              {
+                dataAtom: spectrogramMaxHoldAtom,
+                mode: 'line',
+                color: 'rgba(0, 220, 255, 0.55)',
+              },
+              {
+                dataAtom: shapedSpectrumAtom,
+                mode: 'line',
+                color: 'rgba(0, 255, 120, 0.9)',
+              },
+              {
+                dataAtom: shaperResponseAtom,
+                mode: 'line',
+                color: SHAPER_COLORS[shaperParams.type].replace(', 1)', ', 0.85)'),
+                yAxis: 'right',
+              },
+            ]}
+            height={height}
+            width={width}
+            freqRange={FREQUENCY_SLIDER_RANGE_HZ}
+            xLabel="Frequency (Hz)"
+            yLabel="Amplitude"
+            y2Label="Response"
+            markers={[
+              { freqHz: analysisRange[0], color: 'rgba(255,255,255,0.75)' },
+              { freqHz: analysisRange[1], color: 'rgba(255,255,255,0.75)' },
+            ]}
+            scaleMax={maxHoldSpectrum.length ? Math.max(...maxHoldSpectrum) : undefined}
+            scaleMaxRight={shaperResponse.length ? Math.max(...shaperResponse) : 1}
+          />
         </div>
       </div>
       <CurrentScore />
@@ -95,104 +157,19 @@ const HistoryPlot = () => {
   const [plotRef, plotBounds] = useMeasure<HTMLDivElement>();
   const width = Math.max(0, Math.floor(plotBounds.width ?? 0));
 
-  const [shaperParams, setShaperParams] = useAtom(shaperParamsAtom);
-
-  const currentScore = useAtomValue(currentScoreAtom);
-  const currentMaxAccel = useAtomValue(currentMaxAccelAtom);
-  const delayCentroidSeconds = useAtomValue(delayCentroidSecondsAtom);
-  const optimisationHistory = useAtomValue(optimisationHistoryAtom);
+  const setShaperParams = useSetAtom(shaperParamsAtom);
+  const setPreviewShaperParams = useSetAtom(shaperPreviewParamsAtom);
   const historyMode = useAtomValue(historyModeAtom);
   const scoreMode = useAtomValue(shaperScoreModeAtom);
 
-  const typeColor: Record<InputShaperType, string> = SHAPER_COLORS;
-
-  type HistoryPoint = ScatterPoint<OptimisationResult>;
-
-  const historyPoints = optimisationHistory
-    .map(
-      (h): HistoryPoint => ({
-        x: historyMode === 'centroid_ms' ? h.delay * 1000 : h.maxAccel,
-        y: h.score,
-        color: typeColor[h.params.type],
-        strokeColor: shaperParams.type === h.params.type ? 'black' : '',
-        strokeWidth: shaperParams.type === h.params.type ? 0.5 : 0,
-        radius: shaperParams.type === h.params.type ? 2 : 0.5,
-        meta: h,
-        disabled: shaperParams.type !== h.params.type,
-      })
-    )
-    .sort((a, _b) => (a.meta?.params.type === shaperParams.type ? 1 : -1));
-
-  const currentPoint: HistoryPoint = useMemo(() => {
-    return {
-      x:
-        historyMode === 'centroid_ms'
-          ? delayCentroidSeconds * 1000
-          : (currentMaxAccel ?? Number.NaN),
-      y: currentScore,
-      color: 'rgba(255, 255, 255, 1)',
-      radius: 6,
-      strokeColor: 'rgba(0, 0, 0, 0.9)',
-      strokeWidth: 1.5,
-      meta: {
-        delay: delayCentroidSeconds,
-        maxAccel: currentMaxAccel ?? Number.NaN,
-        score: currentScore,
-        params: shaperParams,
-      },
-      disabled: true,
-    };
-  }, [delayCentroidSeconds, currentMaxAccel, currentScore, shaperParams, historyMode]);
-  const [oldParams, setOldParams] = useState<HistoryPoint>();
-
-  const dataXExtent = useMemo((): [number, number] | undefined => {
-    let min = Number.POSITIVE_INFINITY;
-    let max = Number.NEGATIVE_INFINITY;
-    for (const p of [...historyPoints, currentPoint]) {
-      min = Math.min(min, p.x);
-      max = Math.max(max, p.x);
-    }
-    if (min === max) return [min - 1, max + 1];
-    return [min, max];
-  }, [historyPoints, currentPoint]);
-
-  const [xRange, setXRange] = useState<[number, number]>([
-    Number.NEGATIVE_INFINITY,
-    Number.POSITIVE_INFINITY,
-  ]);
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setXRange([Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY]);
-  }, [historyMode, scoreMode]);
-
-  const basePoints = [
-    ...historyPoints,
-    { ...currentPoint, color: 'rgba(255, 255, 255, .5)' },
-    oldParams,
-  ].filter((v): v is NonNullable<typeof v> => Boolean(v));
-
-  const allHistoryPoints = (() => {
-    const minX = xRange[0];
-    const maxX = xRange[1];
-    const visible = basePoints.filter((p) => Number.isFinite(p.x) && p.x >= minX && p.x <= maxX);
-
-    // Sentinel points: enforce x-axis bounds without affecting y-domain.
-    // (ScatterPlot ignores non-finite y values both for domains and drawing.)
-    const sentinels: HistoryPoint[] = [
-      { x: minX, y: Number.NaN, disabled: true, radius: 0 },
-      { x: maxX, y: Number.NaN, disabled: true, radius: 0 },
-    ];
-
-    return [...visible, ...sentinels];
-  })();
+  const allHistoryPoints = useAtomValue(allPointsAtom);
 
   return (
     <div
       ref={plotRef}
       className="w-full"
-      onPointerEnter={() => void setOldParams(currentPoint)}
       onPointerLeave={() => {
-        if (oldParams?.meta) setShaperParams(oldParams.meta.params);
+        setPreviewShaperParams(undefined);
       }}
     >
       <ScatterPlot
@@ -200,20 +177,18 @@ const HistoryPlot = () => {
         width={width}
         height={height}
         xTickFormat={(v) => `${Math.round(v)}`}
+        xLabel={
+          historyMode === 'centroid_ms' ? 'Delay centroid (ms)' : 'Suggested max accel (mm/s²)'
+        }
+        yLabel={scoreMode === 'klipper' ? 'Score (Klipper)' : 'Score (variation)'}
         hoverMode="x"
         onPointClick={(p) => {
           if (!p.meta) return;
-          setOldParams(currentPoint);
           setShaperParams(p.meta.params);
+          setPreviewShaperParams(undefined);
         }}
         onPointHover={(p) => {
-          if (!p?.meta) {
-            if (oldParams?.meta?.params) {
-              setShaperParams(oldParams.meta.params);
-            }
-          } else {
-            setShaperParams(p.meta.params);
-          }
+          setPreviewShaperParams(p?.meta?.params);
         }}
         getHover={(p) => {
           const meta = p.meta;
@@ -234,30 +209,18 @@ const HistoryPlot = () => {
           };
         }}
       />
-
-      <div className="mt-4">
-        <Slider
-          min={dataXExtent?.[0] ?? 0}
-          max={dataXExtent?.[1] ?? 0}
-          step={dataXExtent ? (dataXExtent[1] - dataXExtent[0]) / 10000 : 1}
-          value={xRange}
-          onValueChange={(v: [number, number]) => void setXRange(v)}
-          className="w-full"
-        />
-      </div>
     </div>
   );
 };
 
 const CurrentScore = () => {
-  const currentScore = useAtomValue(currentScoreAtom);
-  const currentMaxAccel = useAtomValue(currentMaxAccelAtom);
-  const delayCentroidSeconds = useAtomValue(delayCentroidSecondsAtom);
+  const shaperStats = useAtomValue(shaperStatsAtom);
+
   return (
     <div className="grid grid-cols-3 gap-3">
       <div className="border-border rounded-lg border p-3">
         <div className="text-muted-foreground text-sm">Score</div>
-        <div className="mt-1 font-mono text-sm tabular-nums">{currentScore.toFixed(9)}</div>
+        <div className="mt-1 font-mono text-sm tabular-nums">{shaperStats.score.toFixed(9)}</div>
       </div>
 
       <div className="border-border rounded-lg border p-3">
@@ -300,7 +263,7 @@ const CurrentScore = () => {
           </div>
         </ExplainTooltip>
         <div className="mt-1 font-mono text-sm tabular-nums">
-          {(currentMaxAccel ?? 0).toFixed(2)} <span className="text-xs">mm/s²</span>
+          {shaperStats.maxAccel.toFixed(2)} <span className="text-xs">mm/s²</span>
         </div>
       </div>
 
@@ -328,7 +291,7 @@ const CurrentScore = () => {
           </div>
         </ExplainTooltip>
         <div className="mt-1 font-mono text-sm tabular-nums">
-          {(delayCentroidSeconds * 1000).toFixed(2)} ms
+          {(shaperStats.delay * 1000).toFixed(2)} ms
         </div>
       </div>
     </div>

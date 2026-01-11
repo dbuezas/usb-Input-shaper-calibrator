@@ -1,4 +1,4 @@
-import { FIXED_SAMPLE_RATE, WINDOW_SIZE } from '@/constants';
+import { ACTUAL_RESOLUTION, FIXED_SAMPLE_RATE, WINDOW_SIZE } from '@/constants';
 
 export const ALL_SHAPER_TYPES = [
   '3hei',
@@ -35,9 +35,12 @@ const computeK = (zeta: number) => {
 
 type ShaperTaps = { a: number[]; t: number[] };
 
-export const computeDelayCentroidSeconds = (params: ShaperParams) => {
-  const { a, t } = computeMarlinShaperTaps(params);
+export type { ShaperTaps };
+
+export const computeDelayCentroidSecondsFromTaps = (taps: ShaperTaps) => {
+  const { a, t } = taps;
   const sumA = a.reduce((s, v) => s + v, 0);
+  if (sumA === 0) return 0;
   let centroid = 0;
   for (let i = 0; i < a.length; i++) centroid += a[i] * t[i];
   centroid /= sumA;
@@ -128,26 +131,25 @@ export const computeMarlinShaperTaps = ({ type, fHz, zeta, vtol }: ShaperParams)
 
 export const binToHz = (bin: number, bins: number) => bin * (FIXED_SAMPLE_RATE / (2 * (bins - 1)));
 
-export const applyShaperToMagnitudeSpectrum = (
-  params: ShaperParams,
+export const applyShaperToMagnitudeSpectrumFromTaps = (
+  taps: ShaperTaps,
   magnitudes: Float32Array,
   freqRangeHz?: [number, number]
 ) => {
-  let start = 0;
-  let end = magnitudes.length;
+  let startBin = 0;
+  let endBin = magnitudes.length;
   const freqStepHz = FIXED_SAMPLE_RATE / WINDOW_SIZE;
 
   if (freqRangeHz) {
-    start = Math.floor(freqRangeHz[0] / freqStepHz);
-    end = Math.floor(freqRangeHz[1] / freqStepHz);
+    startBin = Math.floor(freqRangeHz[0] / freqStepHz);
+    endBin = Math.floor(freqRangeHz[1] / freqStepHz);
   }
-
-  const { a, t } = computeMarlinShaperTaps(params);
-  const out = new Float32Array(end - start);
-  for (let i = start; i < end; i++) {
+  const { a, t } = taps;
+  const out = new Float32Array(endBin - startBin);
+  for (let i = startBin; i < endBin; i++) {
     const f = i * freqStepHz;
     const h = shaperMagnitudeAtHzFromTaps(a, t, f);
-    out[i - start] = magnitudes[i] * h;
+    out[i - startBin] = magnitudes[i] * h;
   }
   return out;
 };
@@ -173,7 +175,7 @@ export const computeShaperResponse = (params: ShaperParams, freqRangeHz: [number
   return out;
 };
 
-const shaperMagnitudeAtHzFromTaps = (a: number[], t: number[], freqHz: number) => {
+export const shaperMagnitudeAtHzFromTaps = (a: number[], t: number[], freqHz: number) => {
   const w = 2 * Math.PI * freqHz;
   let re = 0;
   let im = 0;
@@ -186,3 +188,21 @@ const shaperMagnitudeAtHzFromTaps = (a: number[], t: number[], freqHz: number) =
 };
 
 export const isEiFamily = (t: InputShaperType) => t === 'ei' || t === '2hei' || t === '3hei';
+
+export const peakFromSeries = (series: Float32Array, freqRangeHz: [number, number]) => {
+  let max = Number.NEGATIVE_INFINITY;
+  let peakIdx = 0;
+  const freqStepHz = ACTUAL_RESOLUTION || 1;
+  const [fMinHz, fMaxHz] = freqRangeHz;
+  const start = Math.max(0, Math.floor(fMinHz / freqStepHz));
+  const end = Math.min(series.length - 1, Math.floor(fMaxHz / freqStepHz));
+
+  for (let i = start; i <= end; i++) {
+    const v = series[i];
+    if (v > max) {
+      max = v;
+      peakIdx = i;
+    }
+  }
+  return peakIdx * ACTUAL_RESOLUTION;
+};

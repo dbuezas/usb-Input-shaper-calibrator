@@ -12,6 +12,7 @@ import { SpectrumPlot } from '@/visualisations/SpectrumPlot';
 import { Waterfall } from '@/visualisations/Waterfall';
 import { historicPeakAtom, peakAtom, spectrogramMaxHoldAtom } from './atoms';
 import { useMeasure } from '@uidotdev/usehooks';
+import { peakFromSeries } from '../ShaperScreen/input-shaper';
 
 const spectrogramAtom = atom<Float32Array>(new Float32Array());
 
@@ -20,25 +21,6 @@ const spectrogramScaleMaxAtom = atom<number | undefined>(undefined);
 export function SpectrogramControls() {
   return null;
 }
-
-const peakFromSeries = (series: Float32Array, freqRangeHz: [number, number]) => {
-  let max = Number.NEGATIVE_INFINITY;
-  let peakIdx = -1;
-  const freqStepHz = ACTUAL_RESOLUTION || 1;
-  const [fMinHz, fMaxHz] = freqRangeHz;
-  const start = Math.max(0, Math.floor(fMinHz / freqStepHz));
-  const end = Math.min(series.length - 1, Math.floor(fMaxHz / freqStepHz));
-
-  for (let i = start; i <= end; i++) {
-    const v = series[i];
-    if (v > max) {
-      max = v;
-      peakIdx = i;
-    }
-  }
-  if (peakIdx < 0) return undefined;
-  return peakIdx * ACTUAL_RESOLUTION;
-};
 
 const updateMaxHold = (prev: Float32Array | undefined, nextSlice: Float32Array) => {
   if (!prev?.length || prev.length !== nextSlice.length) return nextSlice;
@@ -92,6 +74,8 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
               width={width}
               freqRange={FREQUENCY_SLIDER_RANGE_HZ}
               dataAtom={spectrogramAtom}
+              xLabel="Frequency (Hz)"
+              yLabel="Seconds ago"
               onPeakFrequency={(freqHz) => setPeak(freqHz)}
             />
 
@@ -112,6 +96,8 @@ function Spectrogram({ dataSource: _dataSource }: { dataSource?: DataSource }) {
               height={height}
               width={width}
               freqRange={FREQUENCY_SLIDER_RANGE_HZ}
+              xLabel="Frequency (Hz)"
+              yLabel="Amplitude"
               scaleMax={spectrogramScaleMax}
             />
           </>

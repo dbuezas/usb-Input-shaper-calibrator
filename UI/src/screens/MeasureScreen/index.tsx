@@ -16,6 +16,7 @@ import {
   spectrogramMaxHoldAtom,
 } from './atoms';
 import { Slider } from '@/components/ui/slider';
+import { FIXED_SAMPLE_RATE } from '@/constants';
 
 const DEFAULT_SIMULATION_SWEEP_S = 20;
 
@@ -26,7 +27,9 @@ const formattedAxisValueAtom = atomFamily((i: number) =>
   atom((get) => {
     const data = get(adxlDataAtom);
     const value = data?.[i];
-    return value == null ? '' : String(value);
+    if (value === undefined) return '';
+    if (value >= 0) return '+' + String(value);
+    return String(value);
   })
 );
 
@@ -115,7 +118,7 @@ export default function MeasureScreen() {
           intuition: <>A quick sanity check that the sensor is alive and oriented as expected.</>,
         },
         value: (
-          <div className="space-y-1 text-left font-mono text-xs tabular-nums">
+          <div className="space-y-1 text-left font-mono text-xs">
             <div>
               <span className="text-muted-foreground">X:</span>{' '}
               <AtomValue atom={formattedAxisValueAtom(0)} />
@@ -152,14 +155,14 @@ export default function MeasureScreen() {
         value: (
           <>
             <div>
-              <span className="tabular-nums">
+              <span>
                 <AtomValue atom={historicPeakFrequencyAtom} />
               </span>{' '}
               Hz
             </div>
             <div className="text-muted-foreground mt-1 text-xs">
               now:{' '}
-              <span className="tabular-nums">
+              <span>
                 <AtomValue atom={peakFrequencyAtom} />
               </span>{' '}
               Hz
@@ -185,6 +188,9 @@ export default function MeasureScreen() {
         value: (
           <>
             <AtomValue atom={formattedFrequencyAtom} /> Hz
+            <div className="text-muted-foreground mt-1 text-xs">
+              expected: <span>{FIXED_SAMPLE_RATE}</span> Hz
+            </div>
           </>
         ),
       },
@@ -202,7 +208,7 @@ export default function MeasureScreen() {
           </CardTitle>
         </ExplainTooltip>
       </CardHeader>
-      <CardContent className="px-6 pb-2">
+      <CardContent className="px-6 pb-2 font-mono">
         <div>{tile.value}</div>
       </CardContent>
     </Card>

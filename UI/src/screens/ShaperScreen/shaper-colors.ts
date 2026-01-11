@@ -8,5 +8,5 @@ export const SHAPER_COLORS: Record<InputShaperType, string> = {
   mzv: 'rgba(255, 0, 200, 1)',
   ei: 'rgba(180, 140, 255, 1)',
   '2hei': 'rgba(255, 90, 140, 1)',
-  '3hei': 'rgba(120, 200, 255, 1)',
+  '3hei': 'rgba(20, 100, 255, 1)',
 };

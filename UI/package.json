@@ -9,7 +9,7 @@
     "build": "vite build",
     "lint": "tsc && eslint .",
     "format": "eslint . --fix && prettier --write .",
-    "preview": "vite preview"
+    "preview": "vite build && vite preview"
   },
   "dependencies": {
     "@radix-ui/react-radio-group": "^1.3.8",

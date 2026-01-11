@@ -99,7 +99,10 @@ export default function useOptimisers() {
                 iterationsDone,
                 iterationsTotal,
               });
-              setOptimisationHistory(Array.from(perWorkerHistory.values()).flat());
+              const finalHistory = Array.from(perWorkerHistory.values()).flat();
+              setOptimisationHistory(finalHistory);
+              setBestByType(computeBestByType(finalHistory));
+
               return;
             }
 

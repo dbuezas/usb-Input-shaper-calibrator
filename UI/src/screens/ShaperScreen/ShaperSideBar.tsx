@@ -320,21 +320,6 @@ export default function ShaperSideBar() {
 
           <div className="border-border grid w-full grid-cols-2 gap-1 rounded-md border p-1">
             <ExplainTooltip
-              title={scoreModeVariation.title}
-              accurate={scoreModeVariation.accurate}
-              intuition={scoreModeVariation.intuition}
-            >
-              <Button
-                type="button"
-                size="sm"
-                variant={scoreMode === 'variation' ? 'secondary' : 'ghost'}
-                className="h-8 w-full"
-                onClick={() => setScoreMode('variation')}
-              >
-                Variation
-              </Button>
-            </ExplainTooltip>
-            <ExplainTooltip
               title={scoreModeKlipper.title}
               accurate={scoreModeKlipper.accurate}
               intuition={scoreModeKlipper.intuition}
@@ -347,6 +332,21 @@ export default function ShaperSideBar() {
                 onClick={() => setScoreMode('klipper')}
               >
                 Klipper-like
+              </Button>
+            </ExplainTooltip>
+            <ExplainTooltip
+              title={scoreModeVariation.title}
+              accurate={scoreModeVariation.accurate}
+              intuition={scoreModeVariation.intuition}
+            >
+              <Button
+                type="button"
+                size="sm"
+                variant={scoreMode === 'variation' ? 'secondary' : 'ghost'}
+                className="h-8 w-full"
+                onClick={() => setScoreMode('variation')}
+              >
+                Variation
               </Button>
             </ExplainTooltip>
           </div>

@@ -1,55 +1,72 @@
-import { atom } from 'jotai';
+import { atom, type Getter } from 'jotai';
 import { FREQUENCY_SLIDER_RANGE_HZ } from '@/constants';
 import {
-  applyShaperToMagnitudeSpectrum,
   computeShaperResponse,
-  computeDelayCentroidSeconds,
   type CorneringSettings,
   type ShaperParams,
+  computeMarlinShaperTaps,
+  applyShaperToMagnitudeSpectrumFromTaps,
+  computeDelayCentroidSecondsFromTaps,
+  type ShaperTaps,
 } from './input-shaper';
 import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
-import { suggestedMaxAccel } from './shaper-scores/klipper';
+import { suggestedMaxAccelFromTaps } from './shaper-scores/klipper';
 import type { OptimisationResult } from './shaper-optimiser.worker';
-import { scoreCandidate, type ShaperScoreMode } from './shaper-scores';
+import { scoreCandidateFromTaps, type ShaperScoreMode } from './shaper-scores';
 
-export const shaperParamsAtom = atom<ShaperParams>({
+export const shaperPreviewParamsAtom = atom<ShaperParams>();
+export const selectedShaperParamsAtom = atom<ShaperParams>({
   type: 'zv',
   fHz: 55,
   zeta: 0.1,
   vtol: 0.1,
 });
 
-export const shaperScoreModeAtom = atom<ShaperScoreMode>('variation');
+export const shaperParamsAtom = atom(
+  (get) => get(shaperPreviewParamsAtom) ?? get(selectedShaperParamsAtom),
+  (_get, set, value: ShaperParams | ((old: ShaperParams) => ShaperParams)) =>
+    set(selectedShaperParamsAtom, value)
+);
+
+export const shaperScoreModeAtom = atom<ShaperScoreMode>('klipper');
 
 export const corneringSettingsAtom = atom<CorneringSettings>({ model: 'jerk', value: 10 });
 
+export const shaperTapsAtom = atom((get) => computeMarlinShaperTaps(get(shaperParamsAtom)));
+
 export const shapedSpectrumAtom = atom((get) =>
-  applyShaperToMagnitudeSpectrum(get(shaperParamsAtom), get(spectrogramMaxHoldAtom))
+  applyShaperToMagnitudeSpectrumFromTaps(get(shaperTapsAtom), get(spectrogramMaxHoldAtom))
 );
 
 export const shaperResponseAtom = atom((get) =>
   computeShaperResponse(get(shaperParamsAtom), FREQUENCY_SLIDER_RANGE_HZ)
 );
 
-export const currentScoreAtom = atom((get) =>
-  scoreCandidate(
+const getShaperStats = (get: Getter, taps: ShaperTaps) => {
+  const corneringSettings = get(corneringSettingsAtom);
+  const score = scoreCandidateFromTaps(
     get(spectrogramMaxHoldAtom),
-    get(shaperParamsAtom),
+    taps,
     get(shaperScoreModeAtom),
-    get(corneringSettingsAtom),
+    corneringSettings,
     get(analysisRangeAtom)
-  )
-);
+  );
+  const maxAccel = suggestedMaxAccelFromTaps(taps, corneringSettings);
+  const delay = computeDelayCentroidSecondsFromTaps(taps);
+  return { score, maxAccel, delay };
+};
 
-export const currentMaxAccelAtom = atom((get) => {
-  const base = get(spectrogramMaxHoldAtom);
-  if (!base.length) return undefined;
-  const maxAccel = suggestedMaxAccel(get(shaperParamsAtom), get(corneringSettingsAtom), 0.12);
-  return Number.isFinite(maxAccel) ? maxAccel : undefined;
+export const previewStatsAtom = atom((get) => {
+  const params = get(shaperPreviewParamsAtom);
+  if (!params) return undefined;
+  return getShaperStats(get, computeMarlinShaperTaps(params));
 });
 
-export const delayCentroidSecondsAtom = atom((get) => {
-  return computeDelayCentroidSeconds(get(shaperParamsAtom));
+export const shaperStatsAtom = atom((get) => {
+  return getShaperStats(get, computeMarlinShaperTaps(get(shaperParamsAtom)));
+});
+export const selectedParamsStatsAtom = atom((get) => {
+  return getShaperStats(get, computeMarlinShaperTaps(get(selectedShaperParamsAtom)));
 });
 
 export type HistoryMode = 'centroid_ms' | 'suggested_max_accel';

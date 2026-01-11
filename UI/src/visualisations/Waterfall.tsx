@@ -10,6 +10,7 @@ import {
   SPECTROGRAM_WATERFALL_SECONDS,
 } from '@/constants';
 import { DEFAULT_AXIS_PADDING, getInnerSize, useD3Axes } from './axis';
+import { AxisLabels } from './AxisLabels';
 import { Tooltip } from './tooltip';
 import { useRafThrottledHover } from './plot-hover';
 
@@ -23,6 +24,8 @@ export const Waterfall = ({
   scaleMax,
   onPeakFrequency,
   markers,
+  xLabel,
+  yLabel,
 }: {
   width: number;
   height: number;
@@ -31,6 +34,8 @@ export const Waterfall = ({
   scaleMax?: number;
   onPeakFrequency: (freqHz: number) => void;
   markers?: Array<{ freqHz: number; color?: string }>;
+  xLabel: string;
+  yLabel: string;
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -134,6 +139,7 @@ export const Waterfall = ({
         height={height}
         className="pointer-events-none absolute inset-0"
       />
+      <AxisLabels width={width} height={height} xLabel={xLabel} yLabel={yLabel} />
       {markerLines && (
         <svg width={width} height={height} className="pointer-events-none absolute inset-0">
           {markerLines}

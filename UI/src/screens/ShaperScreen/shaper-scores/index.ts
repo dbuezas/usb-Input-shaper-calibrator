@@ -1,19 +1,19 @@
-import type { ShaperParams, CorneringSettings } from '../input-shaper';
-import { klipperScoreFromMagnitudeSpectrum } from './klipper';
-import { variationScoreFromMagnitudeSpectrum } from './variation';
+import type { CorneringSettings, ShaperTaps } from '../input-shaper';
+import { klipperScoreFromMagnitudeSpectrumFromTaps } from './klipper';
+import { variationScoreFromMagnitudeSpectrumFromTaps } from './variation';
 
-export const scoreCandidate = (
+export const scoreCandidateFromTaps = (
   magnitudes: Float32Array,
-  params: ShaperParams,
+  taps: ShaperTaps,
   scoreMode: ShaperScoreMode,
   cornering: CorneringSettings,
   scoreRangeHz: [number, number]
 ) => {
   switch (scoreMode) {
     case 'klipper':
-      return klipperScoreFromMagnitudeSpectrum(magnitudes, params, cornering, 5000, scoreRangeHz);
+      return klipperScoreFromMagnitudeSpectrumFromTaps(magnitudes, taps, cornering, scoreRangeHz);
     case 'variation':
-      return variationScoreFromMagnitudeSpectrum(magnitudes, params, scoreRangeHz);
+      return variationScoreFromMagnitudeSpectrumFromTaps(magnitudes, taps, scoreRangeHz);
   }
 };
 

@@ -21,7 +21,7 @@ export const BATCH_SIZE = 1000;
 export const FIXED_SAMPLE_RATE = 3200;
 
 // How often `src/serial-worker.ts` recomputes the input frequency estimate.
-export const REPORT_HZ_EVERY_MS = 100;
+export const REPORT_HZ_EVERY_MS = 500;
 
 // Throttles how often axis data is posted back to the UI from `src/serial-worker.ts`.
 export const AXIS_REPORT_RATE_HZ = 10;
@@ -64,10 +64,10 @@ export const FREQUENCY_SLIDER_RANGE_HZ: [number, number] = [10, 200];
 
 // Shared plot padding used by canvas renders and D3 axis overlays.
 export const VIS_AXIS_PADDING = {
-  left: 44,
-  right: 44,
+  left: 60,
+  right: 60,
   top: 10,
-  bottom: 28,
+  bottom: 38,
 } as const;
 
 // Default spectrogram plot dimensions.
@@ -91,12 +91,18 @@ export const SIMULATION_AMPLITUDE = 1000;
 
 // === Shaper / Optimiser UI bounds ===
 
+// Any shaper parameter candidate that doesn't reduce the peak resonance by more
+// than this value is discarded.
+// this is mostly used to speed up the process and hide ridiculous candidates,
+// even if they result in very high suggested max accel.
+export const MIN_RESONANCE_REDUCTION_AT_SPECTROGRAM_PEAK = 0.5;
+
 // These constants define the min/max shown in the ShaperScreen sliders.
 // Keep the optimiser bounds in sync by importing these in the worker.
 
 export const SHAPER_F0_RANGE_HZ: [number, number] = [10, 300];
-export const SHAPER_ZETA_RANGE: [number, number] = [0.01, 0.25];
-export const SHAPER_VTOL_RANGE: [number, number] = [0.01, 1];
+export const SHAPER_ZETA_RANGE: [number, number] = [0.0, 0.25];
+export const SHAPER_VTOL_RANGE: [number, number] = [0.0, 1];
 
 export const SEARCH_F_STEP_HZ = 0.5;
 export const SEARCH_ZETA_STEP = 0.01;

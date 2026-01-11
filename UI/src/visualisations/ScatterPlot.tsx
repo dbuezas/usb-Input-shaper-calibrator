@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { scaleLinear } from 'd3-scale';
 import { DEFAULT_AXIS_PADDING, getInnerSize, useD3Axes } from './axis';
+import { AxisLabels } from './AxisLabels';
 import { useRafThrottledHover } from './plot-hover';
 import { Tooltip } from './tooltip';
 
@@ -48,6 +49,8 @@ export const ScatterPlot = <P extends ScatterPoint>({
   width,
   height,
   xTickFormat,
+  xLabel,
+  yLabel,
   hoverMode,
   getHover,
   onPointHover,
@@ -57,6 +60,8 @@ export const ScatterPlot = <P extends ScatterPoint>({
   width: number;
   height: number;
   xTickFormat?: (v: number) => string;
+  xLabel: string;
+  yLabel: string;
   hoverMode?: 'xy' | 'x';
   getHover?: (point: P, index: number) => ScatterPlotHover;
   onPointHover?: (meta: P | undefined) => void;
@@ -66,7 +71,7 @@ export const ScatterPlot = <P extends ScatterPoint>({
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { hover, setHover, hideHover } = useRafThrottledHover();
-  const hoveredPointIndexRef = useRef<number | null>(null);
+  const hoveredPointRef = useRef<P | null>(null);
   const [isHoveringPoint, setIsHoveringPoint] = useState(false);
 
   const { innerWidth, innerHeight } = getInnerSize({
@@ -171,9 +176,9 @@ export const ScatterPlot = <P extends ScatterPoint>({
           }
         }
 
-        const maxDistPx = 10;
+        const maxDistPx = mode === 'x' ? Number.POSITIVE_INFINITY : 10;
         if (bestIdx < 0 || bestDist2 > maxDistPx * maxDistPx) {
-          hoveredPointIndexRef.current = null;
+          hoveredPointRef.current = null;
           setIsHoveringPoint(false);
           hideHover();
           onPointHover?.(undefined);
@@ -181,7 +186,7 @@ export const ScatterPlot = <P extends ScatterPoint>({
         }
 
         const p = points[bestIdx];
-        hoveredPointIndexRef.current = bestIdx;
+        hoveredPointRef.current = p;
         setIsHoveringPoint(Boolean(onPointClick));
         onPointHover?.(p);
 
@@ -198,10 +203,8 @@ export const ScatterPlot = <P extends ScatterPoint>({
         });
       }}
       onClick={() => {
-        const idx = hoveredPointIndexRef.current;
-        if (idx == null) return;
-        const p = points[idx];
-        onPointClick?.(p);
+        const p = hoveredPointRef.current;
+        if (p) onPointClick?.(p);
       }}
     >
       <canvas ref={canvasRef} width={width} height={height} className="block border bg-black" />
@@ -211,6 +214,7 @@ export const ScatterPlot = <P extends ScatterPoint>({
         height={height}
         className="pointer-events-none absolute inset-0"
       />
+      <AxisLabels width={width} height={height} xLabel={xLabel} yLabel={yLabel} />
       <Tooltip hover={hover} />
     </div>
   );

@@ -4,6 +4,7 @@ import type { Atom } from 'jotai';
 import { useAtomValue } from 'jotai';
 import { scaleLinear } from 'd3-scale';
 import { DEFAULT_AXIS_PADDING, getInnerSize, useD3Axes } from './axis';
+import { AxisLabels } from './AxisLabels';
 import { Tooltip } from './tooltip';
 import { MAX_FREQ, MIN_FREQ } from '@/constants';
 import { useRafThrottledHover } from './plot-hover';
@@ -162,15 +163,34 @@ export const SpectrumPlot = ({
   scaleMax,
   scaleMaxRight,
   markers,
-}: {
-  traces: SpectrumPlotTrace[];
-  width: number;
-  height: number;
-  freqRange: [number, number];
-  scaleMax?: number;
-  scaleMaxRight?: number;
-  markers?: SpectrumPlotMarker[];
-}) => {
+  xLabel,
+  yLabel,
+  y2Label,
+}:
+  | {
+      traces: SpectrumPlotTrace[];
+      width: number;
+      height: number;
+      freqRange: [number, number];
+      scaleMax?: number;
+      scaleMaxRight?: undefined;
+      markers?: SpectrumPlotMarker[];
+      xLabel: string;
+      yLabel: string;
+      y2Label?: never;
+    }
+  | {
+      traces: SpectrumPlotTrace[];
+      width: number;
+      height: number;
+      freqRange: [number, number];
+      scaleMax?: number;
+      scaleMaxRight: number;
+      markers?: SpectrumPlotMarker[];
+      xLabel: string;
+      yLabel: string;
+      y2Label: string;
+    }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -285,6 +305,7 @@ export const SpectrumPlot = ({
         height={height}
         className="pointer-events-none absolute inset-0"
       />
+      <AxisLabels width={width} height={height} xLabel={xLabel} yLabel={yLabel} y2Label={y2Label} />
       {markerLines && (
         <svg width={width} height={height} className="pointer-events-none absolute inset-0">
           {markerLines}

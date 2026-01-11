@@ -184,11 +184,11 @@ class DataProcessor {
 
       // Convert to signed 16-bit integers
       this.sampleCount++;
-
+      const dt = now - this.intervalStartTime;
       // Check if interval has elapsed
-      if (now - this.intervalStartTime >= REPORT_HZ_EVERY_MS) {
+      if (dt >= REPORT_HZ_EVERY_MS) {
         // Calculate frequency: samples per second
-        this.frequency = (this.sampleCount / REPORT_HZ_EVERY_MS) * 1000;
+        this.frequency = (this.sampleCount / dt) * 1000;
 
         // Reset for next interval
         this.intervalStartTime = now;
