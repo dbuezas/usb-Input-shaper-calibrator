@@ -1,22 +1,48 @@
 #include <Arduino.h>
+#include <SPI.h>
 
-// Pins
-#define PIN_MISO  12
-#define PIN_CS     9
-#define PIN_SCK   10
-#define PIN_MOSI  11
+#ifdef RT_BLUEPILL
+    #include "usbd_cdc_if.h"
+#endif //RT_BLUEPILL
 
-// Packet delimiters
-#define PACKET_START 0b10101010
-#define PACKET_END   0b01010101
+//#define SPI_BITBANG
+
+#define LED                 LED_BUILTIN
+
+#ifdef RT_RP2040
+    // Pins SPI1
+    #define PIN_MISO        12
+    #define PIN_MOSI        11
+    #define PIN_SCK         10
+    #define PIN_CS          9
+#ifdef RT_PICO
+    #define SMPS_PWM        23
+#endif //RT_PICO
+
+    #define ADXL_SPI        SPI1
+    #define IS_CONNECTED    Serial.dtr()
+#endif //RT_RP2040
+
+#ifdef RT_BLUEPILL
+    // Pins SPI1
+    #define PIN_MOSI        PA7
+    #define PIN_MISO        PA6
+    #define PIN_SCK         PA5
+    #define PIN_CS          PA4
+
+    #define ADXL_SPI        SPI
+    #define IS_CONNECTED    !CDC_connected()
+#endif //RT_BLUEPILL
+
 
 // FIFO registers
-#define REG_DATAX0      0b00110010
-#define REG_FIFO_STATUS 0b00111001
-#define REG_DATA_FORMAT 0b00110001
-#define REG_BW_RATE     0b00101100
-#define REG_POWER_CTL   0b00101101
-#define REG_FIFO_CTL    0b00111000
+#define REG_DEVID       0x00
+#define REG_DATAX0      0x32 //DATAX0-Z1 0x32...0x37
+#define REG_FIFO_STATUS 0x39
+#define REG_DATA_FORMAT 0x31
+#define REG_BW_RATE     0x2C
+#define REG_POWER_CTL   0x2D
+#define REG_FIFO_CTL    0x38
 
 // Bandwidth rate register values (BW_RATE)
 #define BW_3200HZ 0b00001111
@@ -28,16 +54,7 @@
 #define BW_50HZ   0b00001001
 #define BW_25HZ   0b00001000
 
-union PackedXYZ {
-    struct {
-        signed int x : 13;
-        signed int y : 13;
-        signed int z : 13;
-        unsigned int padding : 1;
-    } data;
-    uint8_t bytes[5];
-};
-
+#ifdef SPI_BITBANG
 // For ~1 MHz bit-bang on RP2040.
 static inline void spi_delay() {
     // __asm volatile("nop; nop; nop; nop;");
@@ -63,6 +80,20 @@ uint8_t spi_rw(uint8_t val) {
     return rx;
 }
 
+void spi_rw_multi(uint8_t *buf, uint8_t len) {
+    for (uint8_t i = 0; i < len; i++)
+        buf[i] = spi_rw(0b00000000);
+}
+#else
+uint8_t spi_rw(uint8_t val) {
+    return ADXL_SPI.transfer(val);
+}
+
+void spi_rw_multi(uint8_t *buf, uint8_t len) {
+    ADXL_SPI.transfer(buf, len);
+}
+#endif //SPI_BITBANG
+
 
 void write_reg(uint8_t reg, uint8_t val) {
     digitalWrite(PIN_CS, LOW);
@@ -82,13 +113,10 @@ uint8_t read_reg(uint8_t reg) {
 void read_multi(uint8_t reg, uint8_t *buf, uint8_t len) {
     digitalWrite(PIN_CS, LOW);
     spi_rw(reg | 0b11000000);  // READ + MULTI
-    for (uint8_t i = 0; i < len; i++)
-        buf[i] = spi_rw(0b00000000);
+    spi_rw_multi(buf, len);
     digitalWrite(PIN_CS, HIGH);
 }
 
-// sent every so often to in case the receiving end missed a packet and started reading the bits offset from the beginning
-union PackedXYZ const ALIGN_PACKET = { .bytes = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF } };
 
 void drain_fifo() {
     uint8_t fifo_level = read_reg(REG_FIFO_STATUS) & 0b00111111;
@@ -129,25 +157,52 @@ void drain_fifo() {
 }
 
 void setup() {
+    pinMode(LED, OUTPUT);
+
+#ifdef RT_PICO
+    pinMode(SMPS_PWM, OUTPUT);
+    digitalWrite(SMPS_PWM, HIGH); //enable PWM mode of SMPS regulator to reduce noise
+#endif //RT_PICO
+
     Serial.begin(230400);
+
     pinMode(PIN_CS, OUTPUT);
+#ifdef SPI_BITBANG
     pinMode(PIN_MOSI, OUTPUT);
     pinMode(PIN_MISO, INPUT);
     pinMode(PIN_SCK, OUTPUT);
 
-    digitalWrite(PIN_CS, HIGH);
     digitalWrite(PIN_SCK, HIGH);
+#endif //SPI_BITBANG
+    digitalWrite(PIN_CS, HIGH);
     delay(10);
 
-    uint8_t id = read_reg(0b00000000);
+#ifndef SPI_BITBANG
+    ADXL_SPI.setMOSI(PIN_MOSI);
+    ADXL_SPI.setMISO(PIN_MISO);
+#ifdef RT_RP2040
+    ADXL_SPI.setSCK(PIN_SCK);
+#endif //RT_RP2040
+#ifdef RT_BLUEPILL
+    ADXL_SPI.setSCLK(PIN_SCK);
+#endif //RT_BLUEPILL
+    ADXL_SPI.begin();
+    ADXL_SPI.beginTransaction(SPISettings(2000000, MSBFIRST, SPI_MODE3));
+#endif //SPI_BITBANG
+
+    uint8_t id = read_reg(REG_DEVID);
     Serial.printf("ID = 0x%02X\r\n", id);
 
-    write_reg(REG_DATA_FORMAT, 0b00001011);  // 13 bit, ±16g
-    write_reg(REG_BW_RATE, BW_3200HZ); // 3200 Hz output rate
-    write_reg(REG_POWER_CTL, 0b00001000);    // measurement mode
-    write_reg(REG_FIFO_CTL, 0b10011111);     // stream mode, 32-sample FIFO
+    write_reg(REG_DATA_FORMAT, 0b00001011); // 13 bit, ±16g
+    write_reg(REG_BW_RATE, BW_3200HZ);      // 3200 Hz output rate
+    write_reg(REG_FIFO_CTL, 0b10011111);    // stream mode, 32-sample FIFO
+    write_reg(REG_POWER_CTL, 0b00001000);   // measurement mode
 }
 
 void loop() {
     drain_fifo();
+    if(IS_CONNECTED)    //Light onboard led when USB serial is connected
+        digitalWrite(LED, HIGH);
+    else
+        digitalWrite(LED, LOW);
 }
