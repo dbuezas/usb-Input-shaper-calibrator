@@ -210,26 +210,55 @@ void read_multi(uint8_t reg, uint8_t* buf, uint8_t len) {
   digitalWrite(PIN_CS, HIGH);
 }
 
-void drain_fifo() {
-  #if ACCEL_CHIP == ACCEL_CHIP_ADXL345
-    uint8_t fifo_level = read_reg(REG_FIFO_STATUS) & 0b00111111;
-  #elif ACCEL_CHIP == ACCEL_CHIP_LIS2DW12
-    // FIFO_SAMPLES reports number of unread samples (0..32)
-    uint8_t fifo_level = read_reg(REG_FIFO_STATUS) & 0b00111111; // 0x3F
+// Sends one sample (13-bit signed values at 3.9 mg/LSB) as a 6-byte packet.
+void send_sample(int16_t x, int16_t y, int16_t z) {
+  // convert to 13-bit signed
+  uint32_t x13 = x & 0x1FFF;
+  uint32_t y13 = y & 0x1FFF;
+  uint32_t z13 = z & 0x1FFF;
 
+  // pack 3×13 bits
+  uint64_t bits = (uint64_t)x13 | ((uint64_t)y13 << 13) | ((uint64_t)z13 << 26);
+
+  // output 6 bytes (little-endian)
+  uint8_t out[6];
+  out[0] = 255;
+  out[1] = (uint8_t)(bits >> 0);
+  out[2] = (uint8_t)(bits >> 8);
+  out[3] = (uint8_t)(bits >> 16);
+  out[4] = (uint8_t)(bits >> 24);
+  out[5] = (uint8_t)(bits >> 32);
+
+  #if SERIAL_DEBUG_TEXT
+    // Avoid flooding the USB serial link; print at most ~20Hz.
+    static uint32_t last_print_ms = 0;
+    uint32_t now = millis();
+    if (now - last_print_ms >= 50) {
+      last_print_ms = now;
+      Serial.printf("xyz: %d %d %d\r\n", (int)x, (int)y, (int)z);
+    }
+  #else
+    Serial.write(out, 6);
   #endif
+}
 
-  // #if ACCEL_CHIP == ACCEL_CHIP_LIS2DW12
-  //   // If FIFO isn't reporting samples, fall back to data-ready polling.
-  //   if (fifo_level == 0) {
-  //     uint8_t status = read_reg(REG_STATUS);
-  //     if ((status & 0x01) == 0)
-  //       return;
-  //     fifo_level = 1;
-  //   }
-  // #endif
+#if ACCEL_CHIP == ACCEL_CHIP_LIS2DW12
+  // The LIS2DW runs at 1600 Hz, but the UI expects 3200 Hz.
+  // Upsample 2x with linear interpolation: before each sample, send the midpoint with the previous one.
+  static bool has_prev_sample = false;
+  static int16_t prev_x, prev_y, prev_z;
+#endif
 
-  uint8_t buf[6];
+void drain_fifo() {
+  // FIFO entries ready to read (ADXL345 FIFO_STATUS / LIS2DW FIFO_SAMPLES, 0..32)
+  uint8_t fifo_level = read_reg(REG_FIFO_STATUS) & 0b00111111;
+
+  #if ACCEL_CHIP == ACCEL_CHIP_ADXL345
+    // Read one byte past DATAZ1: the ADXL345 needs 5 us between the end of a data read and the next FIFO read
+    uint8_t buf[7];
+  #else
+    uint8_t buf[6];
+  #endif
   while (fifo_level--) {
     read_multi(REG_DATAX0, buf, sizeof(buf));
 
@@ -244,36 +273,16 @@ void drain_fifo() {
       x16 >>= 3;
       y16 >>= 3;
       z16 >>= 3;
+
+      if (has_prev_sample)
+        send_sample((prev_x + x16) / 2, (prev_y + y16) / 2, (prev_z + z16) / 2);
+      has_prev_sample = true;
+      prev_x = x16;
+      prev_y = y16;
+      prev_z = z16;
     #endif
 
-    // convert to 13-bit signed
-    uint32_t x13 = x16 & 0x1FFF;
-    uint32_t y13 = y16 & 0x1FFF;
-    uint32_t z13 = z16 & 0x1FFF;
-
-    // pack 3×13 bits
-    uint64_t bits = (uint64_t)x13 | ((uint64_t)y13 << 13) | ((uint64_t)z13 << 26);
-
-    // output 6 bytes (little-endian)
-    uint8_t out[6];
-    out[0] = 255;
-    out[1] = (uint8_t)(bits >> 0);
-    out[2] = (uint8_t)(bits >> 8);
-    out[3] = (uint8_t)(bits >> 16);
-    out[4] = (uint8_t)(bits >> 24);
-    out[5] = (uint8_t)(bits >> 32);
-
-    #if SERIAL_DEBUG_TEXT
-      // Avoid flooding the USB serial link; print at most ~20Hz.
-      static uint32_t last_print_ms = 0;
-      uint32_t now = millis();
-      if (now - last_print_ms >= 50) {
-        last_print_ms = now;
-        Serial.printf("xyz: %d %d %d\r\n", (int)x16, (int)y16, (int)z16);
-      }
-    #else
-      Serial.write(out, 6);
-    #endif
+    send_sample(x16, y16, z16);
   }
 }
 
@@ -330,6 +339,7 @@ void setup() {
       if (id != LIS2DW_DEV_ID)
         Serial.printf("Unexpected LIS2DW id (expected 0x%02X)\r\n", LIS2DW_DEV_ID);
     #endif
+    has_prev_sample = false;
   #endif
   accel_init();
 }
