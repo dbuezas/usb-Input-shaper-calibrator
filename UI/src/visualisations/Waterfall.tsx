@@ -2,13 +2,7 @@ import { useEffect, useMemo, useRef, type RefObject } from 'react';
 import type { Atom } from 'jotai';
 import { useAtomValue } from 'jotai';
 import { scaleLinear } from 'd3-scale';
-import {
-  ACTUAL_RESOLUTION,
-  MAX_FREQ,
-  MIN_FREQ,
-  SECONDS_PER_SLICE,
-  SPECTROGRAM_WATERFALL_SECONDS,
-} from '@/constants';
+import { ACTUAL_RESOLUTION, SECONDS_PER_SLICE, SPECTROGRAM_WATERFALL_SECONDS } from '@/constants';
 import { DEFAULT_AXIS_PADDING, getInnerSize, useD3Axes } from './axis';
 import { AxisLabels } from './AxisLabels';
 import { Tooltip } from './tooltip';
@@ -195,11 +189,9 @@ const Waterfall_render = ({
     const plotHeight = bottom - top;
     const secondsPerYPixel = SPECTROGRAM_WATERFALL_SECONDS / plotHeight / devicePixelRatio;
 
-    const iMin = Math.max(0, Math.round((spectrum.length / (MAX_FREQ - MIN_FREQ)) * freqRange[0]));
-    const iMax = Math.min(
-      spectrum.length - 1,
-      Math.round((spectrum.length / (MAX_FREQ - MIN_FREQ)) * freqRange[1])
-    );
+    // Bin width is the same at every sample rate; only the number of bins differs.
+    const iMin = Math.max(0, Math.round(freqRange[0] / ACTUAL_RESOLUTION));
+    const iMax = Math.min(spectrum.length - 1, Math.round(freqRange[1] / ACTUAL_RESOLUTION));
 
     let min = Number.MAX_VALUE;
     let max = Number.MIN_VALUE;

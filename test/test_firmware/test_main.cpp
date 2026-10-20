@@ -27,22 +27,39 @@ struct Sample {
   int x, y, z;
 };
 
-// Same decoding as UI/src/screens/MeasureScreen/serial-worker.ts
-static std::vector<Sample> decode_packets(const std::vector<uint8_t>& bytes) {
+struct Stream {
+  std::vector<Sample> samples;
+  std::vector<int> sample_rates;  // from sample-rate packets
+};
+
+// Same format as UI/src/screens/MeasureScreen/serial-protocol.ts
+static Stream decode_stream(const std::vector<uint8_t>& bytes) {
   TEST_ASSERT_EQUAL_MESSAGE(0, bytes.size() % 6, "output is not whole 6-byte packets");
-  std::vector<Sample> out;
+  Stream out;
   for (size_t i = 0; i < bytes.size(); i += 6) {
-    TEST_ASSERT_EQUAL_HEX8_MESSAGE(255, bytes[i], "packet start marker");
+    const uint8_t* p = &bytes[i];
+    if (p[0] == 0xFE) {
+      TEST_ASSERT_EQUAL_HEX8_MESSAGE('R', p[1], "sample-rate packet tag");
+      TEST_ASSERT_EQUAL_HEX8_MESSAGE(0xFF, p[2] ^ p[4], "sample-rate check byte (low)");
+      TEST_ASSERT_EQUAL_HEX8_MESSAGE(0xFF, p[3] ^ p[5], "sample-rate check byte (high)");
+      out.sample_rates.push_back(p[2] | (p[3] << 8));
+      continue;
+    }
+    TEST_ASSERT_EQUAL_HEX8_MESSAGE(0xFF, p[0], "packet start marker");
     uint64_t bits = 0;
     for (int b = 0; b < 5; b++)
-      bits |= (uint64_t)bytes[i + 1 + b] << (8 * b);
+      bits |= (uint64_t)p[1 + b] << (8 * b);
     auto get13 = [&](int start) {
       int v = (int)((bits >> start) & 0x1FFF);
       return v & 0x1000 ? v - 0x2000 : v;
     };
-    out.push_back({get13(0), get13(13), get13(26)});
+    out.samples.push_back({get13(0), get13(13), get13(26)});
   }
   return out;
+}
+
+static std::vector<Sample> decode_samples(const std::vector<uint8_t>& bytes) {
+  return decode_stream(bytes).samples;
 }
 
 static void assert_g(int lsb, double g) {
@@ -90,11 +107,33 @@ void test_init_configures_chip() {
 #endif
 }
 
-void test_no_output_when_fifo_empty() {
+void test_no_samples_when_fifo_empty() {
   loop();
   loop();
-  TEST_ASSERT_EQUAL(0, Serial.written.size());
+  TEST_ASSERT_EQUAL(0, decode_samples(Serial.written).size());
   TEST_ASSERT_EQUAL(0, sim.protocol_errors);
+}
+
+void test_reports_sample_rate() {
+#if ACCEL_CHIP == ACCEL_CHIP_ADXL345
+  const int expected = 3200;
+#else
+  const int expected = 1600;
+#endif
+  // at boot
+  Stream boot = decode_stream(Serial.written);
+  TEST_ASSERT_EQUAL(1, boot.sample_rates.size());
+  TEST_ASSERT_EQUAL(expected, boot.sample_rates[0]);
+
+  // and again every second, for a UI that connects later
+  Serial.written.clear();
+  loop();
+  mock::now_ms += 1000;
+  loop();
+  loop();
+  Stream later = decode_stream(Serial.written);
+  TEST_ASSERT_EQUAL(1, later.sample_rates.size());
+  TEST_ASSERT_EQUAL(expected, later.sample_rates[0]);
 }
 
 void test_scaling_and_sign() {
@@ -103,20 +142,14 @@ void test_scaling_and_sign() {
   for (auto& s : in)
     sim.push_g(s[0], s[1], s[2]);
   loop();
-  std::vector<Sample> out = decode_packets(Serial.written);
+  std::vector<Sample> out = decode_samples(Serial.written);
   TEST_ASSERT_EQUAL(0, sim.protocol_errors);
   TEST_ASSERT_EQUAL(0, sim.fifo.size());
 
-#if ACCEL_CHIP == ACCEL_CHIP_ADXL345
+  // one packet per sample, at the chip's own rate
   TEST_ASSERT_EQUAL(4, out.size());
   for (int i = 0; i < 4; i++)
     assert_sample_g(out[i], in[i][0], in[i][1], in[i][2]);
-#else
-  // 2x upsampled: sample, then midpoint + sample for each following one
-  TEST_ASSERT_EQUAL(7, out.size());
-  for (int i = 0; i < 4; i++)
-    assert_sample_g(out[2 * i], in[i][0], in[i][1], in[i][2]);
-#endif
 }
 
 void test_full_fifo_drains_in_one_loop() {
@@ -125,40 +158,35 @@ void test_full_fifo_drains_in_one_loop() {
   loop();
   TEST_ASSERT_EQUAL(0, sim.fifo.size());
   TEST_ASSERT_EQUAL(0, sim.protocol_errors);
-  std::vector<Sample> out = decode_packets(Serial.written);
-#if ACCEL_CHIP == ACCEL_CHIP_ADXL345
-  TEST_ASSERT_EQUAL(32, out.size());
-#else
-  TEST_ASSERT_EQUAL(63, out.size());
-#endif
+  TEST_ASSERT_EQUAL(32, decode_samples(Serial.written).size());
 }
 
-#if ACCEL_CHIP == ACCEL_CHIP_LIS2DW12
-void test_lis2dw_upsamples_to_3200hz() {
-  // two drains: the midpoint must also bridge the gap between FIFO reads
-  sim.push_g(0, 0, 0);
-  sim.push_g(1, -1, 2);
-  loop();
-  sim.push_g(3, -3, 0);
-  loop();
-  std::vector<Sample> out = decode_packets(Serial.written);
-  TEST_ASSERT_EQUAL(5, out.size());
-  assert_sample_g(out[0], 0, 0, 0);
-  assert_sample_g(out[1], 0.5, -0.5, 1);  // midpoint
-  assert_sample_g(out[2], 1, -1, 2);
-  assert_sample_g(out[3], 2, -2, 1);  // midpoint across loop() calls
-  assert_sample_g(out[4], 3, -3, 0);
-}
+
+// Exact bytes, also checked by UI/src/screens/MeasureScreen/serial-protocol.test.ts
+void test_packet_bytes_match_ui() {
+  Serial.written.clear();
+  send_sample(256, -256, 0);
+  const std::vector<uint8_t> sample = {0xFF, 0x00, 0x01, 0xE0, 0x03, 0x00};
+  TEST_ASSERT_EQUAL_HEX8_ARRAY(sample.data(), Serial.written.data(), 6);
+
+  Serial.written.clear();
+  send_sample_rate();
+#if ACCEL_CHIP == ACCEL_CHIP_ADXL345
+  const std::vector<uint8_t> rate = {0xFE, 0x52, 0x80, 0x0C, 0x7F, 0xF3};
+#else
+  const std::vector<uint8_t> rate = {0xFE, 0x52, 0x40, 0x06, 0xBF, 0xF9};
 #endif
+  TEST_ASSERT_EQUAL(6, Serial.written.size());
+  TEST_ASSERT_EQUAL_HEX8_ARRAY(rate.data(), Serial.written.data(), 6);
+}
 
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_init_configures_chip);
-  RUN_TEST(test_no_output_when_fifo_empty);
+  RUN_TEST(test_no_samples_when_fifo_empty);
+  RUN_TEST(test_reports_sample_rate);
+  RUN_TEST(test_packet_bytes_match_ui);
   RUN_TEST(test_scaling_and_sign);
   RUN_TEST(test_full_fifo_drains_in_one_loop);
-#if ACCEL_CHIP == ACCEL_CHIP_LIS2DW12
-  RUN_TEST(test_lis2dw_upsamples_to_3200hz);
-#endif
   return UNITY_END();
 }

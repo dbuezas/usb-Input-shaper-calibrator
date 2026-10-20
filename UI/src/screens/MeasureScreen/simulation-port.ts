@@ -1,10 +1,11 @@
 import {
   BATCH_SIZE,
-  FIXED_SAMPLE_RATE,
+  DEFAULT_SAMPLE_RATE,
   SIMULATION_AMPLITUDE,
   SIMULATION_MAX_FREQUENCY,
   SIMULATION_MIN_FREQUENCY,
 } from '@/constants';
+import { encodeSample, encodeSampleRate, PACKET_SIZE } from './serial-protocol';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -23,6 +24,9 @@ export class SimulationPort {
   readable: ReadableStream<Uint8Array>;
 
   private sweepSeconds: number;
+  private sampleRate: number;
+  // Samples until the next sample-rate packet (sent at start and every second, like the firmware).
+  private samplesUntilRatePacket = 0;
 
   private sweepMinFrequencyHz = SIMULATION_MIN_FREQUENCY;
   private sweepMaxFrequencyHz = SIMULATION_MAX_FREQUENCY;
@@ -47,8 +51,9 @@ export class SimulationPort {
   private pendingFrame: Uint8Array | null = null;
   private pendingFrameIndex = 0;
 
-  constructor(options?: { sweepSeconds?: number }) {
+  constructor(options?: { sweepSeconds?: number; sampleRate?: number }) {
     this.sweepSeconds = options?.sweepSeconds ?? 3;
+    this.sampleRate = options?.sampleRate ?? DEFAULT_SAMPLE_RATE;
     this.readable = this.createReadable();
   }
 
@@ -70,6 +75,12 @@ export class SimulationPort {
     this.sweepSeconds = Math.max(0.1, next);
   }
 
+  /** Simulates a sensor with another sample rate (it is reported in the stream right away). */
+  setSampleRate(sampleRate: number) {
+    this.sampleRate = sampleRate;
+    this.restart();
+  }
+
   /**
    * Restarts the simulation sweep from t=0.
    *
@@ -81,6 +92,7 @@ export class SimulationPort {
     this.simulationFrequency = this.sweepMinFrequencyHz;
     this.pendingFrame = null;
     this.pendingFrameIndex = 0;
+    this.samplesUntilRatePacket = 0;
     this.resetResonator();
   }
 
@@ -123,7 +135,7 @@ export class SimulationPort {
       z2: number;
     }) => {
       // RBJ biquad cookbook (band-pass, constant skirt gain; peak gain = Q)
-      const w0 = (2 * Math.PI * axis.f0Hz) / FIXED_SAMPLE_RATE;
+      const w0 = (2 * Math.PI * axis.f0Hz) / this.sampleRate;
       const cosw0 = Math.cos(w0);
       const sinw0 = Math.sin(w0);
       const alpha = sinw0 / (2 * q);
@@ -174,14 +186,19 @@ export class SimulationPort {
   }
 
   private makeNextFrame(): Uint8Array {
+    if (this.samplesUntilRatePacket-- <= 0) {
+      this.samplesUntilRatePacket = this.sampleRate;
+      return encodeSampleRate(this.sampleRate);
+    }
+
     // Sweep (frequency changes smoothly, phase stays continuous)
     const span = this.sweepMaxFrequencyHz - this.sweepMinFrequencyHz;
-    this.simulationFrequency += span / this.sweepSeconds / FIXED_SAMPLE_RATE;
+    this.simulationFrequency += span / this.sweepSeconds / this.sampleRate;
     if (this.simulationFrequency > this.sweepMaxFrequencyHz)
       this.simulationFrequency = this.sweepMinFrequencyHz;
 
     // Phase-accurate integration
-    this.t += (2 * Math.PI * this.simulationFrequency) / FIXED_SAMPLE_RATE;
+    this.t += (2 * Math.PI * this.simulationFrequency) / this.sampleRate;
 
     // Input excitation: swept sine of constant amplitude.
     // The observed signal is the resonator's response, which peaks near 55Hz.
@@ -206,29 +223,11 @@ export class SimulationPort {
       Math.round(SIMULATION_AMPLITUDE * 0.2 + respZ + randomNormal() * noiseStd)
     );
 
-    const simulatedData = new Int16Array([valueX, valueY, valueZ]);
-
-    const frame = new Uint8Array(6);
-    frame[0] = 255;
-
-    // Pack as X in bits 0..12, Y in 13..25, Z in 26..38
-    // to match the decoder in `serial-worker.ts`.
-    const packed =
-      (BigInt(simulatedData[0]) & 0x1fffn) |
-      ((BigInt(simulatedData[1]) & 0x1fffn) << 13n) |
-      ((BigInt(simulatedData[2]) & 0x1fffn) << 26n);
-
-    frame[1] = Number((packed >> 0n) & 0xffn);
-    frame[2] = Number((packed >> 8n) & 0xffn);
-    frame[3] = Number((packed >> 16n) & 0xffn);
-    frame[4] = Number((packed >> 24n) & 0xffn);
-    frame[5] = Number((packed >> 32n) & 0xffn);
-
-    return frame;
+    return encodeSample(valueX, valueY, valueZ);
   }
 
   private nextByte(): number {
-    if (!this.pendingFrame || this.pendingFrameIndex >= 6) {
+    if (!this.pendingFrame || this.pendingFrameIndex >= PACKET_SIZE) {
       this.pendingFrame = this.makeNextFrame();
       this.pendingFrameIndex = 0;
     }
@@ -242,11 +241,11 @@ export class SimulationPort {
     const controller = this.controller;
     if (!controller) return;
 
-    const chunkDurationMs = (1000 * BATCH_SIZE) / FIXED_SAMPLE_RATE / 6;
-
     let nextTime = performance.now();
 
     while (this.isOpen) {
+      // Read inside the loop: the sample rate can change while running.
+      const chunkDurationMs = (1000 * BATCH_SIZE) / this.sampleRate / PACKET_SIZE;
       const chunk = new Uint8Array(BATCH_SIZE);
       for (let i = 0; i < chunk.length; i++) {
         chunk[i] = this.nextByte();

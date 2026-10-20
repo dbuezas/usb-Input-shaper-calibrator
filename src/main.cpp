@@ -93,6 +93,8 @@ void read_multi(uint8_t reg, uint8_t* buf, uint8_t len);
   #define BW_50HZ 0b00001001
   #define BW_25HZ 0b00001000
 
+  #define SAMPLE_RATE_HZ 3200
+
   static inline void accel_init() {
     write_reg(REG_DATA_FORMAT, 0b00001011);  // 13 bit, ±16g
     write_reg(REG_BW_RATE, BW_3200HZ);       // 3200 Hz output rate
@@ -129,6 +131,8 @@ void read_multi(uint8_t reg, uint8_t* buf, uint8_t len);
     write_reg(REG_FIFO_CTRL, 0xC0);
     write_reg(REG_CTRL1, 0x94);
   }
+
+  #define SAMPLE_RATE_HZ 1600
 
   // Map ADXL-style names used in the rest of the code to LIS2DW.
   #define REG_DATAX0 REG_OUT_X_L
@@ -242,12 +246,18 @@ void send_sample(int16_t x, int16_t y, int16_t z) {
   #endif
 }
 
-#if ACCEL_CHIP == ACCEL_CHIP_LIS2DW12
-  // The LIS2DW runs at 1600 Hz, but the UI expects 3200 Hz.
-  // Upsample 2x with linear interpolation: before each sample, send the midpoint with the previous one.
-  static bool has_prev_sample = false;
-  static int16_t prev_x, prev_y, prev_z;
-#endif
+// Tells the UI the sample rate: 0xFE, 'R', rate (uint16 little-endian), then the same 2 bytes inverted as a check.
+// Same 6-byte size as a sample packet. Sent at boot and every second, so a UI that connects later gets it.
+void send_sample_rate() {
+  uint8_t lo = SAMPLE_RATE_HZ & 0xFF;
+  uint8_t hi = SAMPLE_RATE_HZ >> 8;
+  uint8_t out[6] = {0xFE, 'R', lo, hi, (uint8_t)~lo, (uint8_t)~hi};
+  #if SERIAL_DEBUG_TEXT
+    Serial.printf("sample rate: %d Hz\r\n", SAMPLE_RATE_HZ);
+  #else
+    Serial.write(out, 6);
+  #endif
+}
 
 void drain_fifo() {
   // FIFO entries ready to read (ADXL345 FIFO_STATUS / LIS2DW FIFO_SAMPLES, 0..32)
@@ -273,13 +283,6 @@ void drain_fifo() {
       x16 >>= 3;
       y16 >>= 3;
       z16 >>= 3;
-
-      if (has_prev_sample)
-        send_sample((prev_x + x16) / 2, (prev_y + y16) / 2, (prev_z + z16) / 2);
-      has_prev_sample = true;
-      prev_x = x16;
-      prev_y = y16;
-      prev_z = z16;
     #endif
 
     send_sample(x16, y16, z16);
@@ -339,9 +342,9 @@ void setup() {
       if (id != LIS2DW_DEV_ID)
         Serial.printf("Unexpected LIS2DW id (expected 0x%02X)\r\n", LIS2DW_DEV_ID);
     #endif
-    has_prev_sample = false;
   #endif
   accel_init();
+  send_sample_rate();
 }
 
 void loop() {
@@ -353,6 +356,13 @@ void loop() {
     }
   #endif
   drain_fifo();
+
+  static uint32_t last_rate_ms = 0;
+  if (millis() - last_rate_ms >= 1000) {
+    last_rate_ms = millis();
+    send_sample_rate();
+  }
+
   #ifdef LED
     // Light the onboard LED when USB serial is connected
     digitalWrite(LED, IS_CONNECTED ? HIGH : LOW);

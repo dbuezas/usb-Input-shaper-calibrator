@@ -1,9 +1,8 @@
 import {
   ACTUAL_RESOLUTION,
   DEFAULT_FTM_FS_HZ,
-  FIXED_SAMPLE_RATE,
   SHAPER_2HEI_MIN_VTOL,
-  WINDOW_SIZE,
+  MAX_SPECTRUM_BINS,
 } from '@/constants';
 
 export const ALL_SHAPER_TYPES = [
@@ -163,7 +162,7 @@ export const computeMarlinShaperTaps = (
   return { a, t, fEffHz };
 };
 
-export const binToHz = (bin: number, bins: number) => bin * (FIXED_SAMPLE_RATE / (2 * (bins - 1)));
+export const binToHz = (bin: number) => bin * ACTUAL_RESOLUTION;
 
 export const applyShaperToMagnitudeSpectrumFromTaps = (
   taps: ShaperTaps,
@@ -172,11 +171,11 @@ export const applyShaperToMagnitudeSpectrumFromTaps = (
 ) => {
   let startBin = 0;
   let endBin = magnitudes.length;
-  const freqStepHz = FIXED_SAMPLE_RATE / WINDOW_SIZE;
+  const freqStepHz = ACTUAL_RESOLUTION;
 
   if (freqRangeHz) {
     startBin = Math.floor(freqRangeHz[0] / freqStepHz);
-    endBin = Math.floor(freqRangeHz[1] / freqStepHz);
+    endBin = Math.min(magnitudes.length, Math.floor(freqRangeHz[1] / freqStepHz));
   }
   const { a, t } = taps;
   const out = new Float32Array(endBin - startBin);
@@ -191,12 +190,12 @@ export const applyShaperToMagnitudeSpectrumFromTaps = (
 export const computeShaperResponse = (
   params: ShaperParams,
   freqRangeHz: [number, number],
-  ftmFs = DEFAULT_FTM_FS_HZ
+  ftmFs = DEFAULT_FTM_FS_HZ,
+  // Same bin count as the spectrum it is plotted/combined with (it depends on the sample rate).
+  bins = MAX_SPECTRUM_BINS
 ) => {
-  // Match the FFT binning used by the DSP pipeline (see `WINDOW_SIZE` in `src/constants.ts`).
-  // For an N-point real FFT, the magnitude spectrum has N/2+1 bins from 0..Nyquist.
-  const bins = WINDOW_SIZE / 2 + 1;
-  const freqStepHz = FIXED_SAMPLE_RATE / WINDOW_SIZE;
+  // Match the FFT binning used by the DSP pipeline (see `ACTUAL_RESOLUTION` in `src/constants.ts`).
+  const freqStepHz = ACTUAL_RESOLUTION;
 
   const start = Math.max(0, Math.floor(freqRangeHz[0] / freqStepHz));
   const end = Math.min(bins, Math.ceil(freqRangeHz[1] / freqStepHz));

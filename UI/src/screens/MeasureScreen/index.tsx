@@ -14,12 +14,19 @@ import {
   historicPeakFrequencyAtom,
   peakAtom,
   peakFrequencyAtom,
+  sampleRateAtom,
   spectrogramMaxHoldAtom,
 } from './atoms';
 import { Slider } from '@/components/ui/slider';
-import { FIXED_SAMPLE_RATE } from '@/constants';
+import { DEFAULT_SAMPLE_RATE } from '@/constants';
 
 const DEFAULT_SIMULATION_SWEEP_S = 20;
+
+// Sensors the simulator can pretend to be (sample rate it reports, like the firmware does).
+const SIMULATED_SENSORS = [
+  { name: 'ADXL345', sampleRate: DEFAULT_SAMPLE_RATE },
+  { name: 'LIS2DW12', sampleRate: 1600 },
+];
 
 const adxlDataAtom = atom<Int16Array<ArrayBufferLike>>();
 const frequencyAtom = atom(0);
@@ -46,6 +53,7 @@ export default function MeasureScreen() {
   const [connectedKind, setConnectedKind] = useState<'usb' | 'simulation' | null>(null);
   const setAdxlData = useSetAtom(adxlDataAtom);
   const setFrequency = useSetAtom(frequencyAtom);
+  const [sampleRate, setSampleRate] = useAtom(sampleRateAtom);
   const clearMaxHold = useSetAtom(spectrogramMaxHoldAtom);
   const clearPeak = useSetAtom(peakAtom);
   const clearHistoricPeak = useSetAtom(historicPeakAtom);
@@ -54,6 +62,7 @@ export default function MeasureScreen() {
   const [dataSource, setDataSource] = useState<DataSource | undefined>(undefined);
   const [simulationSweepSeconds, setSimulationSweepSeconds] = useState(DEFAULT_SIMULATION_SWEEP_S);
   const [simulationPort, setSimulationPort] = useState<SimulationPort | null>(null);
+  const [simulationSampleRate, setSimulationSampleRate] = useState(DEFAULT_SAMPLE_RATE);
 
   useEffect(() => {
     return () => void dataSource?.stop();
@@ -70,14 +79,20 @@ export default function MeasureScreen() {
 
     const port =
       kind === 'simulation'
-        ? new SimulationPort({ sweepSeconds: simulationSweepSeconds })
+        ? new SimulationPort({
+            sweepSeconds: simulationSweepSeconds,
+            sampleRate: simulationSampleRate,
+          })
         : await navigator.serial.requestPort();
     setSimulationPort(kind === 'simulation' ? (port as SimulationPort) : null);
     setConnectedKind(kind);
     const newDataSource = new SerialDataSource(
       port,
       (data) => setAdxlData(data),
-      (freq) => setFrequency(freq),
+      (freq, rate) => {
+        setFrequency(freq);
+        setSampleRate(rate);
+      },
       (stat) => setStatus(stat)
     );
     newDataSource.setSelectedAxis(selectedAxis);
@@ -162,7 +177,7 @@ export default function MeasureScreen() {
         value: (
           <>
             <div>
-              <span>
+              <span data-testid="historic-peak">
                 <AtomValue atom={historicPeakFrequencyAtom} />
               </span>{' '}
               Hz
@@ -194,9 +209,12 @@ export default function MeasureScreen() {
         },
         value: (
           <>
-            <AtomValue atom={formattedFrequencyAtom} /> Hz
+            <span data-testid="measured-sample-rate">
+              <AtomValue atom={formattedFrequencyAtom} />
+            </span>{' '}
+            Hz
             <div className="text-muted-foreground mt-1 text-xs">
-              expected: <span>{FIXED_SAMPLE_RATE}</span> Hz
+              expected: <span data-testid="expected-sample-rate">{sampleRate}</span> Hz
             </div>
           </>
         ),
@@ -377,6 +395,26 @@ export default function MeasureScreen() {
                 }}
                 className="w-full"
               />
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <span className="text-muted-foreground text-sm">Simulated sensor:</span>
+              {SIMULATED_SENSORS.map((sensor) => (
+                <Button
+                  key={sensor.name}
+                  type="button"
+                  size="sm"
+                  variant={simulationSampleRate === sensor.sampleRate ? 'secondary' : 'ghost'}
+                  aria-pressed={simulationSampleRate === sensor.sampleRate}
+                  onClick={() => {
+                    setSimulationSampleRate(sensor.sampleRate);
+                    simulationPort?.setSampleRate(sensor.sampleRate);
+                    clearMaxHold(new Float32Array());
+                    clearHistoricPeak(undefined);
+                  }}
+                >
+                  {sensor.name} ({sensor.sampleRate} Hz)
+                </Button>
+              ))}
             </div>
           </div>
         )}

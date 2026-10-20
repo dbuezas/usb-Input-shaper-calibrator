@@ -39,7 +39,7 @@ export const klipperScoreFromMagnitudeSpectrumFromTaps = (
   const freqsHz: number[] = [];
   const psd: number[] = [];
   for (let i = 0; i < magnitudes.length; i++) {
-    const f = binToHz(i, magnitudes.length);
+    const f = binToHz(i);
     if (f < fMin) continue;
     if (f > fMax) break;
     freqsHz.push(f);
