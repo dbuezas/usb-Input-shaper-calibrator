@@ -10,7 +10,9 @@
 #define BOARD_BTT_LIS2DW 2
 #define BOARD_FYSETC_PIS 3
 
-#define BOARD BOARD_FLY_ADXL345
+#ifndef BOARD  // can also be set with a build flag, e.g. -DBOARD=BOARD_BTT_LIS2DW
+  #define BOARD BOARD_FLY_ADXL345
+#endif
 
 // ----------------
 // Serial debugging
