@@ -40,11 +40,15 @@ test('each board downloads its own firmware file', async ({ page }) => {
   }
 });
 
-test('DIY boards show their wiring', async ({ page }) => {
+test('DIY boards show their wiring with pin locations', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByText('GPIO12')).toHaveCount(0);
+  const wiring = page.getByTestId('wiring');
+  await expect(wiring).toHaveCount(0);
+
   await pickBoard(page, 'Raspberry Pi Pico + ADXL345');
-  await expect(page.getByText('GPIO12')).toBeVisible();
+  await expect(wiring.getByRole('row', { name: 'SDO (MISO) GP12 pin 16' })).toBeVisible();
+  await expect(wiring.getByRole('row', { name: 'VCC 3V3(OUT) pin 36' })).toBeVisible();
+
   await pickBoard(page, 'STM32F103 Bluepill + ADXL345');
-  await expect(page.getByText('PA6')).toBeVisible();
+  await expect(wiring.getByRole('row', { name: 'SDO (MISO) PA6 label "A6"' })).toBeVisible();
 });

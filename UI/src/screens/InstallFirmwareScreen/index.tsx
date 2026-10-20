@@ -106,18 +106,28 @@ export default function InstallFirmwareScreen() {
           </div>
           {board.wiring && (
             <div>
-              <div className="font-semibold">Wiring ({board.chip} on SPI)</div>
-              <table className="mt-1 font-mono text-xs">
-                <tbody>
-                  {board.wiring.map(({ signal, pin }) => (
-                    <tr key={signal}>
-                      <td className="pr-4">{signal}</td>
-                      <td>{pin}</td>
+              <div className="font-semibold">Wiring</div>
+              <table className="mt-1 text-xs" data-testid="wiring">
+                <thead className="text-muted-foreground text-left">
+                  <tr>
+                    <th className="pr-6 font-normal">{board.chip} pin</th>
+                    <th className="pr-6 font-normal">Board pin</th>
+                    <th className="font-normal">Where</th>
+                  </tr>
+                </thead>
+                <tbody className="font-mono">
+                  {board.wiring.map(({ sensorPin, boardPin, location }) => (
+                    <tr key={sensorPin}>
+                      <td className="pr-6">{sensorPin}</td>
+                      <td className="pr-6">{boardPin}</td>
+                      <td>{location}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              <div className="text-muted-foreground mt-1 text-xs">Also connect 3.3V and GND.</div>
+              {board.wiringHint && (
+                <div className="text-muted-foreground mt-1 text-xs">{board.wiringHint}</div>
+              )}
             </div>
           )}
           {board.notes && <div className="text-muted-foreground">{board.notes}</div>}

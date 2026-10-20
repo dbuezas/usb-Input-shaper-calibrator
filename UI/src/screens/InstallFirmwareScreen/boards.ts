@@ -6,6 +6,9 @@ import rpiPicoAdxl345Url from '@/assets/firmware/rpi-pico-adxl345.uf2?url';
 import bluepillUrl from '@/assets/firmware/bluepill.bin?url';
 import bluepillBoot8kUrl from '@/assets/firmware/bluepill-boot8k.bin?url';
 
+/** One wire: the pin label on the ADXL345 breakout (e.g. GY-291) -> the board pin, and where that pin is. */
+export type WiringRow = { sensorPin: string; boardPin: string; location: string };
+
 export type Board = {
   id: string;
   name: string;
@@ -20,22 +23,30 @@ export type Board = {
   firmwareUrl: string;
   fileName: string;
   /** Sensor wiring, for boards you build yourself. */
-  wiring?: { signal: string; pin: string }[];
+  wiring?: WiringRow[];
+  /** How to find the locations in `wiring` on the board. */
+  wiringHint?: string;
   notes?: string;
 };
 
-const ADXL345_ON_RP2040_SPI1 = [
-  { signal: 'CS', pin: 'GPIO9' },
-  { signal: 'SCK', pin: 'GPIO10' },
-  { signal: 'MOSI (SDA)', pin: 'GPIO11' },
-  { signal: 'MISO (SDO)', pin: 'GPIO12' },
+// Raspberry Pi Pico: physical pin numbers count from pin 1 (top left, next to the USB port).
+const ADXL345_ON_PICO: WiringRow[] = [
+  { sensorPin: 'VCC', boardPin: '3V3(OUT)', location: 'pin 36' },
+  { sensorPin: 'GND', boardPin: 'GND', location: 'pin 38' },
+  { sensorPin: 'CS', boardPin: 'GP9', location: 'pin 12' },
+  { sensorPin: 'SCL (SCK)', boardPin: 'GP10', location: 'pin 14' },
+  { sensorPin: 'SDA (MOSI)', boardPin: 'GP11', location: 'pin 15' },
+  { sensorPin: 'SDO (MISO)', boardPin: 'GP12', location: 'pin 16' },
 ];
 
-const ADXL345_ON_BLUEPILL_SPI1 = [
-  { signal: 'CS', pin: 'PA4' },
-  { signal: 'SCK', pin: 'PA5' },
-  { signal: 'MISO (SDO)', pin: 'PA6' },
-  { signal: 'MOSI (SDA)', pin: 'PA7' },
+// Bluepill: the location is the label printed next to the pin.
+const ADXL345_ON_BLUEPILL: WiringRow[] = [
+  { sensorPin: 'VCC', boardPin: '3.3V', location: 'label "3.3"' },
+  { sensorPin: 'GND', boardPin: 'GND', location: 'label "G"' },
+  { sensorPin: 'CS', boardPin: 'PA4', location: 'label "A4"' },
+  { sensorPin: 'SCL (SCK)', boardPin: 'PA5', location: 'label "A5"' },
+  { sensorPin: 'SDO (MISO)', boardPin: 'PA6', location: 'label "A6"' },
+  { sensorPin: 'SDA (MOSI)', boardPin: 'PA7', location: 'label "A7"' },
 ];
 
 export const BOARDS: Board[] = [
@@ -74,7 +85,9 @@ export const BOARDS: Board[] = [
     flashing: 'uf2',
     firmwareUrl: rpiPicoAdxl345Url,
     fileName: 'rpi-pico-adxl345.uf2',
-    wiring: ADXL345_ON_RP2040_SPI1,
+    wiring: ADXL345_ON_PICO,
+    wiringHint:
+      'With the USB port at the top: pins 1–20 run down the left side, pins 21–40 run up the right side (pin 40 is top right).',
     notes: 'The onboard LED lights while the app is connected.',
   },
   {
@@ -85,7 +98,8 @@ export const BOARDS: Board[] = [
     flashing: 'stm32',
     firmwareUrl: bluepillUrl,
     fileName: 'bluepill.bin',
-    wiring: ADXL345_ON_BLUEPILL_SPI1,
+    wiring: ADXL345_ON_BLUEPILL,
+    wiringHint: 'The labels are printed on the board next to each pin.',
     notes: 'The onboard LED lights while the app is connected.',
   },
   {
@@ -96,7 +110,8 @@ export const BOARDS: Board[] = [
     flashing: 'stm32-msc-bootloader',
     firmwareUrl: bluepillBoot8kUrl,
     fileName: 'bluepill-boot8k.bin',
-    wiring: ADXL345_ON_BLUEPILL_SPI1,
+    wiring: ADXL345_ON_BLUEPILL,
+    wiringHint: 'The labels are printed on the board next to each pin.',
     notes: 'The firmware starts at 0x08002000, after the 8 KiB bootloader.',
   },
 ];
