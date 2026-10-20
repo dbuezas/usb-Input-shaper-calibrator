@@ -139,12 +139,7 @@ uint8_t spi_rw(uint8_t val) {
 
 void write_reg(uint8_t reg, uint8_t val) {
   digitalWrite(PIN_CS, LOW);
-  #if ACCEL_CHIP == ACCEL_CHIP_LIS2DW12
-    spi_rw((reg << 1) | 0x00);  // WRITE
-  #else
-    spi_rw(reg);
-  #endif
-
+  spi_rw(reg);  // bit7=0: write (same for ADXL345 and LIS2DW)
   spi_rw(val);
   digitalWrite(PIN_CS, HIGH);
 }
@@ -184,7 +179,7 @@ void drain_fifo() {
   #if ACCEL_CHIP == ACCEL_CHIP_ADXL345
     uint8_t fifo_level = read_reg(REG_FIFO_STATUS) & 0b00111111;
   #elif ACCEL_CHIP == ACCEL_CHIP_LIS2DW12
-    // FIFO_SAMPLES reports number of unread samples (0..31)
+    // FIFO_SAMPLES reports number of unread samples (0..32)
     uint8_t fifo_level = read_reg(REG_FIFO_STATUS) & 0b00111111; // 0x3F
 
   #endif
@@ -209,10 +204,11 @@ void drain_fifo() {
     int16_t z16 = (buf[5] << 8) | buf[4];
 
     #if ACCEL_CHIP == ACCEL_CHIP_LIS2DW12
-      // LIS2DW outputs 14-bit left-justified data in 16-bit words.
-      x16 >>= 2;
-      y16 >>= 2;
-      z16 >>= 2;
+      // LIS2DW outputs 14-bit left-justified data in 16-bit words (1.952 mg/LSB at ±16g).
+      // Shift by 3 to get 13 bits at 3.9 mg/LSB, the same scale as the ADXL345.
+      x16 >>= 3;
+      y16 >>= 3;
+      z16 >>= 3;
     #endif
 
     // convert to 13-bit signed
