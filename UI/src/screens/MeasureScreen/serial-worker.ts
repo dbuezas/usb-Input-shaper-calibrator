@@ -9,10 +9,17 @@ import {
   REPORT_HZ_EVERY_MS,
   AXIS_REPORT_RATE_HZ,
   BUFFER_SIZE,
-  FIXED_SAMPLE_RATE,
-  WINDOW_SIZE,
-  HOP_SIZE,
+  DEFAULT_SAMPLE_RATE,
+  hopSizeForRate,
+  windowSizeForRate,
 } from '@/constants';
+import {
+  decodeSample,
+  decodeSampleRate,
+  PACKET_SIZE,
+  SAMPLE_MARKER,
+  SAMPLE_RATE_MARKER,
+} from './serial-protocol';
 
 import { FFTR } from 'kissfft-js';
 
@@ -42,6 +49,8 @@ function windowSum(w: Float32Array): number {
 }
 
 class SpectralProcessor {
+  windowSize: number;
+  hopSize: number;
   buffer: Int16Array;
   bufferIndex: number;
   windows: Float32Array;
@@ -50,14 +59,16 @@ class SpectralProcessor {
   timeDomain: Float32Array;
   magnitudes: Float32Array;
 
-  constructor() {
-    this.buffer = new Int16Array(WINDOW_SIZE);
+  constructor(sampleRate: number) {
+    this.windowSize = windowSizeForRate(sampleRate);
+    this.hopSize = hopSizeForRate(sampleRate);
+    this.buffer = new Int16Array(this.windowSize);
     this.bufferIndex = 0;
-    this.windows = hannWindow(WINDOW_SIZE);
+    this.windows = hannWindow(this.windowSize);
     this.windowSum = windowSum(this.windows);
-    this.fftr = new FFTR(WINDOW_SIZE);
-    this.timeDomain = new Float32Array(WINDOW_SIZE);
-    const halfBins = WINDOW_SIZE / 2 + 1;
+    this.fftr = new FFTR(this.windowSize);
+    this.timeDomain = new Float32Array(this.windowSize);
+    const halfBins = this.windowSize / 2 + 1;
     this.magnitudes = new Float32Array(halfBins);
   }
 
@@ -65,22 +76,22 @@ class SpectralProcessor {
     // Ensure the write stays in integer space as long as possible.
     // (JS numbers are float64, but bitwise ops keep them as int32.)
     this.buffer[this.bufferIndex] = value | 0;
-    this.bufferIndex = (this.bufferIndex + 1) % WINDOW_SIZE;
+    this.bufferIndex = (this.bufferIndex + 1) % this.windowSize;
 
-    if (this.bufferIndex % HOP_SIZE === 0) {
+    if (this.bufferIndex % this.hopSize === 0) {
       this.computeSpectrogram();
     }
   }
 
   computeSpectrogram(): void {
-    for (let i = 0; i < WINDOW_SIZE; i++) {
-      const idx = (this.bufferIndex + i) % WINDOW_SIZE;
+    for (let i = 0; i < this.windowSize; i++) {
+      const idx = (this.bufferIndex + i) % this.windowSize;
       this.timeDomain[i] = this.buffer[idx] * this.windows[i];
     }
     const frequencyDomain = this.fftr.forward(this.timeDomain);
 
     // Magnitude spectrum (for existing waterfall/scatter)
-    const halfBins = WINDOW_SIZE / 2 + 1;
+    const halfBins = this.windowSize / 2 + 1;
     const scale = 2 / this.windowSum;
 
     // DC bin (no doubling in one-sided spectrum)
@@ -121,6 +132,7 @@ class DataProcessor {
   selectedAxis: 'x' | 'y' | 'z';
   lastSent: number;
   rawFrame: Int16Array;
+  sampleRate: number;
 
   constructor() {
     this.buffer = new CircularBuffer(BUFFER_SIZE);
@@ -128,32 +140,60 @@ class DataProcessor {
     this.intervalStartTime = 0;
     this.frequency = 0;
     this.lastData = { x: 0, y: 0, z: 0 };
-    this.processor = new SpectralProcessor();
+    this.sampleRate = DEFAULT_SAMPLE_RATE;
+    this.processor = new SpectralProcessor(this.sampleRate);
     this.selectedAxis = 'x';
     this.lastSent = 0;
     this.rawFrame = new Int16Array(3);
   }
 
   resetSpectralProcessor(): void {
-    this.processor = new SpectralProcessor();
+    this.processor = new SpectralProcessor(this.sampleRate);
+  }
+
+  setSampleRate(sampleRate: number): void {
+    if (sampleRate === this.sampleRate) return;
+    this.sampleRate = sampleRate;
+    this.resetSpectralProcessor();
+    // Restart the measured-rate interval, so it does not mix samples of both rates.
+    this.intervalStartTime = 0;
   }
 
   processRawData(rawData: Uint8Array): void {
     this.buffer.append(rawData);
 
-    // Process buffer, scanning for ALIGN packets and data chunks
-    while (this.buffer.available >= 6) {
+    // Process buffer, scanning for packet markers (see `serial-protocol.ts`)
+    while (this.buffer.available >= PACKET_SIZE) {
       const bmarker = this.buffer.getByte(0);
-      if (bmarker != 255) {
+      if (bmarker === SAMPLE_RATE_MARKER) {
+        const sampleRate = decodeSampleRate(
+          this.buffer.getByte(1),
+          this.buffer.getByte(2),
+          this.buffer.getByte(3),
+          this.buffer.getByte(4),
+          this.buffer.getByte(5)
+        );
+        if (sampleRate === undefined) {
+          this.buffer.consume(1);
+          continue;
+        }
+        this.buffer.consume(PACKET_SIZE);
+        this.setSampleRate(sampleRate);
+        continue;
+      }
+      if (bmarker !== SAMPLE_MARKER) {
         this.buffer.consume(1);
         continue;
       }
-      const b0 = this.buffer.getByte(1);
-      const b1 = this.buffer.getByte(2);
-      const b2 = this.buffer.getByte(3);
-      const b3 = this.buffer.getByte(4);
-      const b4 = this.buffer.getByte(5);
-      this.buffer.consume(6);
+      decodeSample(
+        this.buffer.getByte(1),
+        this.buffer.getByte(2),
+        this.buffer.getByte(3),
+        this.buffer.getByte(4),
+        this.buffer.getByte(5),
+        this.rawFrame
+      );
+      this.buffer.consume(PACKET_SIZE);
 
       const now = performance.now();
 
@@ -163,26 +203,10 @@ class DataProcessor {
         this.sampleCount = 0;
       }
 
-      // Decode 3x signed 13-bit values from 5 data bytes (little-endian bit packing)
-      // without using BigInt (keeps the hot path in 32-bit integer ops).
-      const lo = (b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)) >>> 0;
-      const hi = b4 & 0xff;
+      const x = this.rawFrame[0];
+      const y = this.rawFrame[1];
+      const z = this.rawFrame[2];
 
-      const signExtend13 = (v: number): number => (v << 19) >> 19;
-      const get13 = (startBit: number): number => {
-        let v = lo >>> startBit;
-        // If the 13-bit field straddles the 32-bit boundary, pull in the remaining bits from hi.
-        if (startBit + 13 > 32) v |= hi << (32 - startBit);
-        return signExtend13(v & 0x1fff);
-      };
-
-      const x = get13(0);
-      const y = get13(13);
-      const z = get13(26);
-
-      // sign extend
-
-      // Convert to signed 16-bit integers
       this.sampleCount++;
       const dt = now - this.intervalStartTime;
       // Check if interval has elapsed
@@ -199,14 +223,12 @@ class DataProcessor {
       const sample = this.selectedAxis === 'x' ? x : this.selectedAxis === 'y' ? y : z;
       this.processor?.addSample(sample);
 
-      if (++this.lastSent > FIXED_SAMPLE_RATE / AXIS_REPORT_RATE_HZ) {
+      if (++this.lastSent > this.sampleRate / AXIS_REPORT_RATE_HZ) {
         this.lastSent = 0;
-        this.rawFrame[0] = x;
-        this.rawFrame[1] = y;
-        this.rawFrame[2] = z;
         serialChannel.postMessage({
           data: this.rawFrame,
           frequency: this.frequency,
+          sampleRate: this.sampleRate,
         } satisfies RawDataMessage);
       }
     }
@@ -218,9 +240,12 @@ class DataProcessor {
     this.intervalStartTime = 0;
     this.lastData = { x: 0, y: 0, z: 0 };
     this.frequency = 0;
+    // A new connection may be a different device: start from the default until it reports its rate.
+    this.setSampleRate(DEFAULT_SAMPLE_RATE);
     serialChannel.postMessage({
       data: new Int16Array([0, 0, 0]),
       frequency: 0,
+      sampleRate: this.sampleRate,
     } satisfies RawDataMessage);
   }
 }

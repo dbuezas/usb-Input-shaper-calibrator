@@ -1,5 +1,7 @@
 export interface RawDataMessage {
   frequency: number;
+  /** Sample rate reported by the firmware (or the default). */
+  sampleRate: number;
   data: Int16Array;
 }
 

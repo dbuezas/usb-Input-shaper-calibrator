@@ -6,7 +6,7 @@ import { scaleLinear } from 'd3-scale';
 import { DEFAULT_AXIS_PADDING, getInnerSize, useD3Axes } from './axis';
 import { AxisLabels } from './AxisLabels';
 import { Tooltip } from './tooltip';
-import { MAX_FREQ, MIN_FREQ } from '@/constants';
+import { ACTUAL_RESOLUTION } from '@/constants';
 import { useRafThrottledHover } from './plot-hover';
 
 export type SpectrumPlotMode = 'points' | 'line';
@@ -56,11 +56,9 @@ const SpectrumPlot_render = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const iMin = Math.max(0, Math.round((data.length / (MAX_FREQ - MIN_FREQ)) * freqRange[0]));
-    const iMax = Math.min(
-      data.length - 1,
-      Math.round((data.length / (MAX_FREQ - MIN_FREQ)) * freqRange[1])
-    );
+    // Bin width is the same at every sample rate; only the number of bins differs.
+    const iMin = Math.max(0, Math.round(freqRange[0] / ACTUAL_RESOLUTION));
+    const iMax = Math.min(data.length - 1, Math.round(freqRange[1] / ACTUAL_RESOLUTION));
     if (iMax <= iMin) return;
 
     let minLeft = Number.POSITIVE_INFINITY;

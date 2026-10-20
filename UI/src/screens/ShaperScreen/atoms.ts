@@ -48,7 +48,12 @@ export const shapedSpectrumAtom = atom((get) =>
 );
 
 export const shaperResponseAtom = atom((get) =>
-  computeShaperResponse(get(shaperParamsAtom), FREQUENCY_SLIDER_RANGE_HZ, get(ftmFsAtom))
+  computeShaperResponse(
+    get(shaperParamsAtom),
+    FREQUENCY_SLIDER_RANGE_HZ,
+    get(ftmFsAtom),
+    get(spectrogramMaxHoldAtom).length || undefined
+  )
 );
 
 const getShaperStats = (get: Getter, taps: ShaperTaps) => {

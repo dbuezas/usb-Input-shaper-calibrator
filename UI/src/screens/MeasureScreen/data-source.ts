@@ -19,13 +19,13 @@ export class SerialDataSource implements DataSource {
   private port: SerialPort | SerialLikePort;
   private reader: ReadableStreamDefaultReader<Uint8Array<ArrayBufferLike>> | undefined;
   private onData: (data: Int16Array) => void;
-  private onFrequency: (freq: number) => void;
+  private onFrequency: (freq: number, sampleRate: number) => void;
   private onStatus: (status: string) => void;
 
   constructor(
     port: SerialPort | SerialLikePort,
     onData: (data: Int16Array) => void,
-    onFrequency: (freq: number) => void,
+    onFrequency: (freq: number, sampleRate: number) => void,
     onStatus: (status: string) => void
   ) {
     this.port = port;
@@ -35,15 +35,17 @@ export class SerialDataSource implements DataSource {
 
     // Set up worker message listener
     serialChannel.addEventListener('message', (e: MessageEvent<RawDataMessage>) => {
-      const { data, frequency: workerFrequency } = e.data;
+      const { data, frequency: workerFrequency, sampleRate } = e.data;
       this.onData(data);
-      this.onFrequency(workerFrequency);
+      this.onFrequency(workerFrequency, sampleRate);
     });
   }
 
   async start(): Promise<boolean> {
     try {
       await this.port.open({ baudRate: SERIAL_BAUD_RATE });
+      // Drop bytes and the sample rate of a previous connection.
+      serialWorker.postMessage({ type: 'reset' });
 
       this.onStatus('Connected');
 

@@ -16,9 +16,13 @@ export const BATCH_SIZE = 1000;
 
 // === Streaming / reporting ===
 
-// Fixed sample rate assumed by the DSP pipeline.
-// Used in `src/serial-worker.ts` (FFT/PSD scaling) and `src/simulation-port.ts` timing.
-export const FIXED_SAMPLE_RATE = 3200;
+// Sample rate assumed until the firmware reports its own (older firmware never does).
+// See `src/screens/MeasureScreen/serial-protocol.ts`.
+export const DEFAULT_SAMPLE_RATE = 3200;
+
+// Sample rates the firmware may report (ADXL345: 3200 Hz, LIS2DW12: 1600 Hz).
+// Each is DEFAULT_SAMPLE_RATE / 2^n, so every rate gets the same FFT bin width and slice duration (see below).
+export const SUPPORTED_SAMPLE_RATES = [3200, 1600, 800, 400];
 
 // How often `src/serial-worker.ts` recomputes the input frequency estimate.
 export const REPORT_HZ_EVERY_MS = 500;
@@ -32,28 +36,25 @@ export const BUFFER_SIZE = 1024 * 10;
 // === Spectrogram / FFT sizing ===
 
 // Desired (target) bin resolution used to choose a power-of-two FFT window.
-// `WINDOW_SIZE` is derived from this and `FIXED_SAMPLE_RATE`.
 const RESOLUTION_HZ = 1;
 
-// Target window length in samples for the desired resolution.
-const TARGET_WINDOW_SIZE = FIXED_SAMPLE_RATE / RESOLUTION_HZ;
+// FFT size at `DEFAULT_SAMPLE_RATE`, rounded up to a power of two for efficient FFT.
+const DEFAULT_WINDOW_SIZE = 2 ** Math.ceil(Math.log2(DEFAULT_SAMPLE_RATE / RESOLUTION_HZ));
 
-// FFT size used by `src/serial-worker.ts`.
-// Rounded up to a power of two for efficient FFT.
-export const WINDOW_SIZE = 2 ** Math.ceil(Math.log2(TARGET_WINDOW_SIZE));
+// Bin width in Hz (bin index -> Hz). The FFT window always covers the same time span,
+// so this is the same at every supported sample rate; only the number of bins changes.
+export const ACTUAL_RESOLUTION = DEFAULT_SAMPLE_RATE / DEFAULT_WINDOW_SIZE;
 
-// Actual bin resolution that results from the chosen `WINDOW_SIZE`.
-// Used by `src/Spectrogram.tsx` to convert bin index -> Hz (peak readout).
-export const ACTUAL_RESOLUTION = FIXED_SAMPLE_RATE / WINDOW_SIZE;
+// FFT size used by `src/serial-worker.ts` for a sample rate.
+export const windowSizeForRate = (sampleRate: number) => sampleRate / ACTUAL_RESOLUTION;
 
-// Step between successive FFT frames.
+// Step between successive FFT frames (samples).
 // Used by `src/serial-worker.ts` to decide when to compute a new spectrogram slice.
-export const HOP_SIZE = Math.floor(WINDOW_SIZE / 256);
-export const SECONDS_PER_SLICE = HOP_SIZE / FIXED_SAMPLE_RATE;
+export const hopSizeForRate = (sampleRate: number) => windowSizeForRate(sampleRate) / 256;
+export const SECONDS_PER_SLICE = hopSizeForRate(DEFAULT_SAMPLE_RATE) / DEFAULT_SAMPLE_RATE;
 
-// FFT bin -> frequency mapping helpers used in `src/Spectrogram.tsx`.
-export const MIN_FREQ = FIXED_SAMPLE_RATE / WINDOW_SIZE;
-export const MAX_FREQ = FIXED_SAMPLE_RATE / 2;
+// Number of spectrum bins at the highest supported rate (the shaper response is computed for all of them).
+export const MAX_SPECTRUM_BINS = DEFAULT_WINDOW_SIZE / 2 + 1;
 
 // === UI ranges ===
 

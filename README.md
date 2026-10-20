@@ -36,6 +36,8 @@ Source repository: https://github.com/dbuezas/usb-Input-shaper-calibrator
 
 This is only needed if you want to build your own UF2 instead of using the one bundled in the UI.
 
+For RP2040 boards, pick your board in `src/configuration.h` (`BOARD`) first.
+
 ```sh
 pio run                          # generic RP2040 boards (env `pico`)
 pio run -e pico_rp2040           # Raspberry Pi Pico: status LED + SMPS PWM mode (less noise)
@@ -46,8 +48,19 @@ pio run -e bluepill_f103c8_boot8k  # Bluepill with an 8 KiB bootloader, upload v
 The firmware:
 
 - Targets RP2040 (`board = pico`) and STM32F103 Bluepill
-- Reads the ADXL345 via bit-banged SPI on RP2040 and hardware SPI on the Bluepill (`SPI_BITBANG` in `src/main.cpp`)
+- Reads the ADXL345 or LIS2DW12 via bit-banged SPI on RP2040 and hardware SPI on the Bluepill (`SPI_BITBANG` in `src/main.cpp`)
 - Streams samples over USB serial at `230400` baud (UI expects the same)
+- Sends samples at the sensor's own rate (ADXL345: 3200 Hz, LIS2DW12: 1600 Hz) and reports that rate to the UI every second
+
+### Tests
+
+The firmware runs on the host against a simulated ADXL345 / LIS2DW12 (SPI at the pin level), so no hardware is needed:
+
+```sh
+pio test -e native_fly -e native_btt -e native_fysetc -e native_bluepill
+```
+
+GitHub Actions runs these tests and builds every firmware env on each push and pull request.
 
 ## Running the UI locally
 
@@ -58,6 +71,16 @@ pnpm dev
 ```
 
 Then open the printed local URL.
+
+### Tests
+
+```sh
+pnpm lint
+pnpm test       # unit tests (serial protocol)
+pnpm test:e2e   # browser tests with the simulator (3200 Hz and 1600 Hz sensors)
+```
+
+The browser tests use Playwright. On macOS 13 they use the installed Google Chrome; elsewhere run `pnpm exec playwright install chromium` first.
 
 ## Notes / troubleshooting
 

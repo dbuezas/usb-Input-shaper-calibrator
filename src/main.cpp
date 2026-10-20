@@ -1,216 +1,370 @@
 #include <Arduino.h>
 #include <SPI.h>
 
+#include "configuration.h"
+
 #ifdef RT_BLUEPILL
-    #include "usbd_cdc_if.h"
-#endif //RT_BLUEPILL
+  #include "usbd_cdc_if.h"
+#endif
 
-//#define SPI_BITBANG
+#define ACCEL_CHIP_ADXL345 1
+#define ACCEL_CHIP_LIS2DW12 2
 
-#ifdef RT_RP2040
-    // Hardware SPI is not tested on RP2040 boards yet; remove this line to try it
-    #define SPI_BITBANG
+// Define to use bit-banged SPI instead of hardware SPI
+// #define SPI_BITBANG
 
-    // Pins SPI1
-    #define PIN_MISO        12
-    #define PIN_MOSI        11
-    #define PIN_SCK         10
-    #define PIN_CS          9
-#ifdef RT_PICO
-    #define SMPS_PWM        23
+#if defined(RT_BLUEPILL)
+  // STM32F103 Bluepill with an ADXL345 on SPI1 (BOARD in configuration.h is ignored)
+  #define PIN_MOSI PA7
+  #define PIN_MISO PA6
+  #define PIN_SCK PA5
+  #define PIN_CS PA4
+  #define ACCEL_CHIP ACCEL_CHIP_ADXL345
+
+  #define LED LED_BUILTIN
+  #define ACCEL_SPI SPI
+  #define IS_CONNECTED !CDC_connected()  // inverted: the Bluepill LED (PC13) is active low
+
+#elif defined(RT_RP2040)
+  // Hardware SPI is not tested on RP2040 boards yet; remove this line to try it
+  #define SPI_BITBANG
+
+  // All boards below use SPI1-capable pins
+  #define ACCEL_SPI SPI1
+  #define IS_CONNECTED Serial.dtr()
+
+  #ifdef RT_PICO
+    #define SMPS_PWM 23
     // Only the Raspberry Pi Pico is known to have an LED here; other RP2040 boards may use GPIO25 for something else
-    #define LED             LED_BUILTIN
-#endif //RT_PICO
+    #define LED LED_BUILTIN
+  #endif
 
-    #define ADXL_SPI        SPI1
-    #define IS_CONNECTED    Serial.dtr()
-#endif //RT_RP2040
+  #if BOARD == BOARD_FLY_ADXL345
+    #define PIN_MISO 12
+    #define PIN_CS 9
+    #define PIN_SCK 10
+    #define PIN_MOSI 11
+    #define ACCEL_CHIP ACCEL_CHIP_ADXL345
+  #elif BOARD == BOARD_BTT_LIS2DW
+    #define PIN_MISO 8
+    #define PIN_CS 9
+    #define PIN_SCK 10
+    #define PIN_MOSI 11
+    #define ACCEL_CHIP ACCEL_CHIP_LIS2DW12
+  #elif BOARD == BOARD_FYSETC_PIS
+    #define PIN_MISO 12
+    #define PIN_CS 13
+    #define PIN_SCK 10
+    #define PIN_MOSI 11
+    #define ACCEL_CHIP ACCEL_CHIP_ADXL345
+  #else
+    #error "Unsupported BOARD selection"
+  #endif
 
-#ifdef RT_BLUEPILL
-    // Pins SPI1
-    #define PIN_MOSI        PA7
-    #define PIN_MISO        PA6
-    #define PIN_SCK         PA5
-    #define PIN_CS          PA4
+#else
+  #error "Build with a PlatformIO env from platformio.ini (RT_RP2040 or RT_BLUEPILL)"
+#endif
 
-    #define LED             LED_BUILTIN
-    #define ADXL_SPI        SPI
-    #define IS_CONNECTED    !CDC_connected() // inverted: the Bluepill LED (PC13) is active low
-#endif //RT_BLUEPILL
+// Low-level SPI register helpers (defined later)
+void write_reg(uint8_t reg, uint8_t val);
+uint8_t read_reg(uint8_t reg);
+void read_multi(uint8_t reg, uint8_t* buf, uint8_t len);
 
+// ---------------------
+// Chip-specific settings
+// ---------------------
+#if ACCEL_CHIP == ACCEL_CHIP_ADXL345
 
-// FIFO registers
-#define REG_DEVID       0x00
-#define REG_DATAX0      0x32 //DATAX0-Z1 0x32...0x37
-#define REG_FIFO_STATUS 0x39
-#define REG_DATA_FORMAT 0x31
-#define REG_BW_RATE     0x2C
-#define REG_POWER_CTL   0x2D
-#define REG_FIFO_CTL    0x38
+  // ADXL345 registers
+  #define REG_DATAX0 0b00110010
+  #define REG_FIFO_STATUS 0b00111001
+  #define REG_DATA_FORMAT 0b00110001
+  #define REG_BW_RATE 0b00101100
+  #define REG_POWER_CTL 0b00101101
+  #define REG_FIFO_CTL 0b00111000
 
-// Bandwidth rate register values (BW_RATE)
-#define BW_3200HZ 0b00001111
-#define BW_1600HZ 0b00001110
-#define BW_800HZ  0b00001101
-#define BW_400HZ  0b00001100
-#define BW_200HZ  0b00001011
-#define BW_100HZ  0b00001010
-#define BW_50HZ   0b00001001
-#define BW_25HZ   0b00001000
+  // Bandwidth rate register values (BW_RATE)
+  #define BW_3200HZ 0b00001111
+  #define BW_1600HZ 0b00001110
+  #define BW_800HZ 0b00001101
+  #define BW_400HZ 0b00001100
+  #define BW_200HZ 0b00001011
+  #define BW_100HZ 0b00001010
+  #define BW_50HZ 0b00001001
+  #define BW_25HZ 0b00001000
+
+  #define SAMPLE_RATE_HZ 3200
+
+  static inline void accel_init() {
+    write_reg(REG_DATA_FORMAT, 0b00001011);  // 13 bit, ±16g
+    write_reg(REG_BW_RATE, BW_3200HZ);       // 3200 Hz output rate
+    write_reg(REG_FIFO_CTL, 0b10011111);     // stream mode, 32-sample FIFO
+    write_reg(REG_POWER_CTL, 0b00001000);    // measurement mode
+  }
+
+#elif ACCEL_CHIP == ACCEL_CHIP_LIS2DW12
+
+  // LIS2DW / IIS2DW12 (ST) registers (SPI)
+  // Datasheet uses 8-bit reg addresses.
+  #define REG_WHO_AM_I 0x0F
+  #define LIS2DW_DEV_ID 0x44
+
+  #define REG_STATUS 0x27
+
+  #define REG_OUT_X_L 0x28
+  #define REG_FIFO_CTRL 0x2E
+  #define REG_FIFO_SAMPLES 0x2F
+
+  #define REG_CTRL1 0x20
+  #define REG_CTRL2 0x21
+  #define REG_CTRL6 0x25
+
+  // Note: LIS2DW outputs 14-bit left-justified data in 16-bit samples.
+  static inline void accel_init() {
+    // Mirror Klipper's initialization (spi mode):
+    // - Disable I2C / enable address auto-increment via CTRL2
+    // - ODR/2, +-16g, low-pass filter, low-noise via CTRL6
+    // - FIFO continuous/stream mode via FIFO_CTRL
+    // - High-performance 14-bit, 1600Hz via CTRL1
+    write_reg(REG_CTRL2, 0x06);
+    write_reg(REG_CTRL6, 0x34);
+    write_reg(REG_FIFO_CTRL, 0xC0);
+    write_reg(REG_CTRL1, 0x94);
+  }
+
+  #define SAMPLE_RATE_HZ 1600
+
+  // Map ADXL-style names used in the rest of the code to LIS2DW.
+  #define REG_DATAX0 REG_OUT_X_L
+  #define REG_FIFO_STATUS REG_FIFO_SAMPLES
+
+#endif
 
 #ifdef SPI_BITBANG
 // For ~1 MHz bit-bang on RP2040.
 static inline void spi_delay() {
-    // __asm volatile("nop; nop; nop; nop;");
-    delayMicroseconds(0);
+  // __asm volatile("nop; nop; nop; nop;");
+  delayMicroseconds(0);
 }
 
 uint8_t spi_rw(uint8_t val) {
-    uint8_t rx = 0;
-    for (int8_t i = 7; i >= 0; i--) {
-        // Output MOSI while clock is HIGH
-        digitalWrite(PIN_MOSI, (val >> i) & 1);
-        spi_delay();
+  uint8_t rx = 0;
+  for (int8_t i = 7; i >= 0; i--) {
+    // Output MOSI while clock is HIGH
+    digitalWrite(PIN_MOSI, (val >> i) & 1);
+    spi_delay();
 
-        // FALLING edge (CPHA=1: CHANGE data here, do NOT sample)
-        digitalWrite(PIN_SCK, LOW);
-        spi_delay();
+    // FALLING edge (CPHA=1: CHANGE data here, do NOT sample)
+    digitalWrite(PIN_SCK, LOW);
+    spi_delay();
 
-        // RISING edge (CPHA=1: SAMPLE here)
-        digitalWrite(PIN_SCK, HIGH);
-        spi_delay();
-        rx = (rx << 1) | digitalRead(PIN_MISO);
-    }
-    return rx;
+    // RISING edge (CPHA=1: SAMPLE here)
+    digitalWrite(PIN_SCK, HIGH);
+    spi_delay();
+    rx = (rx << 1) | digitalRead(PIN_MISO);
+  }
+  return rx;
 }
 
-void spi_rw_multi(uint8_t *buf, uint8_t len) {
-    for (uint8_t i = 0; i < len; i++)
-        buf[i] = spi_rw(0b00000000);
+void spi_rw_multi(uint8_t* buf, uint8_t len) {
+  for (uint8_t i = 0; i < len; i++)
+    buf[i] = spi_rw(0b00000000);
 }
 #else
 uint8_t spi_rw(uint8_t val) {
-    return ADXL_SPI.transfer(val);
+  return ACCEL_SPI.transfer(val);
 }
 
-void spi_rw_multi(uint8_t *buf, uint8_t len) {
-    ADXL_SPI.transfer(buf, len);
+void spi_rw_multi(uint8_t* buf, uint8_t len) {
+  ACCEL_SPI.transfer(buf, len);
 }
-#endif //SPI_BITBANG
-
+#endif
 
 void write_reg(uint8_t reg, uint8_t val) {
-    digitalWrite(PIN_CS, LOW);
-    spi_rw(reg);
-    spi_rw(val);
-    digitalWrite(PIN_CS, HIGH);
+  digitalWrite(PIN_CS, LOW);
+  spi_rw(reg);  // bit7=0: write (same for ADXL345 and LIS2DW)
+  spi_rw(val);
+  digitalWrite(PIN_CS, HIGH);
 }
 
 uint8_t read_reg(uint8_t reg) {
-    digitalWrite(PIN_CS, LOW);
+  digitalWrite(PIN_CS, LOW);
+  #if ACCEL_CHIP == ACCEL_CHIP_ADXL345
     spi_rw(reg | 0b10000000);
-    uint8_t val = spi_rw(0b00000000);
-    digitalWrite(PIN_CS, HIGH);
-    return val;
+  #elif ACCEL_CHIP == ACCEL_CHIP_LIS2DW12
+    // ST SPI: bit7=R/W (1=read). Auto-increment is controlled via CTRL2.
+    spi_rw(reg | 0b10000000);
+
+  #endif
+  uint8_t val = spi_rw(0b00000000);
+  digitalWrite(PIN_CS, HIGH);
+  return val;
 }
 
-void read_multi(uint8_t reg, uint8_t *buf, uint8_t len) {
-    digitalWrite(PIN_CS, LOW);
-    spi_rw(reg | 0b11000000);  // READ + MULTI
-    spi_rw_multi(buf, len);
-    digitalWrite(PIN_CS, HIGH);
+void read_multi(uint8_t reg, uint8_t* buf, uint8_t len) {
+  digitalWrite(PIN_CS, LOW);
+  #if ACCEL_CHIP == ACCEL_CHIP_ADXL345
+    spi_rw(reg | 0b11000000);  // READ + MULTI (ADXL345)
+  #elif ACCEL_CHIP == ACCEL_CHIP_LIS2DW12
+    // ST SPI: bit7=R/W (1=read). Do NOT set ADXL's multi-bit (0x40).
+    // Auto-increment is enabled via CTRL2=0x06 (set in accel_init()).
+    spi_rw(reg | 0b10000000);
+  #endif
+  spi_rw_multi(buf, len);
+  digitalWrite(PIN_CS, HIGH);
 }
 
+// Sends one sample (13-bit signed values at 3.9 mg/LSB) as a 6-byte packet.
+void send_sample(int16_t x, int16_t y, int16_t z) {
+  // convert to 13-bit signed
+  uint32_t x13 = x & 0x1FFF;
+  uint32_t y13 = y & 0x1FFF;
+  uint32_t z13 = z & 0x1FFF;
+
+  // pack 3×13 bits
+  uint64_t bits = (uint64_t)x13 | ((uint64_t)y13 << 13) | ((uint64_t)z13 << 26);
+
+  // output 6 bytes (little-endian)
+  uint8_t out[6];
+  out[0] = 255;
+  out[1] = (uint8_t)(bits >> 0);
+  out[2] = (uint8_t)(bits >> 8);
+  out[3] = (uint8_t)(bits >> 16);
+  out[4] = (uint8_t)(bits >> 24);
+  out[5] = (uint8_t)(bits >> 32);
+
+  #if SERIAL_DEBUG_TEXT
+    // Avoid flooding the USB serial link; print at most ~20Hz.
+    static uint32_t last_print_ms = 0;
+    uint32_t now = millis();
+    if (now - last_print_ms >= 50) {
+      last_print_ms = now;
+      Serial.printf("xyz: %d %d %d\r\n", (int)x, (int)y, (int)z);
+    }
+  #else
+    Serial.write(out, 6);
+  #endif
+}
+
+// Tells the UI the sample rate: 0xFE, 'R', rate (uint16 little-endian), then the same 2 bytes inverted as a check.
+// Same 6-byte size as a sample packet. Sent at boot and every second, so a UI that connects later gets it.
+void send_sample_rate() {
+  uint8_t lo = SAMPLE_RATE_HZ & 0xFF;
+  uint8_t hi = SAMPLE_RATE_HZ >> 8;
+  uint8_t out[6] = {0xFE, 'R', lo, hi, (uint8_t)~lo, (uint8_t)~hi};
+  #if SERIAL_DEBUG_TEXT
+    Serial.printf("sample rate: %d Hz\r\n", SAMPLE_RATE_HZ);
+  #else
+    Serial.write(out, 6);
+  #endif
+}
 
 void drain_fifo() {
-    uint8_t fifo_level = read_reg(REG_FIFO_STATUS) & 0b00111111;
-    if (fifo_level == 0)
-    return;
-    
+  // FIFO entries ready to read (ADXL345 FIFO_STATUS / LIS2DW FIFO_SAMPLES, 0..32)
+  uint8_t fifo_level = read_reg(REG_FIFO_STATUS) & 0b00111111;
+
+  #if ACCEL_CHIP == ACCEL_CHIP_ADXL345
+    // Read one byte past DATAZ1: the ADXL345 needs 5 us between the end of a data read and the next FIFO read
     uint8_t buf[7];
-    while (fifo_level--) {
-        read_multi(REG_DATAX0, buf, sizeof(buf));
-        
-        // get real 16-bit signed values
-        int16_t x16 = (buf[1] << 8) | buf[0];
-        int16_t y16 = (buf[3] << 8) | buf[2];
-        int16_t z16 = (buf[5] << 8) | buf[4];
+  #else
+    uint8_t buf[6];
+  #endif
+  while (fifo_level--) {
+    read_multi(REG_DATAX0, buf, sizeof(buf));
 
-        // convert to 13-bit signed
-        uint32_t x13 = x16 & 0x1FFF;
-        uint32_t y13 = y16 & 0x1FFF;
-        uint32_t z13 = z16 & 0x1FFF;
-        
-        // pack 3×13 bits
-        uint64_t bits = (uint64_t)x13
-        | ((uint64_t)y13 << 13)
-        | ((uint64_t)z13 << 26);
-        
-        // output 6 bytes (little-endian)
-        uint8_t out[6];
-        out[0] = 255;
-        out[1] = (uint8_t)(bits >> 0);
-        out[2] = (uint8_t)(bits >> 8);
-        out[3] = (uint8_t)(bits >> 16);
-        out[4] = (uint8_t)(bits >> 24);
-        out[5] = (uint8_t)(bits >> 32);
-        
-        Serial.write(out, 6);
-    }
+    // get real 16-bit signed values
+    int16_t x16 = (buf[1] << 8) | buf[0];
+    int16_t y16 = (buf[3] << 8) | buf[2];
+    int16_t z16 = (buf[5] << 8) | buf[4];
 
+    #if ACCEL_CHIP == ACCEL_CHIP_LIS2DW12
+      // LIS2DW outputs 14-bit left-justified data in 16-bit words (1.952 mg/LSB at ±16g).
+      // Shift by 3 to get 13 bits at 3.9 mg/LSB, the same scale as the ADXL345.
+      x16 >>= 3;
+      y16 >>= 3;
+      z16 >>= 3;
+    #endif
+
+    send_sample(x16, y16, z16);
+  }
 }
 
 void setup() {
-#ifdef LED
+  #ifdef LED
     pinMode(LED, OUTPUT);
-#endif //LED
+  #endif
 
-#ifdef RT_PICO
+  #ifdef RT_PICO
     pinMode(SMPS_PWM, OUTPUT);
-    digitalWrite(SMPS_PWM, HIGH); //enable PWM mode of SMPS regulator to reduce noise
-#endif //RT_PICO
+    digitalWrite(SMPS_PWM, HIGH);  // enable PWM mode of SMPS regulator to reduce noise
+  #endif
 
-    Serial.begin(230400);
+  Serial.begin(230400);
+  #if SERIAL_DEBUG_TEXT
+    // On RP2040 USB-CDC, Serial may not be immediately ready.
+    uint32_t start_ms = millis();
+    while (!Serial && (millis() - start_ms) < 2000) {
+      delay(10);
+    }
+    Serial.printf("boot: board=%d chip=%d\r\n", BOARD, ACCEL_CHIP);
+  #endif
 
-    pinMode(PIN_CS, OUTPUT);
-#ifdef SPI_BITBANG
+  pinMode(PIN_CS, OUTPUT);
+  digitalWrite(PIN_CS, HIGH);
+  #ifdef SPI_BITBANG
     pinMode(PIN_MOSI, OUTPUT);
     pinMode(PIN_MISO, INPUT);
     pinMode(PIN_SCK, OUTPUT);
-
     digitalWrite(PIN_SCK, HIGH);
-#endif //SPI_BITBANG
-    digitalWrite(PIN_CS, HIGH);
-    delay(10);
+  #else
+    ACCEL_SPI.setMOSI(PIN_MOSI);
+    ACCEL_SPI.setMISO(PIN_MISO);
+    #ifdef RT_BLUEPILL
+      ACCEL_SPI.setSCLK(PIN_SCK);
+    #else
+      ACCEL_SPI.setSCK(PIN_SCK);
+    #endif
+    ACCEL_SPI.begin();
+    ACCEL_SPI.beginTransaction(SPISettings(2000000, MSBFIRST, SPI_MODE3));
+  #endif
+  delay(10);
 
-#ifndef SPI_BITBANG
-    ADXL_SPI.setMOSI(PIN_MOSI);
-    ADXL_SPI.setMISO(PIN_MISO);
-#ifdef RT_RP2040
-    ADXL_SPI.setSCK(PIN_SCK);
-#endif //RT_RP2040
-#ifdef RT_BLUEPILL
-    ADXL_SPI.setSCLK(PIN_SCK);
-#endif //RT_BLUEPILL
-    ADXL_SPI.begin();
-    ADXL_SPI.beginTransaction(SPISettings(2000000, MSBFIRST, SPI_MODE3));
-#endif //SPI_BITBANG
+  #if ACCEL_CHIP == ACCEL_CHIP_ADXL345
+    uint8_t id = read_reg(0b00000000);
+    #if SERIAL_DEBUG_TEXT
+      Serial.printf("ADXL345 ID = 0x%02X\r\n", id);
+    #endif
 
-    uint8_t id = read_reg(REG_DEVID);
-    Serial.printf("ID = 0x%02X\r\n", id);
-
-    write_reg(REG_DATA_FORMAT, 0b00001011); // 13 bit, ±16g
-    write_reg(REG_BW_RATE, BW_3200HZ);      // 3200 Hz output rate
-    write_reg(REG_FIFO_CTL, 0b10011111);    // stream mode, 32-sample FIFO
-    write_reg(REG_POWER_CTL, 0b00001000);   // measurement mode
+  #elif ACCEL_CHIP == ACCEL_CHIP_LIS2DW12
+    uint8_t id = read_reg(REG_WHO_AM_I);
+    #if SERIAL_DEBUG_TEXT
+      Serial.printf("LIS2DW WHO_AM_I = 0x%02X\r\n", id);
+      if (id != LIS2DW_DEV_ID)
+        Serial.printf("Unexpected LIS2DW id (expected 0x%02X)\r\n", LIS2DW_DEV_ID);
+    #endif
+  #endif
+  accel_init();
+  send_sample_rate();
 }
 
 void loop() {
-    drain_fifo();
-#ifdef LED
-    if(IS_CONNECTED)    //Light onboard led when USB serial is connected
-        digitalWrite(LED, HIGH);
-    else
-        digitalWrite(LED, LOW);
-#endif //LED
+  #if SERIAL_DEBUG_TEXT
+    static uint32_t last_ms = 0;
+    if (millis() - last_ms > 1000) {
+      last_ms = millis();
+      Serial.printf("hb: fifo=0x%02X\r\n", read_reg(REG_FIFO_STATUS));
+    }
+  #endif
+  drain_fifo();
+
+  static uint32_t last_rate_ms = 0;
+  if (millis() - last_rate_ms >= 1000) {
+    last_rate_ms = millis();
+    send_sample_rate();
+  }
+
+  #ifdef LED
+    // Light the onboard LED when USB serial is connected
+    digitalWrite(LED, IS_CONNECTED ? HIGH : LOW);
+  #endif
 }
