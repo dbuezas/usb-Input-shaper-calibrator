@@ -24,6 +24,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Build firmware (bundled in the UI)
+        uses: ./.github/actions/build-firmware
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:

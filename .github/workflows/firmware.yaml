@@ -3,9 +3,9 @@ name: Firmware
 on:
   push:
     branches: [main]
-    paths: ['src/**', 'test/**', 'platformio.ini', '.github/workflows/firmware.yaml']
+    paths: ['src/**', 'test/**', 'platformio.ini', 'scripts/build-firmware.sh', '.github/actions/build-firmware/**', '.github/workflows/firmware.yaml']
   pull_request:
-    paths: ['src/**', 'test/**', 'platformio.ini', '.github/workflows/firmware.yaml']
+    paths: ['src/**', 'test/**', 'platformio.ini', 'scripts/build-firmware.sh', '.github/actions/build-firmware/**', '.github/workflows/firmware.yaml']
   workflow_dispatch:
 
 jobs:
@@ -21,28 +21,12 @@ jobs:
       - run: pio test -e native_fly -e native_btt -e native_fysetc -e native_bluepill
 
   build:
-    name: Build ${{ matrix.env }} ${{ matrix.board }}
+    name: Build all boards
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { env: pico, board: BOARD_FLY_ADXL345 }
-          - { env: pico, board: BOARD_BTT_LIS2DW }
-          - { env: pico, board: BOARD_FYSETC_PIS }
-          - { env: pico_rp2040, board: BOARD_FLY_ADXL345 }
-          - { env: bluepill_f103c8, board: '' }
-          - { env: bluepill_f103c8_boot8k, board: '' }
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: ./.github/actions/build-firmware
+      - uses: actions/upload-artifact@v4
         with:
-          python-version: '3.12'
-      - uses: actions/cache@v4
-        with:
-          path: ~/.platformio
-          key: pio-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
-      - run: pip install platformio
-      - run: pio run -e ${{ matrix.env }}
-        env:
-          PLATFORMIO_BUILD_FLAGS: ${{ matrix.board && format('-DBOARD={0}', matrix.board) || '' }}
+          name: firmware
+          path: UI/src/assets/firmware/
