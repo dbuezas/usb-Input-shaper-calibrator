@@ -139,7 +139,12 @@ uint8_t spi_rw(uint8_t val) {
 
 void write_reg(uint8_t reg, uint8_t val) {
   digitalWrite(PIN_CS, LOW);
-  spi_rw(reg);
+  #if ACCEL_CHIP == ACCEL_CHIP_LIS2DW12
+    spi_rw((reg << 1) | 0x00);  // WRITE
+  #else
+    spi_rw(reg);
+  #endif
+
   spi_rw(val);
   digitalWrite(PIN_CS, HIGH);
 }
@@ -151,6 +156,7 @@ uint8_t read_reg(uint8_t reg) {
   #elif ACCEL_CHIP == ACCEL_CHIP_LIS2DW12
     // ST SPI: bit7=R/W (1=read). Auto-increment is controlled via CTRL2.
     spi_rw(reg | 0b10000000);
+
   #endif
   uint8_t val = spi_rw(0b00000000);
   digitalWrite(PIN_CS, HIGH);
@@ -179,18 +185,19 @@ void drain_fifo() {
     uint8_t fifo_level = read_reg(REG_FIFO_STATUS) & 0b00111111;
   #elif ACCEL_CHIP == ACCEL_CHIP_LIS2DW12
     // FIFO_SAMPLES reports number of unread samples (0..31)
-    uint8_t fifo_level = read_reg(REG_FIFO_STATUS) & 0b00011111;
+    uint8_t fifo_level = read_reg(REG_FIFO_STATUS) & 0b00111111; // 0x3F
+
   #endif
 
-  #if ACCEL_CHIP == ACCEL_CHIP_LIS2DW12
-    // If FIFO isn't reporting samples, fall back to data-ready polling.
-    if (fifo_level == 0) {
-      uint8_t status = read_reg(REG_STATUS);
-      if ((status & 0x01) == 0)
-        return;
-      fifo_level = 1;
-    }
-  #endif
+  // #if ACCEL_CHIP == ACCEL_CHIP_LIS2DW12
+  //   // If FIFO isn't reporting samples, fall back to data-ready polling.
+  //   if (fifo_level == 0) {
+  //     uint8_t status = read_reg(REG_STATUS);
+  //     if ((status & 0x01) == 0)
+  //       return;
+  //     fifo_level = 1;
+  //   }
+  // #endif
 
   uint8_t buf[6];
   while (fifo_level--) {
@@ -273,7 +280,6 @@ void setup() {
         Serial.printf("Unexpected LIS2DW id (expected 0x%02X)\r\n", LIS2DW_DEV_ID);
     #endif
   #endif
-
   accel_init();
 }
 
