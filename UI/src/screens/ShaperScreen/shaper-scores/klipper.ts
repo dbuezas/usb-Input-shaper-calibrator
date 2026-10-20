@@ -11,9 +11,10 @@ export const klipperScoreFromMagnitudeSpectrum = (
   params: ShaperParams,
   cornering: CorneringSettings,
   freqRangeHz: [number, number],
-  smoothingAccel = 5000
+  smoothingAccel = 5000,
+  ftmFs?: number
 ) => {
-  const taps = computeMarlinShaperTaps(params);
+  const taps = computeMarlinShaperTaps(params, ftmFs);
   return klipperScoreFromMagnitudeSpectrumFromTaps(
     magnitudes,
     taps,

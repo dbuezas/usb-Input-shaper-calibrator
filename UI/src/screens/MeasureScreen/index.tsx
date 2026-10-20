@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { atom, useAtomValue, useSetAtom, type Atom } from 'jotai';
+import { atom, useAtom, useAtomValue, useSetAtom, type Atom } from 'jotai';
 import { atomFamily } from 'jotai-family';
 import Spectrogram, { SpectrogramControls } from './Spectrogram';
 import type { DataSource } from '@/screens/MeasureScreen/data-source';
@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { ExplainTooltip } from '@/components/ExplainTooltip';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
+  measureAxisAtom,
   historicPeakAtom,
   historicPeakFrequencyAtom,
   peakAtom,
@@ -49,7 +50,7 @@ export default function MeasureScreen() {
   const clearPeak = useSetAtom(peakAtom);
   const clearHistoricPeak = useSetAtom(historicPeakAtom);
   const [status, setStatus] = useState('Disconnected');
-  const [selectedAxis, setSelectedAxis] = useState<'x' | 'y' | 'z'>('x');
+  const [selectedAxis, setSelectedAxis] = useAtom(measureAxisAtom);
   const [dataSource, setDataSource] = useState<DataSource | undefined>(undefined);
   const [simulationSweepSeconds, setSimulationSweepSeconds] = useState(DEFAULT_SIMULATION_SWEEP_S);
   const [simulationPort, setSimulationPort] = useState<SimulationPort | null>(null);
@@ -59,6 +60,12 @@ export default function MeasureScreen() {
   }, [dataSource]);
 
   const connect = async (kind: 'usb' | 'simulation') => {
+    if (kind === 'usb' && !('serial' in navigator)) {
+      setStatus(
+        'Web Serial is not available. Use Chrome, Edge or Opera (over HTTPS or localhost).'
+      );
+      return;
+    }
     await dataSource?.stop();
 
     const port =

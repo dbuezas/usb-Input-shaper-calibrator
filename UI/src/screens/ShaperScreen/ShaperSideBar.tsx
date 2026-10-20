@@ -1,10 +1,12 @@
 import { useAtom, useAtomValue } from 'jotai';
-import type { CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import {
   CORNERING_JUNCTION_DEVIATION_RANGE_MM,
   CORNERING_JERK_RANGE_MM_S,
   CORNERING_SPEED_RANGE_MM_S,
-  SHAPER_F0_RANGE_HZ,
+  shaperF0RangeHz,
+  FTM_FS_RANGE_HZ,
+  SHAPER_2HEI_MIN_VTOL,
   SHAPER_VTOL_RANGE,
   SHAPER_ZETA_RANGE,
   FREQUENCY_SLIDER_RANGE_HZ,
@@ -20,10 +22,12 @@ import {
   corneringSettingsAtom,
   analysisRangeAtom,
   historyModeAtom,
+  ftmFsAtom,
 } from './atoms';
+import GcodePanel from './GcodePanel';
 import useOptimisers from './useOptimizers';
 import { SEARCH_TYPES } from './shaper-optimiser.worker';
-import { isEiFamily } from './input-shaper';
+import { computeMarlinShaperTaps, isEiFamily } from './input-shaper';
 import { SHAPER_COLORS } from './shaper-colors';
 
 export default function ShaperSideBar() {
@@ -31,6 +35,11 @@ export default function ShaperSideBar() {
   const [scoreMode, setScoreMode] = useAtom(shaperScoreModeAtom);
   const [corneringSettings, setCorneringSettings] = useAtom(corneringSettingsAtom);
   const [historyMode, setHistoryMode] = useAtom(historyModeAtom);
+  const [ftmFs, setFtmFs] = useAtom(ftmFsAtom);
+  const [ftmFsText, setFtmFsText] = useState(String(ftmFs));
+  const f0Range = shaperF0RangeHz(ftmFs);
+  const { fEffHz } = computeMarlinShaperTaps(shaperParams, ftmFs);
+  const vtolMin = shaperParams.type === '2hei' ? SHAPER_2HEI_MIN_VTOL : SHAPER_VTOL_RANGE[0];
 
   const maxHoldSpectrum = useAtomValue(spectrogramMaxHoldAtom);
   const [analysisRange, setAnalysisRange] = useAtom(analysisRangeAtom);
@@ -475,6 +484,9 @@ export default function ShaperSideBar() {
                     ...old,
                     type: shaper,
                     ...(bestByType[shaper]?.params ?? {}),
+                    ...(shaper === '2hei' && old.vtol < SHAPER_2HEI_MIN_VTOL
+                      ? { vtol: SHAPER_2HEI_MIN_VTOL }
+                      : {}),
                   }));
                 }}
               >
@@ -496,9 +508,13 @@ export default function ShaperSideBar() {
               Resonance f0: {shaperParams.fHz.toFixed(1)} Hz
             </label>
           </ExplainTooltip>
+          <div className="text-muted-foreground text-xs">
+            Marlin rounds the tap spacing to whole 1/FTM_FS samples: effective notch{' '}
+            {fEffHz.toFixed(1)} Hz
+          </div>
           <Slider
-            min={SHAPER_F0_RANGE_HZ[0]}
-            max={SHAPER_F0_RANGE_HZ[1]}
+            min={f0Range[0]}
+            max={f0Range[1]}
             step={0.5}
             value={[shaperParams.fHz]}
             onValueChange={([fHz]) => setShaperParams((old) => ({ ...old, fHz }))}
@@ -539,7 +555,7 @@ export default function ShaperSideBar() {
             </label>
           </ExplainTooltip>
           <Slider
-            min={SHAPER_VTOL_RANGE[0]}
+            min={vtolMin}
             max={SHAPER_VTOL_RANGE[1]}
             step={0.005}
             value={[shaperParams.vtol]}
@@ -548,6 +564,33 @@ export default function ShaperSideBar() {
             disabled={!isEiFamily(shaperParams.type)}
           />
         </div>
+
+        <div className="flex flex-col gap-y-2">
+          <label className="text-muted-foreground text-sm">Marlin FTM_FS (Hz)</label>
+          <input
+            type="number"
+            min={FTM_FS_RANGE_HZ[0]}
+            max={FTM_FS_RANGE_HZ[1]}
+            step={100}
+            value={ftmFsText}
+            onChange={(e) => {
+              setFtmFsText(e.target.value);
+              const fs = Number(e.target.value);
+              if (!(fs >= FTM_FS_RANGE_HZ[0] && fs <= FTM_FS_RANGE_HZ[1])) return;
+              setFtmFs(fs);
+              // Keep f0 within 20 Hz … FTM_FS/2 (Marlin rejects M493 A outside it).
+              const [fMin, fMax] = shaperF0RangeHz(fs);
+              setShaperParams((old) => ({ ...old, fHz: Math.min(fMax, Math.max(fMin, old.fHz)) }));
+            }}
+            className="bg-muted w-full rounded-md p-1 text-sm"
+          />
+          <div className="text-muted-foreground text-xs">
+            Trajectory sample rate of your firmware (Configuration_adv.h, default 1000). f0 is
+            limited to 20 Hz … FTM_FS/2.
+          </div>
+        </div>
+
+        <GcodePanel />
       </div>
     </div>
   );
