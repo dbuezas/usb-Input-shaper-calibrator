@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Input shaper taps ported from Marlin, Marlin/src/module/ft_motion/shaping.cpp
+// Copyright (c) 2025 MarlinFirmware [https://github.com/MarlinFirmware/Marlin]
+// Ported to TypeScript and changed by David Buezas, 2025-2026. See NOTICE.
+
 import {
   ACTUAL_RESOLUTION,
   DEFAULT_FTM_FS_HZ,

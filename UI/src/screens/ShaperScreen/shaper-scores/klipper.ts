@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Shaper scoring based on Klipper, klippy/extras/shaper_calibrate.py
+// Copyright (C) 2020-2024 Dmitry Butyugin <dmbutyugin@google.com>, GNU GPLv3
+// Ported to TypeScript and changed by David Buezas, 2026. See NOTICE.
+
 import {
   binToHz,
   computeMarlinShaperTaps,

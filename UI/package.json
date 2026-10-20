@@ -2,6 +2,8 @@
   "name": "marlin-resonance-analyser",
   "private": true,
   "version": "0.0.0",
+  "license": "GPL-3.0-or-later",
+  "author": "David Buezas",
   "type": "module",
   "packageManager": "pnpm@9.0.0",
   "scripts": {

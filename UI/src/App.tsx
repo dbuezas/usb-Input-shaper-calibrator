@@ -99,6 +99,35 @@ function App() {
           <ShaperScreen />
         )}
       </div>
+
+      {/* Appropriate Legal Notices (GPLv3 section 5(d)); the attribution must stay, see NOTICE. */}
+      <footer
+        className="border-border text-muted-foreground shrink-0 border-t px-6 py-1.5 text-xs"
+        data-testid="legal-notices"
+      >
+        Marlin USB Resonance Tester by David Buezas · © 2025–2026 ·{' '}
+        <a
+          className="underline"
+          href={`${REPO_URL}/blob/main/LICENSE`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          GPL-3.0-or-later
+        </a>
+        , no warranty ·{' '}
+        <a className="underline" href={REPO_URL} target="_blank" rel="noreferrer">
+          source
+        </a>{' '}
+        ·{' '}
+        <a
+          className="underline"
+          href={`${REPO_URL}/blob/main/NOTICE`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          credits
+        </a>
+      </footer>
     </div>
   );
 }
