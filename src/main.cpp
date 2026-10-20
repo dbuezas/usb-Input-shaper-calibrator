@@ -1,3 +1,7 @@
+// Marlin USB Resonance Tester firmware
+// Copyright (C) 2025-2026 David Buezas and contributors (see the git history)
+// SPDX-License-Identifier: GPL-3.0-or-later. See LICENSE and NOTICE.
+
 #include <Arduino.h>
 #include <SPI.h>
 

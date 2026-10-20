@@ -1,0 +1,42 @@
+Marlin USB Resonance Tester
+https://github.com/dbuezas/usb-Input-shaper-calibrator
+
+Copyright (C) 2025-2026 David Buezas
+Contributions by other authors are listed in the git history.
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License (LICENSE) for
+more details.
+
+
+Additional terms (GNU GPL version 3, section 7(b))
+--------------------------------------------------
+
+For the parts of this program written by David Buezas: modified versions, and
+works based on this program, must keep the author attribution
+
+    Based on Marlin USB Resonance Tester by David Buezas
+    (https://github.com/dbuezas/usb-Input-shaper-calibrator)
+
+in the Appropriate Legal Notices displayed by their user interface. In this
+program, these notices are in the footer of the web app.
+
+
+Third-party code
+----------------
+
+UI/src/screens/ShaperScreen/input-shaper.ts
+    Input shaper taps ported from Marlin, Marlin/src/module/ft_motion/shaping.cpp
+    Copyright (c) 2025 MarlinFirmware [https://github.com/MarlinFirmware/Marlin]
+    GNU GPL version 3 or later.
+
+UI/src/screens/ShaperScreen/shaper-scores/klipper.ts
+    Shaper scoring based on Klipper, klippy/extras/shaper_calibrate.py
+    Copyright (C) 2020-2024 Dmitry Butyugin <dmbutyugin@google.com>
+    GNU GPL version 3.

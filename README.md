@@ -96,3 +96,16 @@ The browser tests use Playwright. On macOS 13 they use the installed Google Chro
 <img width="1340" height="932" alt="image" src="https://github.com/user-attachments/assets/adb6fe45-afc1-471d-9e54-13eefaf6a75f" />
 
 <img width="1325" height="923" alt="image" src="https://github.com/user-attachments/assets/4f365fb0-5500-4c54-bbc3-064b1a167f6e" />
+
+## License
+
+Copyright (C) 2025-2026 David Buezas. Contributions by other authors are listed in the git history.
+
+This project is free software under the [GNU General Public License v3.0 or later](LICENSE), with one additional term under GPLv3 section 7(b): modified versions must keep the attribution “Based on Marlin USB Resonance Tester by David Buezas” (with a link to this repository) in the legal notices shown in their user interface. See [NOTICE](NOTICE).
+
+## Credits
+
+- [Marlin](https://github.com/MarlinFirmware/Marlin): input shaper math (`UI/src/screens/ShaperScreen/input-shaper.ts` is a port of `shaping.cpp`).
+- [Klipper](https://github.com/Klipper3d/klipper), Dmitry Butyugin: shaper scoring (`UI/src/screens/ShaperScreen/shaper-scores/klipper.ts` follows `shaper_calibrate.py`).
+- Scott Lahteine ([@thinkyhead](https://github.com/thinkyhead)): Marlin FT Motion parity and the M493/M593 G-code output (#5).
+- [@Nuck-TH](https://github.com/Nuck-TH): hardware SPI, STM32F103 Bluepill support and the Pico SMPS noise fix (#3).
