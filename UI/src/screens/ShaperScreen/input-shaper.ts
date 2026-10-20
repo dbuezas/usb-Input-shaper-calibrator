@@ -1,4 +1,10 @@
-import { ACTUAL_RESOLUTION, FIXED_SAMPLE_RATE, WINDOW_SIZE } from '@/constants';
+import {
+  ACTUAL_RESOLUTION,
+  DEFAULT_FTM_FS_HZ,
+  FIXED_SAMPLE_RATE,
+  SHAPER_2HEI_MIN_VTOL,
+  WINDOW_SIZE,
+} from '@/constants';
 
 export const ALL_SHAPER_TYPES = [
   '3hei',
@@ -33,7 +39,27 @@ const computeK = (zeta: number) => {
   return Math.exp((-z * Math.PI) / safeSqrt(1 - z * z));
 };
 
-type ShaperTaps = { a: number[]; t: number[] };
+// Marlin `M493 C<n>` compensator codes (ftMotionShaper_t in shaping.h).
+export const MARLIN_SHAPER_CODE: Record<InputShaperType, number> = {
+  zv: 1,
+  zvd: 2,
+  zvdd: 3,
+  zvddd: 4,
+  ei: 5,
+  '2hei': 6,
+  '3hei': 7,
+  mzv: 8,
+};
+
+// Tap spacing in periods of the damped resonance (`base` in set_axis_shaping_N).
+const shaperBase = (type: InputShaperType) => (type === 'mzv' ? 0.375 : 0.5);
+
+type ShaperTaps = {
+  a: number[];
+  t: number[];
+  /** The notch frequency Marlin really uses after rounding the tap spacing to FTM_FS samples. */
+  fEffHz: number;
+};
 
 export type { ShaperTaps };
 
@@ -47,20 +73,28 @@ export const computeDelayCentroidSecondsFromTaps = (taps: ShaperTaps) => {
   return centroid;
 };
 
-export const computeMarlinShaperTaps = ({ type, fHz, zeta, vtol }: ShaperParams): ShaperTaps => {
+// Mirrors Marlin's set_axis_shaping_A / set_axis_shaping_N in
+// Marlin/src/module/ft_motion/shaping.cpp (bugfix-2.1.x @13fa4497).
+export const computeMarlinShaperTaps = (
+  { type, fHz, zeta, vtol }: ShaperParams,
+  ftmFs = DEFAULT_FTM_FS_HZ
+): ShaperTaps => {
   const f = Math.max(0.01, fHz);
   const z = clamp(zeta, 0, 0.99);
-  const v = clamp(vtol, 0, 0.99);
+  const v = clamp(vtol, type === '2hei' ? SHAPER_2HEI_MIN_VTOL : 0, 1);
 
   const K = computeK(z);
   const K2 = K * K;
   const K3 = K2 * K;
   const K4 = K3 * K;
 
-  // From Marlin: df = sqrt(1 - zeta^2), base=0.5 for these shapers.
+  // From Marlin: df = sqrt(1 - zeta^2); base = 0.5 (0.375 for MZV).
   const df = safeSqrt(1 - z * z);
-  const base = 0.5;
-  const t1 = base / f / df; // seconds between taps (except i=0)
+  const base = shaperBase(type);
+  // Marlin: Ni[1] = LROUND((base / f / df) * FTM_FS), i.e. whole trajectory samples.
+  const n1 = Math.round((base / f / df) * ftmFs);
+  const t1 = n1 / ftmFs; // seconds between taps (except i=0)
+  const fEffHz = n1 > 0 ? base / t1 / df : f;
 
   let a: number[];
   switch (type) {
@@ -126,7 +160,7 @@ export const computeMarlinShaperTaps = ({ type, fHz, zeta, vtol }: ShaperParams)
   }
 
   const t = a.map((_, i) => i * t1);
-  return { a, t };
+  return { a, t, fEffHz };
 };
 
 export const binToHz = (bin: number, bins: number) => bin * (FIXED_SAMPLE_RATE / (2 * (bins - 1)));
@@ -154,7 +188,11 @@ export const applyShaperToMagnitudeSpectrumFromTaps = (
   return out;
 };
 
-export const computeShaperResponse = (params: ShaperParams, freqRangeHz: [number, number]) => {
+export const computeShaperResponse = (
+  params: ShaperParams,
+  freqRangeHz: [number, number],
+  ftmFs = DEFAULT_FTM_FS_HZ
+) => {
   // Match the FFT binning used by the DSP pipeline (see `WINDOW_SIZE` in `src/constants.ts`).
   // For an N-point real FFT, the magnitude spectrum has N/2+1 bins from 0..Nyquist.
   const bins = WINDOW_SIZE / 2 + 1;
@@ -163,7 +201,7 @@ export const computeShaperResponse = (params: ShaperParams, freqRangeHz: [number
   const start = Math.max(0, Math.floor(freqRangeHz[0] / freqStepHz));
   const end = Math.min(bins, Math.ceil(freqRangeHz[1] / freqStepHz));
 
-  const { a, t } = computeMarlinShaperTaps(params);
+  const { a, t } = computeMarlinShaperTaps(params, ftmFs);
 
   // Return a full-length response so it can be plotted/combined with spectra directly.
   // Values outside the requested range are set to 0.

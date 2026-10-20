@@ -15,8 +15,9 @@ import {
   SEARCH_F_STEP_HZ,
   SEARCH_VTOL_STEP,
   SEARCH_ZETA_STEP,
-  SHAPER_F0_RANGE_HZ,
+  shaperF0RangeHz,
   SHAPER_VTOL_RANGE,
+  SHAPER_2HEI_MIN_VTOL,
   SHAPER_ZETA_RANGE,
 } from '@/constants';
 
@@ -34,6 +35,7 @@ export type WorkerStartMessage = {
   magnitudes: Float32Array;
   scoreRangeHz: [number, number];
   scoreMode: ShaperScoreMode;
+  ftmFs: number;
   cornering: CorneringSettings;
   candidateTypes?: InputShaperType[];
   frontierMode?: 'delay_centroid' | 'suggested_max_accel';
@@ -110,18 +112,24 @@ function shuffle<T>(array: T[]) {
 }
 
 const bruteForce = (msg: WorkerStartMessage) => {
-  const { magnitudes, scoreMode, scoreRangeHz } = msg;
+  const { magnitudes, scoreMode, scoreRangeHz, ftmFs } = msg;
+  const f0Range = shaperF0RangeHz(ftmFs);
   const types = (msg.candidateTypes?.length ? msg.candidateTypes : SEARCH_TYPES).filter(
     (t): t is InputShaperType => SEARCH_TYPES.includes(t)
   );
   const candidates: ShaperParams[] = [];
   for (const type of types) {
     const isEi = isEiFamily(type);
-    for (let fHz = SHAPER_F0_RANGE_HZ[0]; ; fHz += SEARCH_F_STEP_HZ) {
-      fHz = Math.min(fHz, SHAPER_F0_RANGE_HZ[1]);
+    for (let fHz = f0Range[0]; ; fHz += SEARCH_F_STEP_HZ) {
+      fHz = Math.min(fHz, f0Range[1]);
       for (let zeta = SHAPER_ZETA_RANGE[0]; ; zeta += SEARCH_ZETA_STEP) {
         zeta = Math.min(zeta, SHAPER_ZETA_RANGE[1]);
-        for (let vtol = SHAPER_VTOL_RANGE[0]; ; vtol += SEARCH_VTOL_STEP) {
+        // 2HEI is undefined (NaN) at vtol = 0.
+        for (
+          let vtol = type === '2hei' ? SHAPER_2HEI_MIN_VTOL : SHAPER_VTOL_RANGE[0];
+          ;
+          vtol += SEARCH_VTOL_STEP
+        ) {
           vtol = Math.min(vtol, SHAPER_VTOL_RANGE[1]);
           candidates.push({ type, fHz, zeta, vtol });
           if (!isEi) break;
@@ -129,7 +137,7 @@ const bruteForce = (msg: WorkerStartMessage) => {
         }
         if (zeta === SHAPER_ZETA_RANGE[1]) break;
       }
-      if (fHz === SHAPER_F0_RANGE_HZ[1]) break;
+      if (fHz === f0Range[1]) break;
     }
   }
 
@@ -166,7 +174,7 @@ const bruteForce = (msg: WorkerStartMessage) => {
   // Evaluate in that order
   for (const params of candidates) {
     iterationsDone++;
-    const taps = computeMarlinShaperTaps(params);
+    const taps = computeMarlinShaperTaps(params, ftmFs);
     const peakResponse = shaperMagnitudeAtHzFromTaps(taps.a, taps.t, peakHz);
     if (peakResponse < MIN_RESONANCE_REDUCTION_AT_SPECTROGRAM_PEAK) {
       const current = {

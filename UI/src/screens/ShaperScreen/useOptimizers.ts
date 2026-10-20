@@ -15,6 +15,7 @@ import {
   optimisationHistoryAtom,
   corneringSettingsAtom,
   historyModeAtom,
+  ftmFsAtom,
 } from './atoms';
 
 const computeBestByType = (results: readonly OptimisationResult[]) => {
@@ -37,6 +38,7 @@ export default function useOptimisers() {
   const scoreMode = useAtomValue(shaperScoreModeAtom);
   const corneringSettings = useAtomValue(corneringSettingsAtom);
   const historyMode = useAtomValue(historyModeAtom);
+  const ftmFs = useAtomValue(ftmFsAtom);
 
   const maxHoldSpectrum = useAtomValue(spectrogramMaxHoldAtom);
   const scoreRangeHz = useAtomValue(analysisRangeAtom);
@@ -124,6 +126,7 @@ export default function useOptimisers() {
           magnitudes: maxHoldSpectrum,
           scoreRangeHz,
           scoreMode,
+          ftmFs,
           cornering: corneringSettings,
           candidateTypes,
           frontierMode: historyMode === 'centroid_ms' ? 'delay_centroid' : 'suggested_max_accel',

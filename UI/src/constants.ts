@@ -100,9 +100,23 @@ export const MIN_RESONANCE_REDUCTION_AT_SPECTROGRAM_PEAK = 0.5;
 // These constants define the min/max shown in the ShaperScreen sliders.
 // Keep the optimiser bounds in sync by importing these in the worker.
 
-export const SHAPER_F0_RANGE_HZ: [number, number] = [10, 300];
+// Marlin limits (Marlin/src/module/ft_motion/shaping.h, Configuration_adv.h):
+// - M493 A<Hz> must be within FTM_MIN_SHAPE_FREQ..FTM_FS/2.
+// - FTM_FS is the trajectory sample rate (Hz). Marlin rounds the tap spacing to whole samples of it.
+export const FTM_MIN_SHAPE_FREQ_HZ = 20;
+export const DEFAULT_FTM_FS_HZ = 1000;
+export const FTM_FS_RANGE_HZ: [number, number] = [100, 5000];
+
+// Highest f0 the sliders / optimiser offer (also capped to FTM_FS/2, see `shaperF0RangeHz`).
+const SHAPER_F0_MAX_HZ = 300;
+export const shaperF0RangeHz = (ftmFs: number): [number, number] => [
+  FTM_MIN_SHAPE_FREQ_HZ,
+  Math.min(SHAPER_F0_MAX_HZ, ftmFs / 2),
+];
 export const SHAPER_ZETA_RANGE: [number, number] = [0.0, 0.25];
 export const SHAPER_VTOL_RANGE: [number, number] = [0.0, 1];
+// 2HEI computes 0/0 (NaN gains) at vtol = 0 in Marlin, so keep a little above zero.
+export const SHAPER_2HEI_MIN_VTOL = 0.005;
 
 export const SEARCH_F_STEP_HZ = 0.5;
 export const SEARCH_ZETA_STEP = 0.01;
