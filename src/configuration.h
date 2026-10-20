@@ -4,6 +4,7 @@
 // Board selection
 // ----------------
 // Pick exactly one board here. This will auto-configure pins + accel chip.
+// Used by the RP2040 envs (`pico`, `pico_rp2040`). The Bluepill envs ignore it.
 
 #define BOARD_FLY_ADXL345 1
 #define BOARD_BTT_LIS2DW 2

@@ -1,35 +1,69 @@
 #include <Arduino.h>
+#include <SPI.h>
 
 #include "configuration.h"
+
+#ifdef RT_BLUEPILL
+  #include "usbd_cdc_if.h"
+#endif
 
 #define ACCEL_CHIP_ADXL345 1
 #define ACCEL_CHIP_LIS2DW12 2
 
-#if BOARD == BOARD_FLY_ADXL345
-  #define PIN_MISO 12
-  #define PIN_CS 9
-  #define PIN_SCK 10
-  #define PIN_MOSI 11
-  #define ACCEL_CHIP ACCEL_CHIP_ADXL345
-#elif BOARD == BOARD_BTT_LIS2DW
-  #define PIN_MISO 8
-  #define PIN_CS 9
-  #define PIN_SCK 10
-  #define PIN_MOSI 11
-  #define ACCEL_CHIP ACCEL_CHIP_LIS2DW12
-#elif BOARD == BOARD_FYSETC_PIS
-  #define PIN_MISO 12
-  #define PIN_CS 13
-  #define PIN_SCK 10
-  #define PIN_MOSI 11
-  #define ACCEL_CHIP ACCEL_CHIP_ADXL345
-#else
-  #error "Unsupported BOARD selection"
-#endif
+// Define to use bit-banged SPI instead of hardware SPI
+// #define SPI_BITBANG
 
-// Packet delimiters
-#define PACKET_START 0b10101010
-#define PACKET_END 0b01010101
+#if defined(RT_BLUEPILL)
+  // STM32F103 Bluepill with an ADXL345 on SPI1 (BOARD in configuration.h is ignored)
+  #define PIN_MOSI PA7
+  #define PIN_MISO PA6
+  #define PIN_SCK PA5
+  #define PIN_CS PA4
+  #define ACCEL_CHIP ACCEL_CHIP_ADXL345
+
+  #define LED LED_BUILTIN
+  #define ACCEL_SPI SPI
+  #define IS_CONNECTED !CDC_connected()  // inverted: the Bluepill LED (PC13) is active low
+
+#elif defined(RT_RP2040)
+  // Hardware SPI is not tested on RP2040 boards yet; remove this line to try it
+  #define SPI_BITBANG
+
+  // All boards below use SPI1-capable pins
+  #define ACCEL_SPI SPI1
+  #define IS_CONNECTED Serial.dtr()
+
+  #ifdef RT_PICO
+    #define SMPS_PWM 23
+    // Only the Raspberry Pi Pico is known to have an LED here; other RP2040 boards may use GPIO25 for something else
+    #define LED LED_BUILTIN
+  #endif
+
+  #if BOARD == BOARD_FLY_ADXL345
+    #define PIN_MISO 12
+    #define PIN_CS 9
+    #define PIN_SCK 10
+    #define PIN_MOSI 11
+    #define ACCEL_CHIP ACCEL_CHIP_ADXL345
+  #elif BOARD == BOARD_BTT_LIS2DW
+    #define PIN_MISO 8
+    #define PIN_CS 9
+    #define PIN_SCK 10
+    #define PIN_MOSI 11
+    #define ACCEL_CHIP ACCEL_CHIP_LIS2DW12
+  #elif BOARD == BOARD_FYSETC_PIS
+    #define PIN_MISO 12
+    #define PIN_CS 13
+    #define PIN_SCK 10
+    #define PIN_MOSI 11
+    #define ACCEL_CHIP ACCEL_CHIP_ADXL345
+  #else
+    #error "Unsupported BOARD selection"
+  #endif
+
+#else
+  #error "Build with a PlatformIO env from platformio.ini (RT_RP2040 or RT_BLUEPILL)"
+#endif
 
 // Low-level SPI register helpers (defined later)
 void write_reg(uint8_t reg, uint8_t val);
@@ -62,8 +96,8 @@ void read_multi(uint8_t reg, uint8_t* buf, uint8_t len);
   static inline void accel_init() {
     write_reg(REG_DATA_FORMAT, 0b00001011);  // 13 bit, ±16g
     write_reg(REG_BW_RATE, BW_3200HZ);       // 3200 Hz output rate
-    write_reg(REG_POWER_CTL, 0b00001000);    // measurement mode
     write_reg(REG_FIFO_CTL, 0b10011111);     // stream mode, 32-sample FIFO
+    write_reg(REG_POWER_CTL, 0b00001000);    // measurement mode
   }
 
 #elif ACCEL_CHIP == ACCEL_CHIP_LIS2DW12
@@ -102,16 +136,7 @@ void read_multi(uint8_t reg, uint8_t* buf, uint8_t len);
 
 #endif
 
-union PackedXYZ {
-  struct {
-    signed int x : 13;
-    signed int y : 13;
-    signed int z : 13;
-    unsigned int padding : 1;
-  } data;
-  uint8_t bytes[5];
-};
-
+#ifdef SPI_BITBANG
 // For ~1 MHz bit-bang on RP2040.
 static inline void spi_delay() {
   // __asm volatile("nop; nop; nop; nop;");
@@ -136,6 +161,20 @@ uint8_t spi_rw(uint8_t val) {
   }
   return rx;
 }
+
+void spi_rw_multi(uint8_t* buf, uint8_t len) {
+  for (uint8_t i = 0; i < len; i++)
+    buf[i] = spi_rw(0b00000000);
+}
+#else
+uint8_t spi_rw(uint8_t val) {
+  return ACCEL_SPI.transfer(val);
+}
+
+void spi_rw_multi(uint8_t* buf, uint8_t len) {
+  ACCEL_SPI.transfer(buf, len);
+}
+#endif
 
 void write_reg(uint8_t reg, uint8_t val) {
   digitalWrite(PIN_CS, LOW);
@@ -167,13 +206,9 @@ void read_multi(uint8_t reg, uint8_t* buf, uint8_t len) {
     // Auto-increment is enabled via CTRL2=0x06 (set in accel_init()).
     spi_rw(reg | 0b10000000);
   #endif
-  for (uint8_t i = 0; i < len; i++)
-    buf[i] = spi_rw(0b00000000);
+  spi_rw_multi(buf, len);
   digitalWrite(PIN_CS, HIGH);
 }
-
-// sent every so often to in case the receiving end missed a packet and started reading the bits offset from the beginning
-union PackedXYZ const ALIGN_PACKET = {.bytes = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF}};
 
 void drain_fifo() {
   #if ACCEL_CHIP == ACCEL_CHIP_ADXL345
@@ -243,6 +278,15 @@ void drain_fifo() {
 }
 
 void setup() {
+  #ifdef LED
+    pinMode(LED, OUTPUT);
+  #endif
+
+  #ifdef RT_PICO
+    pinMode(SMPS_PWM, OUTPUT);
+    digitalWrite(SMPS_PWM, HIGH);  // enable PWM mode of SMPS regulator to reduce noise
+  #endif
+
   Serial.begin(230400);
   #if SERIAL_DEBUG_TEXT
     // On RP2040 USB-CDC, Serial may not be immediately ready.
@@ -254,12 +298,23 @@ void setup() {
   #endif
 
   pinMode(PIN_CS, OUTPUT);
-  pinMode(PIN_MOSI, OUTPUT);
-  pinMode(PIN_MISO, INPUT);
-  pinMode(PIN_SCK, OUTPUT);
-
   digitalWrite(PIN_CS, HIGH);
-  digitalWrite(PIN_SCK, HIGH);
+  #ifdef SPI_BITBANG
+    pinMode(PIN_MOSI, OUTPUT);
+    pinMode(PIN_MISO, INPUT);
+    pinMode(PIN_SCK, OUTPUT);
+    digitalWrite(PIN_SCK, HIGH);
+  #else
+    ACCEL_SPI.setMOSI(PIN_MOSI);
+    ACCEL_SPI.setMISO(PIN_MISO);
+    #ifdef RT_BLUEPILL
+      ACCEL_SPI.setSCLK(PIN_SCK);
+    #else
+      ACCEL_SPI.setSCK(PIN_SCK);
+    #endif
+    ACCEL_SPI.begin();
+    ACCEL_SPI.beginTransaction(SPISettings(2000000, MSBFIRST, SPI_MODE3));
+  #endif
   delay(10);
 
   #if ACCEL_CHIP == ACCEL_CHIP_ADXL345
@@ -288,4 +343,8 @@ void loop() {
     }
   #endif
   drain_fifo();
+  #ifdef LED
+    // Light the onboard LED when USB serial is connected
+    digitalWrite(LED, IS_CONNECTED ? HIGH : LOW);
+  #endif
 }
