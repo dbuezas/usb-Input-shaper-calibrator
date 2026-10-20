@@ -8,3 +8,6 @@ __pycache__
 # Playwright output
 UI/test-results
 UI/playwright-report
+
+# Built by scripts/build-firmware.sh (locally or in CI)
+UI/src/assets/firmware/

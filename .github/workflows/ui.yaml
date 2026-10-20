@@ -3,9 +3,23 @@ name: UI
 on:
   push:
     branches: [main]
-    paths: ['UI/**', '.github/workflows/ui.yaml']
+    paths:
+      - 'UI/**'
+      - '.github/workflows/ui.yaml'
+      # the UI bundles the firmware files
+      - 'src/**'
+      - 'platformio.ini'
+      - 'scripts/build-firmware.sh'
+      - '.github/actions/build-firmware/**'
   pull_request:
-    paths: ['UI/**', '.github/workflows/ui.yaml']
+    paths:
+      - 'UI/**'
+      - '.github/workflows/ui.yaml'
+      # the UI bundles the firmware files
+      - 'src/**'
+      - 'platformio.ini'
+      - 'scripts/build-firmware.sh'
+      - '.github/actions/build-firmware/**'
   workflow_dispatch:
 
 jobs:
@@ -17,6 +31,7 @@ jobs:
         working-directory: UI
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/build-firmware
 
       - uses: pnpm/action-setup@v4
         with:

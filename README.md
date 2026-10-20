@@ -16,7 +16,7 @@ Source repository: https://github.com/dbuezas/usb-Input-shaper-calibrator
 
 - `src/main.cpp`: firmware that reads an ADXL345 / LIS2DW12 over SPI and streams packed samples over USB serial.
 - `platformio.ini`: PlatformIO configuration (RP2040 with the Earle Philhower Arduino core, STM32F103 Bluepill).
-- `scripts/build-firmware.sh`: builds the firmware for every supported board into `UI/src/assets/firmware/` (the files the web UI offers).
+- `scripts/build-firmware.sh`: builds the firmware for every supported board into `UI/src/assets/firmware/` (the files the web UI offers). CI runs it before building the UI; the files are not in git.
 - `UI/`: React + Vite web app (deployed to GitHub Pages via `.github/workflows/deploy.yaml`).
 
 ## Requirements
@@ -61,13 +61,16 @@ The firmware runs on the host against a simulated ADXL345 / LIS2DW12 (SPI at the
 pio test -e native_fly -e native_btt -e native_fysetc -e native_bluepill
 ```
 
-GitHub Actions runs these tests and builds every firmware env on each push and pull request.
+GitHub Actions runs these tests and builds the firmware for every board on each push and pull request; the files are attached to the run as the `firmware` artifact.
 
 ## Running the UI locally
+
+Needs [PlatformIO](https://platformio.org/install/cli): the UI bundles the firmware files, so build them once first (and again after firmware changes).
 
 ```sh
 cd UI
 pnpm install
+pnpm firmware   # runs ../scripts/build-firmware.sh
 pnpm dev
 ```
 
