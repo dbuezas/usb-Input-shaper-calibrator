@@ -37,13 +37,16 @@ Source repository: https://github.com/dbuezas/usb-Input-shaper-calibrator
 This is only needed if you want to build your own UF2 instead of using the one bundled in the UI.
 
 ```sh
-pio run
+pio run                          # generic RP2040 boards (env `pico`)
+pio run -e pico_rp2040           # Raspberry Pi Pico: status LED + SMPS PWM mode (less noise)
+pio run -e bluepill_f103c8       # STM32F103 Bluepill
+pio run -e bluepill_f103c8_boot8k  # Bluepill with an 8 KiB bootloader, upload via DFU
 ```
 
 The firmware:
 
-- Targets RP2040 (`board = pico`)
-- Reads the ADXL345 via bit-banged SPI
+- Targets RP2040 (`board = pico`) and STM32F103 Bluepill
+- Reads the ADXL345 via bit-banged SPI on RP2040 and hardware SPI on the Bluepill (`SPI_BITBANG` in `src/main.cpp`)
 - Streams samples over USB serial at `230400` baud (UI expects the same)
 
 ## Running the UI locally
