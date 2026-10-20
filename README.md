@@ -1,8 +1,8 @@
 # Marlin USB Resonance Tester
 
-Measure your 3D printer’s mechanical resonance over **USB** (ADXL345 on an RP2040 “USB accelerometer” board) and use the built-in web UI to:
+Measure your 3D printer’s mechanical resonance over **USB** (ADXL345 or LIS2DW12 on an RP2040 or STM32F103 “USB accelerometer” board) and use the built-in web UI to:
 
-- Flash the firmware (UF2)
+- Download the firmware for your board and flash it
 - Stream accelerometer samples over the browser’s **Web Serial** API
 - View a live spectrogram / peak frequency
 - Simulate data without hardware
@@ -14,20 +14,21 @@ Source repository: https://github.com/dbuezas/usb-Input-shaper-calibrator
 
 ## What’s in this repo
 
-- `src/main.cpp`: RP2040 firmware that reads an ADXL345 over SPI and streams packed samples over USB serial.
-- `platformio.ini`: PlatformIO configuration for `board = pico` (Earle Philhower Arduino core).
+- `src/main.cpp`: firmware that reads an ADXL345 / LIS2DW12 over SPI and streams packed samples over USB serial.
+- `platformio.ini`: PlatformIO configuration (RP2040 with the Earle Philhower Arduino core, STM32F103 Bluepill).
+- `scripts/build-firmware.sh`: builds the firmware for every supported board into `UI/src/assets/firmware/` (the files the web UI offers).
 - `UI/`: React + Vite web app (deployed to GitHub Pages via `.github/workflows/deploy.yaml`).
 
 ## Requirements
 
 - A Chromium-based browser with Web Serial support: **Chrome**, **Edge**, **Opera**.
-- Hardware (optional): an RP2040 + ADXL345 “USB accelerometer” board (e.g. Mellow Fly ADXL345 USB-C).
+- Hardware (optional), one of: Mellow FLY ADXL345 USB-C, BIGTREETECH S2DW, FYSETC Portable Input Shaper, a Raspberry Pi Pico + ADXL345, or an STM32F103 Bluepill + ADXL345.
 
 ## Quick start (recommended)
 
 1. Open the web app.
-2. **Install firmware** → download `firmware.uf2`.
-3. Put the RP2040 into bootloader mode (hold **BOOT** while plugging in) and drag-and-drop the UF2 onto the `RPI-RP2` drive.
+2. **Install firmware** → pick your board and download its firmware.
+3. Flash it as shown there (RP2040: hold **BOOT** while plugging in, then drag-and-drop the UF2 onto the `RPI-RP2` drive).
 4. **Measure axis** → click **Connect** and pick the serial device.
 5. Use **Simulate** if you want to try the UI without hardware.
 6. **Optimize shaper** → run **Auto optimise** to get suggested shaper taps.
