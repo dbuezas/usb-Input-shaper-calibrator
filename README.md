@@ -50,7 +50,7 @@ The firmware:
 - Targets RP2040 (`board = pico`) and STM32F103 Bluepill
 - Reads the ADXL345 or LIS2DW12 via bit-banged SPI on RP2040 and hardware SPI on the Bluepill (`SPI_BITBANG` in `src/main.cpp`)
 - Streams samples over USB serial at `230400` baud (UI expects the same)
-- Sends 3200 samples/s. The LIS2DW12 runs at 1600 Hz, so the firmware adds a linear-interpolated sample between each pair.
+- Sends samples at the sensor's own rate (ADXL345: 3200 Hz, LIS2DW12: 1600 Hz) and reports that rate to the UI every second
 
 ### Tests
 
@@ -71,6 +71,16 @@ pnpm dev
 ```
 
 Then open the printed local URL.
+
+### Tests
+
+```sh
+pnpm lint
+pnpm test       # unit tests (serial protocol)
+pnpm test:e2e   # browser tests with the simulator (3200 Hz and 1600 Hz sensors)
+```
+
+The browser tests use Playwright. On macOS 13 they use the installed Google Chrome; elsewhere run `pnpm exec playwright install chromium` first.
 
 ## Notes / troubleshooting
 

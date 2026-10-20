@@ -1,0 +1,35 @@
+name: UI
+
+on:
+  push:
+    branches: [main]
+    paths: ['UI/**', '.github/workflows/ui.yaml']
+  pull_request:
+    paths: ['UI/**', '.github/workflows/ui.yaml']
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Lint, unit and browser tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: UI
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: UI/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
