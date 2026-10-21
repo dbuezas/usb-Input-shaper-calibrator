@@ -49,16 +49,16 @@ pio run -e bluepill_f103c8_boot8k  # Bluepill with an 8 KiB bootloader, upload v
 The firmware:
 
 - Targets RP2040 (`board = pico`) and STM32F103 Bluepill
-- Reads the ADXL345 or LIS2DW12 via bit-banged SPI on RP2040 and hardware SPI on the Bluepill (`SPI_BITBANG` in `src/main.cpp`)
+- Reads the ADXL345 or LIS2DW12 via hardware SPI (1 MHz on RP2040, 2 MHz on the Bluepill). Bit-banged SPI is still available with `-DSPI_BITBANG`
 - Streams samples over USB serial at `230400` baud (UI expects the same)
 - Sends samples at the sensor's own rate (ADXL345: 3200 Hz, LIS2DW12: 1600 Hz) and reports that rate to the UI every second
 
 ### Tests
 
-The firmware runs on the host against a simulated ADXL345 / LIS2DW12 (SPI at the pin level), so no hardware is needed:
+The firmware runs on the host against a simulated ADXL345 / LIS2DW12 (SPI at the byte level, or the pin level for bit-bang), so no hardware is needed:
 
 ```sh
-pio test -e native_fly -e native_btt -e native_fysetc -e native_bluepill
+pio test -e native_fly -e native_btt -e native_fysetc -e native_fly_bitbang -e native_bluepill
 ```
 
 GitHub Actions runs these tests and builds the firmware for every board on each push and pull request; the files are attached to the run as the `firmware` artifact.
