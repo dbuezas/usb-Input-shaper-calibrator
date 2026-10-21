@@ -90,10 +90,10 @@ const estimateRemainingVibrations = (
 // Klipper-like scoring (adapted for our Marlin tap generator). This mirrors the
 // logic in `klipper-master/klippy/extras/shaper_calibrate.py`.
 
-const TEST_DAMPING_RATIOS = [0.075, 0.1, 0.15] as const;
-const SHAPER_VIBRATION_REDUCTION = 20;
+export const TEST_DAMPING_RATIOS = [0.075, 0.1, 0.15] as const;
+export const SHAPER_VIBRATION_REDUCTION = 20;
 
-const estimateShaperVals = (
+export const estimateShaperVals = (
   a: number[],
   t: number[],
   testDampingRatio: number,
@@ -123,7 +123,7 @@ const estimateShaperVals = (
   return out;
 };
 
-const klipperSmoothing = (
+export const klipperSmoothing = (
   a: number[],
   t: number[],
   accel: number,
