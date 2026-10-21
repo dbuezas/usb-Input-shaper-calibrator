@@ -14,8 +14,7 @@
 #define ACCEL_CHIP_ADXL345 1
 #define ACCEL_CHIP_LIS2DW12 2
 
-// Define to use bit-banged SPI instead of hardware SPI
-// #define SPI_BITBANG
+// Build with -DSPI_BITBANG to use bit-banged SPI instead of hardware SPI
 
 #if defined(RT_BLUEPILL)
   // STM32F103 Bluepill with an ADXL345 on SPI1 (BOARD in configuration.h is ignored)
@@ -27,14 +26,17 @@
 
   #define LED LED_BUILTIN
   #define ACCEL_SPI SPI
+  #define SPI_CLOCK_HZ 2000000
   #define IS_CONNECTED !CDC_connected()  // inverted: the Bluepill LED (PC13) is active low
 
 #elif defined(RT_RP2040)
-  // Hardware SPI is not tested on RP2040 boards yet; remove this line to try it
-  #define SPI_BITBANG
-
   // All boards below use SPI1-capable pins
   #define ACCEL_SPI SPI1
+  // Measured on a FLY ADXL345 at rest: 1 MHz gives the lowest noise (about 20 mg),
+  // 2 MHz about twice as much. The LIS2DW12 is the same at 1, 2 and 5 MHz.
+  #ifndef SPI_CLOCK_HZ
+    #define SPI_CLOCK_HZ 1000000
+  #endif
   #define IS_CONNECTED Serial.dtr()
 
   #ifdef RT_PICO
@@ -329,7 +331,7 @@ void setup() {
       ACCEL_SPI.setSCK(PIN_SCK);
     #endif
     ACCEL_SPI.begin();
-    ACCEL_SPI.beginTransaction(SPISettings(2000000, MSBFIRST, SPI_MODE3));
+    ACCEL_SPI.beginTransaction(SPISettings(SPI_CLOCK_HZ, MSBFIRST, SPI_MODE3));
   #endif
   delay(10);
 
