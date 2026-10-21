@@ -1,5 +1,6 @@
 import { atom, type Getter } from 'jotai';
-import { DEFAULT_FTM_FS_HZ, FREQUENCY_SLIDER_RANGE_HZ } from '@/constants';
+import { atomWithStorage } from 'jotai/utils';
+import { DEFAULT_FTM_FS_HZ, DEFAULT_PRINT_ACCEL, FREQUENCY_SLIDER_RANGE_HZ } from '@/constants';
 import {
   computeShaperResponse,
   type CorneringSettings,
@@ -13,6 +14,7 @@ import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
 import { suggestedMaxAccelFromTaps } from './shaper-scores/klipper';
 import type { OptimisationResult } from './shaper-optimiser.worker';
 import { scoreCandidateFromTaps, type ShaperScoreMode } from './shaper-scores';
+import { rankShapers, type Priority } from './simple-shaper';
 
 /** Marlin FTM_FS (trajectory sample rate, Hz) of the user's firmware build. */
 export const ftmFsAtom = atom(DEFAULT_FTM_FS_HZ);
@@ -37,7 +39,11 @@ export const shaperParamsAtom = atom(
 
 export const shaperScoreModeAtom = atom<ShaperScoreMode>('klipper');
 
-export const corneringSettingsAtom = atom<CorneringSettings>({ model: 'jerk', value: 10 });
+// Marlin's default: CLASSIC_JERK off, JUNCTION_DEVIATION_MM 0.013 (Configuration.h).
+export const corneringSettingsAtom = atom<CorneringSettings>({
+  model: 'junction_deviation',
+  value: 0.013,
+});
 
 export const shaperTapsAtom = atom((get) =>
   computeMarlinShaperTaps(get(shaperParamsAtom), get(ftmFsAtom))
@@ -93,3 +99,19 @@ export const historyModeAtom = atom<HistoryMode>('suggested_max_accel');
 export const optimisationHistoryAtom = atom<OptimisationResult[]>([]);
 
 export const analysisRangeAtom = atom(FREQUENCY_SLIDER_RANGE_HZ);
+
+/** Simple: the app picks the shaper from one priority choice. Advanced: every optimiser control. */
+export const shaperUiModeAtom = atomWithStorage<'simple' | 'advanced'>('shaper-ui-mode', 'simple');
+
+export const priorityAtom = atom<Priority>('balanced');
+
+export const printAccelAtom = atomWithStorage('print-accel', DEFAULT_PRINT_ACCEL);
+
+export const simpleRankingAtom = atom((get) =>
+  rankShapers(
+    get(spectrogramMaxHoldAtom),
+    get(priorityAtom),
+    get(corneringSettingsAtom),
+    get(ftmFsAtom)
+  )
+);

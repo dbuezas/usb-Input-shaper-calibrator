@@ -84,56 +84,67 @@ const allPointsAtom = atom((get) => {
   return all;
 });
 
-export default function ShaperPlots() {
+/** Max-hold spectrum, the same after the current shaper, and the shaper response. */
+export const ShapedSpectrumPlot = ({ showAnalysisRange }: { showAnalysisRange: boolean }) => {
   const height = SPECTROGRAM_WATERFALL_HEIGHT;
   const [plotRef, plotBounds] = useMeasure<HTMLDivElement>();
   const width = Math.max(0, Math.floor(plotBounds.width ?? 0));
 
   const shaperParams = useAtomValue(shaperParamsAtom);
-
   const maxHoldSpectrum = useAtomValue(spectrogramMaxHoldAtom);
   const shaperResponse = useAtomValue(shaperResponseAtom);
   const analysisRange = useAtomValue(analysisRangeAtom);
+
+  return (
+    <div ref={plotRef} className="w-full">
+      <SpectrumPlot
+        traces={[
+          {
+            dataAtom: spectrogramMaxHoldAtom,
+            mode: 'line',
+            color: 'rgba(0, 220, 255, 0.55)',
+          },
+          {
+            dataAtom: shapedSpectrumAtom,
+            mode: 'line',
+            color: 'rgba(0, 255, 120, 0.9)',
+          },
+          {
+            dataAtom: shaperResponseAtom,
+            mode: 'line',
+            color: SHAPER_COLORS[shaperParams.type].replace(', 1)', ', 0.85)'),
+            yAxis: 'right',
+          },
+        ]}
+        height={height}
+        width={width}
+        freqRange={FREQUENCY_SLIDER_RANGE_HZ}
+        xLabel="Frequency (Hz)"
+        yLabel="Amplitude"
+        y2Label="Response"
+        markers={
+          showAnalysisRange
+            ? [
+                { freqHz: analysisRange[0], color: 'rgba(255,255,255,0.75)' },
+                { freqHz: analysisRange[1], color: 'rgba(255,255,255,0.75)' },
+              ]
+            : []
+        }
+        scaleMax={maxHoldSpectrum.length ? Math.max(...maxHoldSpectrum) : undefined}
+        scaleMaxRight={shaperResponse.length ? Math.max(...shaperResponse) : 1}
+      />
+    </div>
+  );
+};
+
+export default function ShaperPlots() {
   const historyMode = useAtomValue(historyModeAtom);
 
   return (
     <div className="flex flex-col gap-4">
       <div>
         <h4 className="mb-2 font-semibold">Spectrum Max-Hold → Shaped</h4>
-        <div ref={plotRef} className="w-full">
-          <SpectrumPlot
-            traces={[
-              {
-                dataAtom: spectrogramMaxHoldAtom,
-                mode: 'line',
-                color: 'rgba(0, 220, 255, 0.55)',
-              },
-              {
-                dataAtom: shapedSpectrumAtom,
-                mode: 'line',
-                color: 'rgba(0, 255, 120, 0.9)',
-              },
-              {
-                dataAtom: shaperResponseAtom,
-                mode: 'line',
-                color: SHAPER_COLORS[shaperParams.type].replace(', 1)', ', 0.85)'),
-                yAxis: 'right',
-              },
-            ]}
-            height={height}
-            width={width}
-            freqRange={FREQUENCY_SLIDER_RANGE_HZ}
-            xLabel="Frequency (Hz)"
-            yLabel="Amplitude"
-            y2Label="Response"
-            markers={[
-              { freqHz: analysisRange[0], color: 'rgba(255,255,255,0.75)' },
-              { freqHz: analysisRange[1], color: 'rgba(255,255,255,0.75)' },
-            ]}
-            scaleMax={maxHoldSpectrum.length ? Math.max(...maxHoldSpectrum) : undefined}
-            scaleMaxRight={shaperResponse.length ? Math.max(...shaperResponse) : 1}
-          />
-        </div>
+        <ShapedSpectrumPlot showAnalysisRange />
       </div>
       <CurrentScore />
 

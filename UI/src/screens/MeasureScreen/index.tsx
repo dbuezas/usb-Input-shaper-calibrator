@@ -396,7 +396,7 @@ export default function MeasureScreen() {
                 className="w-full"
               />
             </div>
-            <div className="mt-3 flex items-center gap-2">
+            <div className="mt-3 flex flex-wrap items-center gap-2">
               <span className="text-muted-foreground text-sm">Simulated sensor:</span>
               {SIMULATED_SENSORS.map((sensor) => (
                 <Button
