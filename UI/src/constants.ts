@@ -126,10 +126,13 @@ export const SEARCH_VTOL_STEP = 0.05;
 // Simple shaper mode shows the corner rounding at the user's print acceleration.
 export const DEFAULT_PRINT_ACCEL = 5000;
 export const PRINT_ACCEL_RANGE: [number, number] = [100, 100_000];
-// The corner simulation in Simple mode: wall speed (mm/s), leg length (mm) and resonance damping.
+// The corner simulation in Simple mode: wall speed (mm/s) and leg length (mm).
 export const CORNER_SIM_SPEED_MM_S = 100;
 export const CORNER_SIM_LEG_MM = 3;
-export const CORNER_SIM_ZETA = 0.1;
+// Resonance damping ratio: measured from the peak width, kept in this range. The default is used
+// when the peak width cannot be measured (Klipper's default too).
+export const CORNER_SIM_ZETA_RANGE: [number, number] = [0.02, 0.3];
+export const CORNER_SIM_DEFAULT_ZETA = 0.1;
 
 export const CORNERING_SPEED_RANGE_MM_S: [number, number] = [0.5, 60];
 export const CORNERING_JUNCTION_DEVIATION_RANGE_MM: [number, number] = [0, 0.2];

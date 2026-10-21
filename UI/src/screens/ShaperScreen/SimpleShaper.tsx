@@ -1,11 +1,6 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
-import {
-  CORNER_SIM_SPEED_MM_S,
-  CORNER_SIM_ZETA,
-  FREQUENCY_SLIDER_RANGE_HZ,
-  PRINT_ACCEL_RANGE,
-} from '@/constants';
+import { CORNER_SIM_SPEED_MM_S, PRINT_ACCEL_RANGE } from '@/constants';
 import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
 import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
@@ -18,13 +13,15 @@ import {
   simpleRankingAtom,
 } from './atoms';
 import GcodePanel from './GcodePanel';
-import { peakFromSeries, type ShaperParams } from './input-shaper';
+import type { ShaperParams } from './input-shaper';
 import {
   cornerCutMm,
   NO_SHAPER,
+  resonanceFromSpectrum,
   simulateCorner,
   wallRippleMm,
   type CornerPath,
+  type Resonance,
 } from './corner-sim';
 import { ShapedSpectrumPlot } from './ShaperPlots';
 import { SHAPER_COLORS } from './shaper-colors';
@@ -178,12 +175,12 @@ const CornerSimulation = ({
   shaped,
   none,
   color,
-  peakHz,
+  resonance,
 }: {
   shaped: CornerPath;
   none: CornerPath;
   color: string;
-  peakHz: number;
+  resonance: Resonance;
 }) => (
   <div className="mt-4">
     <div className="flex flex-wrap gap-6">
@@ -191,9 +188,11 @@ const CornerSimulation = ({
       <WallChart shaped={shaped} none={none} color={color} />
     </div>
     <div className="text-muted-foreground mt-1 text-xs">
-      Simulated print of a square corner. Colored: this shaper. Gray: no shaper. Dashed: the perfect
-      path. Uses your {peakHz.toFixed(0)} Hz resonance (damping {CORNER_SIM_ZETA}), your
-      acceleration, and walls at {CORNER_SIM_SPEED_MM_S} mm/s.
+      Estimate from a simple model of a square corner. Colored: this shaper. Gray: no shaper.
+      Dashed: the perfect path. Uses your {resonance.peakHz.toFixed(0)} Hz resonance, damping{' '}
+      {resonance.zeta.toFixed(2)} (
+      {resonance.measured ? 'from the width of your peak' : 'assumed, the peak width was unclear'}),
+      your acceleration, and walls at {CORNER_SIM_SPEED_MM_S} mm/s.
     </div>
   </div>
 );
@@ -296,22 +295,22 @@ const whyText = (c: SimpleCandidate, peakHz: number, recommended: boolean) => {
 const SelectedCard = ({
   candidate,
   recommended,
-  peakHz,
+  resonance,
 }: {
   candidate: SimpleCandidate;
   recommended: boolean;
-  peakHz: number;
+  resonance: Resonance;
 }) => {
   const color = SHAPER_COLORS[candidate.params.type];
   const printAccel = useAtomValue(printAccelAtom);
   const cornering = useAtomValue(corneringSettingsAtom);
   const none = useMemo(
-    () => simulateCorner(NO_SHAPER, peakHz, printAccel, cornering),
-    [peakHz, printAccel, cornering]
+    () => simulateCorner(NO_SHAPER, resonance, printAccel, cornering),
+    [resonance, printAccel, cornering]
   );
   const shaped = useMemo(
-    () => simulateCorner(candidate.taps, peakHz, printAccel, cornering),
-    [candidate.taps, peakHz, printAccel, cornering]
+    () => simulateCorner(candidate.taps, resonance, printAccel, cornering),
+    [candidate.taps, resonance, printAccel, cornering]
   );
   return (
     <div className="border-border bg-card rounded-xl border p-5" data-testid="simple-selected">
@@ -356,14 +355,14 @@ const SelectedCard = ({
           </div>
         </div>
       </div>
-      <CornerSimulation shaped={shaped} none={none} color={color} peakHz={peakHz} />
+      <CornerSimulation shaped={shaped} none={none} color={color} resonance={resonance} />
       {printAccel > candidate.maxAccel && (
         <div className="mt-3 rounded-md bg-amber-500/15 p-2 text-sm">
           Your {printAccel} mm/s² is above the max acceleration of this shaper. Corners get too
           round. Print slower, or move the slider to the left.
         </div>
       )}
-      <div className="mt-4 text-sm">{whyText(candidate, peakHz, recommended)}</div>
+      <div className="mt-4 text-sm">{whyText(candidate, resonance.peakHz, recommended)}</div>
     </div>
   );
 };
@@ -372,18 +371,18 @@ const ShaperTable = ({
   ranking,
   selected,
   onPick,
-  peakHz,
+  resonance,
 }: {
   ranking: SimpleCandidate[];
   selected: ShaperParams;
   onPick: (c: SimpleCandidate) => void;
-  peakHz: number;
+  resonance: Resonance;
 }) => {
   const printAccel = useAtomValue(printAccelAtom);
   const cornering = useAtomValue(corneringSettingsAtom);
   const cuts = useMemo(
-    () => ranking.map((c) => cornerCutMm(simulateCorner(c.taps, peakHz, printAccel, cornering))),
-    [ranking, peakHz, printAccel, cornering]
+    () => ranking.map((c) => cornerCutMm(simulateCorner(c.taps, resonance, printAccel, cornering))),
+    [ranking, resonance, printAccel, cornering]
   );
   return (
     <div className="border-border overflow-x-auto rounded-xl border">
@@ -441,7 +440,7 @@ export default function SimpleShaper() {
   }, [recommended, setSelected]);
 
   const current = ranking.find((c) => sameParams(c.params, selected)) ?? recommended;
-  const peakHz = peakFromSeries(maxHold, FREQUENCY_SLIDER_RANGE_HZ);
+  const resonance = useMemo(() => resonanceFromSpectrum(maxHold), [maxHold]);
 
   return (
     <div className="flex flex-col gap-6 md:flex-row">
@@ -468,7 +467,7 @@ export default function SimpleShaper() {
             <SelectedCard
               candidate={current}
               recommended={current === recommended}
-              peakHz={peakHz}
+              resonance={resonance}
             />
             <div>
               <h4 className="mb-1 font-semibold">All shapers</h4>
@@ -479,7 +478,7 @@ export default function SimpleShaper() {
                 ranking={ranking}
                 selected={selected}
                 onPick={(c) => setSelected(c.params)}
-                peakHz={peakHz}
+                resonance={resonance}
               />
             </div>
             <div>

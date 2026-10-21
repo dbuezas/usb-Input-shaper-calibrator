@@ -1,7 +1,13 @@
 // Simulates the toolhead around a 90° corner: the planner's moves, then the input shaper, then one
 // resonance (a mass on a spring) on each axis. Gives the real path, to show rounding and ringing.
-import { CORNER_SIM_LEG_MM, CORNER_SIM_SPEED_MM_S, CORNER_SIM_ZETA } from '@/constants';
-import type { CorneringSettings, ShaperTaps } from './input-shaper';
+import {
+  CORNER_SIM_DEFAULT_ZETA,
+  CORNER_SIM_LEG_MM,
+  CORNER_SIM_SPEED_MM_S,
+  CORNER_SIM_ZETA_RANGE,
+  FREQUENCY_SLIDER_RANGE_HZ,
+} from '@/constants';
+import { binToHz, peakFromSeries, type CorneringSettings, type ShaperTaps } from './input-shaper';
 import { scvEquivalentAtAccel } from './shaper-scores/klipper';
 
 const DT_S = 1e-5;
@@ -31,6 +37,45 @@ const trapezoid = (v0: number, v1: number, accel: number) => {
   return { duration, at };
 };
 
+export type Resonance = {
+  peakHz: number;
+  /** Damping ratio ζ. */
+  zeta: number;
+  /** False when the peak width could not be measured and ζ is the default. */
+  measured: boolean;
+};
+
+/**
+ * The highest peak and its damping, from the half-power width: ζ ≈ (f2 − f1) / (2·f0), where the
+ * magnitude falls to peak/√2 at f1 and f2.
+ */
+export const resonanceFromSpectrum = (magnitudes: Float32Array): Resonance => {
+  const peakHz = peakFromSeries(magnitudes, FREQUENCY_SLIDER_RANGE_HZ);
+  const fallback = { peakHz, zeta: CORNER_SIM_DEFAULT_ZETA, measured: false };
+  const peakBin = magnitudes.findIndex((_, i) => binToHz(i) === peakHz);
+  const half = (magnitudes[peakBin] ?? 0) / Math.SQRT2;
+  if (peakBin < 0 || !(half > 0)) return fallback;
+
+  // Walks from the peak until the magnitude drops below `half`; interpolates the crossing.
+  const crossingHz = (step: 1 | -1) => {
+    for (let i = peakBin + step; i >= 0 && i < magnitudes.length; i += step) {
+      const f = binToHz(i);
+      if (f < FREQUENCY_SLIDER_RANGE_HZ[0] || f > FREQUENCY_SLIDER_RANGE_HZ[1]) return undefined;
+      const prev = magnitudes[i - step];
+      const cur = magnitudes[i];
+      if (cur < half)
+        return binToHz(i - step) + ((prev - half) / (prev - cur)) * (f - binToHz(i - step));
+    }
+    return undefined;
+  };
+  const f1 = crossingHz(-1);
+  const f2 = crossingHz(1);
+  if (f1 === undefined || f2 === undefined) return fallback;
+  const zeta = (f2 - f1) / (2 * peakHz);
+  if (zeta < CORNER_SIM_ZETA_RANGE[0] || zeta > CORNER_SIM_ZETA_RANGE[1]) return fallback;
+  return { peakHz, zeta, measured: true };
+};
+
 export type CornerPath = {
   /** Toolhead positions (mm). The ideal corner is at (0, 0): in along +x, out along +y. */
   points: [number, number][];
@@ -38,7 +83,7 @@ export type CornerPath = {
 
 export const simulateCorner = (
   taps: Pick<ShaperTaps, 'a' | 't'>,
-  peakHz: number,
+  { peakHz, zeta }: Resonance,
   accel: number,
   cornering: CorneringSettings
 ): CornerPath => {
@@ -75,8 +120,8 @@ export const simulateCorner = (
   const points: [number, number][] = [];
   for (let step = 0, t = -LEAD_IN_S; t < end; step++, t += DT_S) {
     const c = shaped(t);
-    vx += (-omega * omega * (x - c.x) - 2 * CORNER_SIM_ZETA * omega * (vx - c.vx)) * DT_S;
-    vy += (-omega * omega * (y - c.y) - 2 * CORNER_SIM_ZETA * omega * (vy - c.vy)) * DT_S;
+    vx += (-omega * omega * (x - c.x) - 2 * zeta * omega * (vx - c.vx)) * DT_S;
+    vy += (-omega * omega * (y - c.y) - 2 * zeta * omega * (vy - c.vy)) * DT_S;
     x += vx * DT_S;
     y += vy * DT_S;
     if (step % SAMPLE_EVERY === 0) points.push([x, y]);
