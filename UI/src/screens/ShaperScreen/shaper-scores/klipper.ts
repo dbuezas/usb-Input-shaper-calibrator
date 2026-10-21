@@ -162,7 +162,7 @@ export const suggestedMaxAccelFromTaps = (
   return Number.isFinite(maxAccel) ? maxAccel : 0;
 };
 
-const scvEquivalentAtAccel = ({ model, value }: CorneringSettings, accel: number) => {
+export const scvEquivalentAtAccel = ({ model, value }: CorneringSettings, accel: number) => {
   switch (model) {
     case 'scv':
       return value;

@@ -1,6 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
-import { FREQUENCY_SLIDER_RANGE_HZ, PRINT_ACCEL_RANGE } from '@/constants';
+import {
+  CORNER_SIM_SPEED_MM_S,
+  CORNER_SIM_ZETA,
+  FREQUENCY_SLIDER_RANGE_HZ,
+  PRINT_ACCEL_RANGE,
+} from '@/constants';
 import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
 import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
@@ -13,8 +18,14 @@ import {
   simpleRankingAtom,
 } from './atoms';
 import GcodePanel from './GcodePanel';
-import { peakFromSeries, type CorneringSettings, type ShaperParams } from './input-shaper';
-import { klipperSmoothing } from './shaper-scores/klipper';
+import { peakFromSeries, type ShaperParams } from './input-shaper';
+import {
+  cornerCutMm,
+  NO_SHAPER,
+  simulateCorner,
+  wallRippleMm,
+  type CornerPath,
+} from './corner-sim';
 import { ShapedSpectrumPlot } from './ShaperPlots';
 import { SHAPER_COLORS } from './shaper-colors';
 import { PRIORITIES, PRIORITY_ORDER, type SimpleCandidate } from './simple-shaper';
@@ -24,49 +35,168 @@ const sameParams = (a: ShaperParams, b: ShaperParams) =>
 
 const percent = (v: number) => `${(v * 100).toFixed(v < 0.1 ? 1 : 0)} %`;
 const accel = (v: number) => `${Math.round(v / 100) * 100} mm/s²`;
-const roundingAt = (c: SimpleCandidate, printAccel: number, cornering: CorneringSettings) =>
-  klipperSmoothing(c.taps.a, c.taps.t, printAccel, cornering);
+const microns = (mm: number) => `${Math.round(mm * 1000)} µm`;
 
-// A 90° corner as printed (shaper color) over the ideal corner (dashed), seen from above.
-// The rounding is to scale (enlarged). The ripples after the corner only show the relative ringing.
-const CORNER_PX_PER_MM = 100;
-const RIPPLE_PX_PER_RINGING = 60;
-const CornerPicture = ({
-  roundingMm,
-  ringing,
+// Charts of the simulated corner. The scales do not depend on the shaper, so the slider changes
+// the shapes, not the axes.
+const GRAY = 'var(--color-muted-foreground)';
+const PLOT_PX = 130;
+const MARGIN_PX = 10;
+const CORNER_VIEW_MM = 0.3; // how much of each wall the corner chart shows
+const CORNER_PAD_MM = 0.06; // room outside the corner
+const WALL_VIEW_MM = 2.5; // how much of the wall after the corner the wall chart shows
+const WALL_W_PX = 240;
+const MIN_WALL_RANGE_MM = 0.005;
+
+const CornerChart = ({
+  shaped,
+  none,
   color,
 }: {
-  roundingMm: number;
-  ringing: number;
+  shaped: CornerPath;
+  none: CornerPath;
   color: string;
 }) => {
-  const c = 90; // corner position
-  // A quadratic curve through the corner control point passes 0.354·d from the corner.
-  const d = Math.min(70, (roundingMm * CORNER_PX_PER_MM) / 0.354);
-  const amplitude = Math.min(8, ringing * RIPPLE_PX_PER_RINGING);
-  const ripple: string[] = [];
-  for (let y = c - d; y >= 5; y -= 1) {
-    const s = c - d - y;
-    ripple.push(`${c + amplitude * Math.sin(s / 2.5) * Math.exp(-s / 30)} ${y}`);
-  }
+  const clipId = useId();
+  const pxPerMm = PLOT_PX / (CORNER_VIEW_MM + CORNER_PAD_MM);
+  const toSvg = ([x, y]: [number, number]) =>
+    `${MARGIN_PX + (x + CORNER_VIEW_MM) * pxPerMm},${MARGIN_PX + (CORNER_VIEW_MM - y) * pxPerMm}`;
+  const line = (points: [number, number][]) => points.map(toSvg).join(' ');
+  const size = PLOT_PX + 2 * MARGIN_PX;
   return (
-    <svg viewBox="0 0 100 100" className="h-28 w-28 shrink-0" aria-hidden>
-      <path
-        d={`M 5 ${c} L ${c} ${c} L ${c} 5`}
-        fill="none"
-        stroke="currentColor"
-        strokeDasharray="3 3"
-        className="text-muted-foreground"
-      />
-      <path
-        d={`M 5 ${c} L ${c - d} ${c} Q ${c} ${c} ${c} ${c - d} L ${ripple.join(' L ')}`}
-        fill="none"
-        stroke={color}
-        strokeWidth={2.5}
-      />
-    </svg>
+    <figure className="flex flex-col gap-1">
+      <figcaption className="text-muted-foreground text-xs">
+        Corner from above, true scale
+      </figcaption>
+      <svg
+        viewBox={`0 0 ${size} ${size + 14}`}
+        className="w-40"
+        role="img"
+        aria-label="Simulated corner"
+      >
+        <clipPath id={clipId}>
+          <rect x={MARGIN_PX} y={MARGIN_PX} width={PLOT_PX} height={PLOT_PX} />
+        </clipPath>
+        <polyline
+          points={line([
+            [-CORNER_VIEW_MM, 0],
+            [0, 0],
+            [0, CORNER_VIEW_MM],
+          ])}
+          fill="none"
+          stroke={GRAY}
+          strokeDasharray="3 3"
+        />
+        <g clipPath={`url(#${clipId})`} fill="none" strokeWidth={2} strokeLinejoin="round">
+          <polyline points={line(none.points)} stroke={GRAY} opacity={0.6} />
+          <polyline points={line(shaped.points)} stroke={color} />
+        </g>
+        <line
+          x1={MARGIN_PX}
+          x2={MARGIN_PX + 0.1 * pxPerMm}
+          y1={size + 4}
+          y2={size + 4}
+          stroke={GRAY}
+          strokeWidth={2}
+        />
+        <text x={MARGIN_PX + 0.1 * pxPerMm + 4} y={size + 8} fontSize={10} fill={GRAY}>
+          0.1 mm
+        </text>
+      </svg>
+    </figure>
   );
 };
+
+const WallChart = ({
+  shaped,
+  none,
+  color,
+}: {
+  shaped: CornerPath;
+  none: CornerPath;
+  color: string;
+}) => {
+  const clipId = useId();
+  // The no-shaper wobble sets the scale (after it has left the corner).
+  const rangeMm = Math.max(MIN_WALL_RANGE_MM, 1.2 * wallRippleMm(none, 0.3));
+  const toSvg = ([x, y]: [number, number]) =>
+    `${MARGIN_PX + (y / WALL_VIEW_MM) * WALL_W_PX},${MARGIN_PX + ((rangeMm - x) / (2 * rangeMm)) * PLOT_PX}`;
+  const line = (p: CornerPath) =>
+    p.points
+      .filter(([, y]) => y >= 0)
+      .map(toSvg)
+      .join(' ');
+  return (
+    <figure className="flex min-w-0 flex-col gap-1">
+      <figcaption className="text-muted-foreground text-xs">
+        Wall after the corner: sideways wobble (ghost lines)
+      </figcaption>
+      <svg
+        viewBox={`0 0 ${WALL_W_PX + 2 * MARGIN_PX + 40} ${PLOT_PX + 2 * MARGIN_PX + 14}`}
+        className="w-full max-w-80"
+        role="img"
+        aria-label="Simulated wall wobble"
+      >
+        <clipPath id={clipId}>
+          <rect x={MARGIN_PX} y={MARGIN_PX} width={WALL_W_PX} height={PLOT_PX} />
+        </clipPath>
+        <line
+          x1={MARGIN_PX}
+          x2={MARGIN_PX + WALL_W_PX}
+          y1={MARGIN_PX + PLOT_PX / 2}
+          y2={MARGIN_PX + PLOT_PX / 2}
+          stroke={GRAY}
+          strokeDasharray="3 3"
+        />
+        <g clipPath={`url(#${clipId})`} fill="none" strokeWidth={2} strokeLinejoin="round">
+          <polyline points={line(none)} stroke={GRAY} opacity={0.6} />
+          <polyline points={line(shaped)} stroke={color} />
+        </g>
+        <g fontSize={10} fill={GRAY}>
+          <text x={MARGIN_PX + WALL_W_PX + 4} y={MARGIN_PX + 8}>
+            +{microns(rangeMm)}
+          </text>
+          <text x={MARGIN_PX + WALL_W_PX + 4} y={MARGIN_PX + PLOT_PX / 2 + 3}>
+            0
+          </text>
+          <text x={MARGIN_PX + WALL_W_PX + 4} y={MARGIN_PX + PLOT_PX}>
+            −{microns(rangeMm)}
+          </text>
+          <text x={MARGIN_PX} y={PLOT_PX + 2 * MARGIN_PX + 10}>
+            corner
+          </text>
+          <text x={MARGIN_PX + WALL_W_PX} y={PLOT_PX + 2 * MARGIN_PX + 10} textAnchor="end">
+            {WALL_VIEW_MM} mm
+          </text>
+        </g>
+      </svg>
+    </figure>
+  );
+};
+
+const CornerSimulation = ({
+  shaped,
+  none,
+  color,
+  peakHz,
+}: {
+  shaped: CornerPath;
+  none: CornerPath;
+  color: string;
+  peakHz: number;
+}) => (
+  <div className="mt-4">
+    <div className="flex flex-wrap gap-6">
+      <CornerChart shaped={shaped} none={none} color={color} />
+      <WallChart shaped={shaped} none={none} color={color} />
+    </div>
+    <div className="text-muted-foreground mt-1 text-xs">
+      Simulated print of a square corner. Colored: this shaper. Gray: no shaper. Dashed: the perfect
+      path. Uses your {peakHz.toFixed(0)} Hz resonance (damping {CORNER_SIM_ZETA}), your
+      acceleration, and walls at {CORNER_SIM_SPEED_MM_S} mm/s.
+    </div>
+  </div>
+);
 
 const PrioritySlider = () => {
   const [priority, setPriority] = useAtom(priorityAtom);
@@ -175,7 +305,14 @@ const SelectedCard = ({
   const color = SHAPER_COLORS[candidate.params.type];
   const printAccel = useAtomValue(printAccelAtom);
   const cornering = useAtomValue(corneringSettingsAtom);
-  const roundingMm = roundingAt(candidate, printAccel, cornering);
+  const none = useMemo(
+    () => simulateCorner(NO_SHAPER, peakHz, printAccel, cornering),
+    [peakHz, printAccel, cornering]
+  );
+  const shaped = useMemo(
+    () => simulateCorner(candidate.taps, peakHz, printAccel, cornering),
+    [candidate.taps, peakHz, printAccel, cornering]
+  );
   return (
     <div className="border-border bg-card rounded-xl border p-5" data-testid="simple-selected">
       <div className="text-muted-foreground text-sm">
@@ -185,52 +322,45 @@ const SelectedCard = ({
         <span style={{ color }}>{candidate.params.type.toUpperCase()}</span> at{' '}
         {candidate.fEffHz.toFixed(1)} Hz
       </div>
-      <div className="mt-4 flex flex-col gap-4 sm:flex-row">
-        <div className="grid flex-1 gap-4 sm:grid-cols-3">
-          <div>
-            <div className="text-muted-foreground text-sm">Ringing left</div>
-            <div className="mt-1 font-mono text-lg">{percent(candidate.ringing)}</div>
-            <div className="bg-muted mt-1 h-2 w-full rounded">
-              <div
-                className="h-2 rounded"
-                style={{
-                  width: `${Math.min(100, (candidate.ringing / 0.2) * 100)}%`,
-                  background: color,
-                }}
-              />
-            </div>
-            <div className="text-muted-foreground mt-1 text-xs">
-              Ghost lines after edges. Lower is better.
-            </div>
+      <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        <div>
+          <div className="text-muted-foreground text-sm">Ringing left</div>
+          <div className="mt-1 font-mono text-lg">{percent(candidate.ringing)}</div>
+          <div className="bg-muted mt-1 h-2 w-full rounded">
+            <div
+              className="h-2 rounded"
+              style={{
+                width: `${Math.min(100, (candidate.ringing / 0.2) * 100)}%`,
+                background: color,
+              }}
+            />
           </div>
-          <div>
-            <div className="text-muted-foreground text-sm">Corner rounding</div>
-            <div className="mt-1 font-mono text-lg" data-testid="simple-rounding">
-              {roundingMm.toFixed(2)} mm
-            </div>
-            <div className="text-muted-foreground mt-1 text-xs">
-              At your {printAccel} mm/s². Lower is better.
-            </div>
-          </div>
-          <div>
-            <div className="text-muted-foreground text-sm">Max acceleration</div>
-            <div className="mt-1 font-mono text-lg">{accel(candidate.maxAccel)}</div>
-            <div className="text-muted-foreground mt-1 text-xs">
-              Above this, corners round more than 0.12 mm.
-            </div>
+          <div className="text-muted-foreground mt-1 text-xs">
+            Ghost lines after edges. Lower is better.
           </div>
         </div>
-        <div className="flex flex-col items-center">
-          <CornerPicture roundingMm={roundingMm} ringing={candidate.ringing} color={color} />
-          <div className="text-muted-foreground w-28 text-center text-[10px] leading-tight">
-            A corner from above. Rounding {CORNER_PX_PER_MM}× larger.
+        <div>
+          <div className="text-muted-foreground text-sm">Corner rounding</div>
+          <div className="mt-1 font-mono text-lg" data-testid="simple-rounding">
+            {microns(cornerCutMm(shaped))}
+          </div>
+          <div className="text-muted-foreground mt-1 text-xs">
+            How much the corner is cut, at your {printAccel} mm/s². Lower is better.
+          </div>
+        </div>
+        <div>
+          <div className="text-muted-foreground text-sm">Max acceleration</div>
+          <div className="mt-1 font-mono text-lg">{accel(candidate.maxAccel)}</div>
+          <div className="text-muted-foreground mt-1 text-xs">
+            Above this, corners get too round (Klipper's smoothing limit).
           </div>
         </div>
       </div>
+      <CornerSimulation shaped={shaped} none={none} color={color} peakHz={peakHz} />
       {printAccel > candidate.maxAccel && (
         <div className="mt-3 rounded-md bg-amber-500/15 p-2 text-sm">
-          Your {printAccel} mm/s² is above the max acceleration of this shaper. Corners round more
-          than 0.12 mm. Print slower, or move the slider to the left.
+          Your {printAccel} mm/s² is above the max acceleration of this shaper. Corners get too
+          round. Print slower, or move the slider to the left.
         </div>
       )}
       <div className="mt-4 text-sm">{whyText(candidate, peakHz, recommended)}</div>
@@ -242,13 +372,19 @@ const ShaperTable = ({
   ranking,
   selected,
   onPick,
+  peakHz,
 }: {
   ranking: SimpleCandidate[];
   selected: ShaperParams;
   onPick: (c: SimpleCandidate) => void;
+  peakHz: number;
 }) => {
   const printAccel = useAtomValue(printAccelAtom);
   const cornering = useAtomValue(corneringSettingsAtom);
+  const cuts = useMemo(
+    () => ranking.map((c) => cornerCutMm(simulateCorner(c.taps, peakHz, printAccel, cornering))),
+    [ranking, peakHz, printAccel, cornering]
+  );
   return (
     <div className="border-border overflow-x-auto rounded-xl border">
       <table className="w-full text-sm">
@@ -258,11 +394,11 @@ const ShaperTable = ({
             <th className="p-2">Frequency</th>
             <th className="p-2">Ringing left</th>
             <th className="p-2">Max acceleration</th>
-            <th className="p-2 pr-4">Rounding at {printAccel} mm/s²</th>
+            <th className="p-2 pr-4">Corner cut at {printAccel} mm/s²</th>
           </tr>
         </thead>
         <tbody className="font-mono">
-          {ranking.map((c) => (
+          {ranking.map((c, i) => (
             <tr
               key={c.params.type}
               data-testid={`shaper-row-${c.params.type}`}
@@ -284,7 +420,7 @@ const ShaperTable = ({
                 {!c.meetsTarget && <span className="font-sans text-xs"> (over limit)</span>}
               </td>
               <td className="p-2">{accel(c.maxAccel)}</td>
-              <td className="p-2 pr-4">{roundingAt(c, printAccel, cornering).toFixed(2)} mm</td>
+              <td className="p-2 pr-4">{microns(cuts[i] ?? 0)}</td>
             </tr>
           ))}
         </tbody>
@@ -343,6 +479,7 @@ export default function SimpleShaper() {
                 ranking={ranking}
                 selected={selected}
                 onPick={(c) => setSelected(c.params)}
+                peakHz={peakHz}
               />
             </div>
             <div>
