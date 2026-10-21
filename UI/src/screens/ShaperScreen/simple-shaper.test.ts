@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ACTUAL_RESOLUTION } from '@/constants';
 import { computeMarlinShaperTaps } from './input-shaper';
+import { klipperSmoothing } from './shaper-scores/klipper';
 import { PRIORITY_ORDER, rankShapers } from './simple-shaper';
 
 // One resonance at `peakHz` (quality factor 8) on a small noise floor.
@@ -26,12 +27,13 @@ describe('rankShapers', () => {
       expect(r.maxAccel).toBeLessThanOrEqual(rows[0].maxAccel);
   });
 
-  it('trades acceleration for less ringing from fast to clean', () => {
-    const [fast, balanced, clean] = PRIORITY_ORDER.map((p) => rank(p)[0]);
-    expect(fast.maxAccel).toBeGreaterThanOrEqual(balanced.maxAccel);
-    expect(balanced.maxAccel).toBeGreaterThanOrEqual(clean.maxAccel);
-    expect(clean.ringing).toBeLessThanOrEqual(balanced.ringing);
-    expect(clean.roundingMm).toBeGreaterThanOrEqual(fast.roundingMm);
+  it('trades corner rounding for less ringing from sharp to no_ringing', () => {
+    const [sharp, balanced, noRinging] = PRIORITY_ORDER.map((p) => rank(p)[0]);
+    const rounding = (c: typeof sharp) => klipperSmoothing(c.taps.a, c.taps.t, 5000, JD);
+    expect(sharp.maxAccel).toBeGreaterThanOrEqual(balanced.maxAccel);
+    expect(balanced.maxAccel).toBeGreaterThanOrEqual(noRinging.maxAccel);
+    expect(noRinging.ringing).toBeLessThanOrEqual(balanced.ringing);
+    expect(rounding(noRinging)).toBeGreaterThanOrEqual(rounding(sharp));
   });
 
   it('moves wide-notch shapers above the peak to round corners less', () => {

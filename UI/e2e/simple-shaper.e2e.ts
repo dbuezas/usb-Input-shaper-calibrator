@@ -27,9 +27,18 @@ test('simple shaper mode recommends a shaper and gives G-code', async ({ page })
   await expect(selected).toContainText('Recommended for your printer');
   await expect(page.locator('[data-testid^="shaper-row-"]')).toHaveCount(8);
 
-  // Clean surfaces: less ringing allowed, so the description changes.
-  await page.getByRole('button', { name: 'Clean surfaces' }).click();
+  // No ringing: less ringing allowed, so the description changes.
+  await page.getByRole('button', { name: 'No ringing' }).click();
   await expect(page.getByTestId('priority-description')).toContainText('Least ringing');
+
+  // The rounding follows the print acceleration.
+  const rounding = page.getByTestId('simple-rounding');
+  const before = parseFloat((await rounding.textContent()) ?? '');
+  await page.getByLabel('Your print acceleration').fill('10000');
+  await expect
+    .poll(async () => parseFloat((await rounding.textContent()) ?? ''))
+    .toBeGreaterThan(before);
+  await expect(selected).toContainText('above the max acceleration');
 
   // Picking another row makes it "your pick".
   const recommendedName = (await selected.locator('span').first().textContent()) ?? '';

@@ -1,18 +1,20 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
-import { FREQUENCY_SLIDER_RANGE_HZ, SIMPLE_SHAPER_ROUNDING_ACCEL } from '@/constants';
+import { FREQUENCY_SLIDER_RANGE_HZ, PRINT_ACCEL_RANGE } from '@/constants';
 import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
 import { spectrogramMaxHoldAtom } from '../MeasureScreen/atoms';
 import {
   corneringSettingsAtom,
   ftmFsAtom,
+  printAccelAtom,
   priorityAtom,
   selectedShaperParamsAtom,
   simpleRankingAtom,
 } from './atoms';
 import GcodePanel from './GcodePanel';
-import { peakFromSeries, type ShaperParams } from './input-shaper';
+import { peakFromSeries, type CorneringSettings, type ShaperParams } from './input-shaper';
+import { klipperSmoothing } from './shaper-scores/klipper';
 import { ShapedSpectrumPlot } from './ShaperPlots';
 import { SHAPER_COLORS } from './shaper-colors';
 import { PRIORITIES, PRIORITY_ORDER, type SimpleCandidate } from './simple-shaper';
@@ -22,15 +24,33 @@ const sameParams = (a: ShaperParams, b: ShaperParams) =>
 
 const percent = (v: number) => `${(v * 100).toFixed(v < 0.1 ? 1 : 0)} %`;
 const accel = (v: number) => `${Math.round(v / 100) * 100} mm/s²`;
+const roundingAt = (c: SimpleCandidate, printAccel: number, cornering: CorneringSettings) =>
+  klipperSmoothing(c.taps.a, c.taps.t, printAccel, cornering);
 
-// A 90° corner as printed (shaper color) over the ideal corner (dashed). Enlarged a lot.
-const CORNER_PX_PER_MM = 300;
-const CornerPicture = ({ roundingMm, color }: { roundingMm: number; color: string }) => {
+// A 90° corner as printed (shaper color) over the ideal corner (dashed), seen from above.
+// The rounding is to scale (enlarged). The ripples after the corner only show the relative ringing.
+const CORNER_PX_PER_MM = 100;
+const RIPPLE_PX_PER_RINGING = 60;
+const CornerPicture = ({
+  roundingMm,
+  ringing,
+  color,
+}: {
+  roundingMm: number;
+  ringing: number;
+  color: string;
+}) => {
   const c = 90; // corner position
   // A quadratic curve through the corner control point passes 0.354·d from the corner.
-  const d = Math.min(80, (roundingMm * CORNER_PX_PER_MM) / 0.354);
+  const d = Math.min(70, (roundingMm * CORNER_PX_PER_MM) / 0.354);
+  const amplitude = Math.min(8, ringing * RIPPLE_PX_PER_RINGING);
+  const ripple: string[] = [];
+  for (let y = c - d; y >= 5; y -= 1) {
+    const s = c - d - y;
+    ripple.push(`${c + amplitude * Math.sin(s / 2.5) * Math.exp(-s / 30)} ${y}`);
+  }
   return (
-    <svg viewBox="0 0 100 100" className="h-24 w-24 shrink-0" aria-hidden>
+    <svg viewBox="0 0 100 100" className="h-28 w-28 shrink-0" aria-hidden>
       <path
         d={`M 5 ${c} L ${c} ${c} L ${c} 5`}
         fill="none"
@@ -39,10 +59,10 @@ const CornerPicture = ({ roundingMm, color }: { roundingMm: number; color: strin
         className="text-muted-foreground"
       />
       <path
-        d={`M 5 ${c} L ${c - d} ${c} Q ${c} ${c} ${c} ${c - d} L ${c} 5`}
+        d={`M 5 ${c} L ${c - d} ${c} Q ${c} ${c} ${c} ${c - d} L ${ripple.join(' L ')}`}
         fill="none"
         stroke={color}
-        strokeWidth={3}
+        strokeWidth={2.5}
       />
     </svg>
   );
@@ -53,6 +73,10 @@ const PrioritySlider = () => {
   return (
     <div className="flex flex-col gap-y-2">
       <div className="text-sm font-medium">What matters more to you?</div>
+      <div className="text-muted-foreground text-xs">
+        Every shaper trades ringing (ghost lines after edges) against corner rounding. You pick the
+        balance.
+      </div>
       <Slider
         min={0}
         max={PRIORITY_ORDER.length - 1}
@@ -79,6 +103,35 @@ const PrioritySlider = () => {
       </div>
       <div className="text-muted-foreground text-xs" data-testid="priority-description">
         {PRIORITIES[priority].description}
+      </div>
+    </div>
+  );
+};
+
+const PrintAccelInput = () => {
+  const [printAccel, setPrintAccel] = useAtom(printAccelAtom);
+  const [text, setText] = useState(String(printAccel));
+  return (
+    <div className="flex flex-col gap-y-2">
+      <label className="text-sm font-medium" htmlFor="print-accel">
+        Your print acceleration (mm/s²)
+      </label>
+      <input
+        id="print-accel"
+        type="number"
+        min={PRINT_ACCEL_RANGE[0]}
+        max={PRINT_ACCEL_RANGE[1]}
+        step={500}
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value);
+          const v = Number(e.target.value);
+          if (v >= PRINT_ACCEL_RANGE[0] && v <= PRINT_ACCEL_RANGE[1]) setPrintAccel(v);
+        }}
+        className="bg-muted w-full rounded-md p-1 text-sm"
+      />
+      <div className="text-muted-foreground text-xs">
+        Corners round more at higher acceleration. Used only to show the rounding.
       </div>
     </div>
   );
@@ -120,6 +173,9 @@ const SelectedCard = ({
   peakHz: number;
 }) => {
   const color = SHAPER_COLORS[candidate.params.type];
+  const printAccel = useAtomValue(printAccelAtom);
+  const cornering = useAtomValue(corneringSettingsAtom);
+  const roundingMm = roundingAt(candidate, printAccel, cornering);
   return (
     <div className="border-border bg-card rounded-xl border p-5" data-testid="simple-selected">
       <div className="text-muted-foreground text-sm">
@@ -129,41 +185,54 @@ const SelectedCard = ({
         <span style={{ color }}>{candidate.params.type.toUpperCase()}</span> at{' '}
         {candidate.fEffHz.toFixed(1)} Hz
       </div>
-      <div className="mt-4 grid gap-4 sm:grid-cols-3">
-        <div>
-          <div className="text-muted-foreground text-sm">Ringing left</div>
-          <div className="mt-1 font-mono text-lg">{percent(candidate.ringing)}</div>
-          <div className="bg-muted mt-1 h-2 w-full rounded">
-            <div
-              className="h-2 rounded"
-              style={{
-                width: `${Math.min(100, (candidate.ringing / 0.2) * 100)}%`,
-                background: color,
-              }}
-            />
-          </div>
-          <div className="text-muted-foreground mt-1 text-xs">
-            Ghost lines next to edges. Lower is better.
-          </div>
-        </div>
-        <div>
-          <div className="text-muted-foreground text-sm">Max acceleration</div>
-          <div className="mt-1 font-mono text-lg">{accel(candidate.maxAccel)}</div>
-          <div className="text-muted-foreground mt-1 text-xs">
-            Faster than this rounds corners more than 0.12 mm.
-          </div>
-        </div>
-        <div className="flex gap-3">
+      <div className="mt-4 flex flex-col gap-4 sm:flex-row">
+        <div className="grid flex-1 gap-4 sm:grid-cols-3">
           <div>
-            <div className="text-muted-foreground text-sm">Corner rounding</div>
-            <div className="mt-1 font-mono text-lg">{candidate.roundingMm.toFixed(2)} mm</div>
+            <div className="text-muted-foreground text-sm">Ringing left</div>
+            <div className="mt-1 font-mono text-lg">{percent(candidate.ringing)}</div>
+            <div className="bg-muted mt-1 h-2 w-full rounded">
+              <div
+                className="h-2 rounded"
+                style={{
+                  width: `${Math.min(100, (candidate.ringing / 0.2) * 100)}%`,
+                  background: color,
+                }}
+              />
+            </div>
             <div className="text-muted-foreground mt-1 text-xs">
-              At {SIMPLE_SHAPER_ROUNDING_ACCEL} mm/s². The picture is {CORNER_PX_PER_MM}× larger.
+              Ghost lines after edges. Lower is better.
             </div>
           </div>
-          <CornerPicture roundingMm={candidate.roundingMm} color={color} />
+          <div>
+            <div className="text-muted-foreground text-sm">Corner rounding</div>
+            <div className="mt-1 font-mono text-lg" data-testid="simple-rounding">
+              {roundingMm.toFixed(2)} mm
+            </div>
+            <div className="text-muted-foreground mt-1 text-xs">
+              At your {printAccel} mm/s². Lower is better.
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground text-sm">Max acceleration</div>
+            <div className="mt-1 font-mono text-lg">{accel(candidate.maxAccel)}</div>
+            <div className="text-muted-foreground mt-1 text-xs">
+              Above this, corners round more than 0.12 mm.
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-col items-center">
+          <CornerPicture roundingMm={roundingMm} ringing={candidate.ringing} color={color} />
+          <div className="text-muted-foreground w-28 text-center text-[10px] leading-tight">
+            A corner from above. Rounding {CORNER_PX_PER_MM}× larger.
+          </div>
         </div>
       </div>
+      {printAccel > candidate.maxAccel && (
+        <div className="mt-3 rounded-md bg-amber-500/15 p-2 text-sm">
+          Your {printAccel} mm/s² is above the max acceleration of this shaper. Corners round more
+          than 0.12 mm. Print slower, or move the slider to the left.
+        </div>
+      )}
       <div className="mt-4 text-sm">{whyText(candidate, peakHz, recommended)}</div>
     </div>
   );
@@ -177,48 +246,52 @@ const ShaperTable = ({
   ranking: SimpleCandidate[];
   selected: ShaperParams;
   onPick: (c: SimpleCandidate) => void;
-}) => (
-  <div className="border-border overflow-x-auto rounded-xl border">
-    <table className="w-full text-sm">
-      <thead className="text-muted-foreground text-left text-xs">
-        <tr>
-          <th className="p-2 pl-4">Shaper</th>
-          <th className="p-2">Frequency</th>
-          <th className="p-2">Ringing left</th>
-          <th className="p-2">Max acceleration</th>
-          <th className="p-2 pr-4">Corner rounding</th>
-        </tr>
-      </thead>
-      <tbody className="font-mono">
-        {ranking.map((c) => (
-          <tr
-            key={c.params.type}
-            data-testid={`shaper-row-${c.params.type}`}
-            onClick={() => onPick(c)}
-            className={cn(
-              'border-border hover:bg-muted/60 cursor-pointer border-t',
-              sameParams(c.params, selected) && 'bg-muted',
-              !c.meetsTarget && 'text-muted-foreground'
-            )}
-          >
-            <td className="p-2 pl-4 font-sans font-semibold">
-              <span style={{ color: SHAPER_COLORS[c.params.type] }}>
-                {c.params.type.toUpperCase()}
-              </span>
-            </td>
-            <td className="p-2">{c.fEffHz.toFixed(1)} Hz</td>
-            <td className="p-2">
-              {percent(c.ringing)}
-              {!c.meetsTarget && <span className="font-sans text-xs"> (over limit)</span>}
-            </td>
-            <td className="p-2">{accel(c.maxAccel)}</td>
-            <td className="p-2 pr-4">{c.roundingMm.toFixed(2)} mm</td>
+}) => {
+  const printAccel = useAtomValue(printAccelAtom);
+  const cornering = useAtomValue(corneringSettingsAtom);
+  return (
+    <div className="border-border overflow-x-auto rounded-xl border">
+      <table className="w-full text-sm">
+        <thead className="text-muted-foreground text-left text-xs">
+          <tr>
+            <th className="p-2 pl-4">Shaper</th>
+            <th className="p-2">Frequency</th>
+            <th className="p-2">Ringing left</th>
+            <th className="p-2">Max acceleration</th>
+            <th className="p-2 pr-4">Rounding at {printAccel} mm/s²</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
-  </div>
-);
+        </thead>
+        <tbody className="font-mono">
+          {ranking.map((c) => (
+            <tr
+              key={c.params.type}
+              data-testid={`shaper-row-${c.params.type}`}
+              onClick={() => onPick(c)}
+              className={cn(
+                'border-border hover:bg-muted/60 cursor-pointer border-t',
+                sameParams(c.params, selected) && 'bg-muted',
+                !c.meetsTarget && 'text-muted-foreground'
+              )}
+            >
+              <td className="p-2 pl-4 font-sans font-semibold">
+                <span style={{ color: SHAPER_COLORS[c.params.type] }}>
+                  {c.params.type.toUpperCase()}
+                </span>
+              </td>
+              <td className="p-2">{c.fEffHz.toFixed(1)} Hz</td>
+              <td className="p-2">
+                {percent(c.ringing)}
+                {!c.meetsTarget && <span className="font-sans text-xs"> (over limit)</span>}
+              </td>
+              <td className="p-2">{accel(c.maxAccel)}</td>
+              <td className="p-2 pr-4">{roundingAt(c, printAccel, cornering).toFixed(2)} mm</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
 
 export default function SimpleShaper() {
   const ranking = useAtomValue(simpleRankingAtom);
@@ -244,6 +317,7 @@ export default function SimpleShaper() {
           </div>
         </div>
         <PrioritySlider />
+        <PrintAccelInput />
         <Assumptions />
         <GcodePanel />
       </aside>

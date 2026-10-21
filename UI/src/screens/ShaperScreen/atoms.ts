@@ -1,6 +1,6 @@
 import { atom, type Getter } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
-import { DEFAULT_FTM_FS_HZ, FREQUENCY_SLIDER_RANGE_HZ } from '@/constants';
+import { DEFAULT_FTM_FS_HZ, DEFAULT_PRINT_ACCEL, FREQUENCY_SLIDER_RANGE_HZ } from '@/constants';
 import {
   computeShaperResponse,
   type CorneringSettings,
@@ -104,6 +104,8 @@ export const analysisRangeAtom = atom(FREQUENCY_SLIDER_RANGE_HZ);
 export const shaperUiModeAtom = atomWithStorage<'simple' | 'advanced'>('shaper-ui-mode', 'simple');
 
 export const priorityAtom = atom<Priority>('balanced');
+
+export const printAccelAtom = atomWithStorage('print-accel', DEFAULT_PRINT_ACCEL);
 
 export const simpleRankingAtom = atom((get) =>
   rankShapers(

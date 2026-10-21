@@ -123,8 +123,9 @@ export const SEARCH_F_STEP_HZ = 0.5;
 export const SEARCH_ZETA_STEP = 0.01;
 export const SEARCH_VTOL_STEP = 0.05;
 
-// Simple shaper mode shows the corner rounding at this print acceleration.
-export const SIMPLE_SHAPER_ROUNDING_ACCEL = 5000;
+// Simple shaper mode shows the corner rounding at the user's print acceleration.
+export const DEFAULT_PRINT_ACCEL = 5000;
+export const PRINT_ACCEL_RANGE: [number, number] = [100, 100_000];
 
 export const CORNERING_SPEED_RANGE_MM_S: [number, number] = [0.5, 60];
 export const CORNERING_JUNCTION_DEVIATION_RANGE_MM: [number, number] = [0, 0.2];

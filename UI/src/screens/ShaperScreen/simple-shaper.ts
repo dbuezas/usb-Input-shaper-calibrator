@@ -1,10 +1,6 @@
 // Simple mode: for each shaper, the frequency that gives the highest max accel while the ringing
 // left stays under the chosen limit, also when the resonance drifts a bit.
-import {
-  FREQUENCY_SLIDER_RANGE_HZ,
-  shaperF0RangeHz,
-  SIMPLE_SHAPER_ROUNDING_ACCEL,
-} from '@/constants';
+import { FREQUENCY_SLIDER_RANGE_HZ, shaperF0RangeHz } from '@/constants';
 import {
   ALL_SHAPER_TYPES,
   binToHz,
@@ -16,38 +12,40 @@ import {
 } from './input-shaper';
 import {
   estimateShaperVals,
-  klipperSmoothing,
   suggestedMaxAccelFromTaps,
   SHAPER_VIBRATION_REDUCTION,
   TEST_DAMPING_RATIOS,
 } from './shaper-scores/klipper';
 
-export type Priority = 'fast' | 'balanced' | 'clean';
+// One slider trades ringing against corner rounding. Right also covers more resonance drift.
+export type Priority = 'sharp' | 'balanced' | 'no_ringing';
 
 export const PRIORITIES: Record<
   Priority,
   { label: string; maxRinging: number; drift: number; description: string }
 > = {
-  fast: {
-    label: 'Fast prints',
+  sharp: {
+    label: 'Sharp corners',
     maxRinging: 0.1,
     drift: 0.05,
-    description: 'Highest acceleration. Some ringing may stay.',
+    description:
+      'Sharpest corners, so you can also print fastest. Up to 10 % ringing. Covers ±5 % resonance drift.',
   },
   balanced: {
     label: 'Balanced',
     maxRinging: 0.07,
     drift: 0.1,
-    description: 'Little ringing, good acceleration. Tolerates ±10% resonance drift.',
+    description: 'Some of both. Up to 7 % ringing. Covers ±10 % resonance drift.',
   },
-  clean: {
-    label: 'Clean surfaces',
+  no_ringing: {
+    label: 'No ringing',
     maxRinging: 0.03,
     drift: 0.15,
-    description: 'Least ringing, tolerates ±15% drift. Print slower.',
+    description:
+      'Least ringing, but rounder corners. Print slower to keep them sharp. Up to 3 % ringing. Covers ±15 % resonance drift.',
   },
 };
-export const PRIORITY_ORDER: Priority[] = ['fast', 'balanced', 'clean'];
+export const PRIORITY_ORDER: Priority[] = ['sharp', 'balanced', 'no_ringing'];
 
 // Klipper's defaults for the damping ratio and the EI tolerance.
 const SIMPLE_ZETA = 0.1;
@@ -56,12 +54,12 @@ const F_STEP_HZ = 0.5;
 
 export type SimpleCandidate = {
   params: ShaperParams;
+  taps: ShaperTaps;
   fEffHz: number;
   /** Worst fraction of the vibration left (Klipper's "vibrations"), over the drift band. */
   ringing: number;
+  /** Acceleration where the corner rounding reaches 0.12 mm. */
   maxAccel: number;
-  /** Corner rounding (Klipper smoothing, mm) at SIMPLE_SHAPER_ROUNDING_ACCEL. */
-  roundingMm: number;
   meetsTarget: boolean;
 };
 
@@ -129,10 +127,10 @@ export const rankShapers = (
       const ringing = ringingLeft(freqsHz, psd, taps, drift);
       return {
         params,
+        taps,
         fEffHz: taps.fEffHz,
         ringing,
         maxAccel: suggestedMaxAccelFromTaps(taps, cornering),
-        roundingMm: klipperSmoothing(taps.a, taps.t, SIMPLE_SHAPER_ROUNDING_ACCEL, cornering),
         meetsTarget: ringing <= maxRinging,
       };
     });
