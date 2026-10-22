@@ -152,10 +152,12 @@ export const computeMarlinShaperTaps = (
       break;
     }
     case 'mzv': {
-      // Marlin MZV
-      const Bx = 1.4142135623730951 * K;
-      const a0 = 1 / (1 + Bx + K2);
-      a = [a0, a0 * Bx, a0 * K2];
+      // Marlin MZV (since MarlinFirmware/Marlin#28716): the taps are 0.375 periods apart, so the
+      // damping factor per tap is K^0.75, as in Klipper's get_mzv_shaper.
+      const Km = Math.pow(K, 0.75);
+      const Bx = 1.4142135623730951 * Km;
+      const a0 = 1 / (1 + Bx + Km * Km);
+      a = [a0, a0 * Bx, a0 * Km * Km];
       break;
     }
     default:
